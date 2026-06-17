@@ -1,0 +1,31 @@
+name = "roast-my-landing-page-test"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "roast-db"
+database_id = "7b59df5c-8185-4562-b149-ae28ebf65dca"
+
+[[r2_buckets]]
+binding = "SCREENSHOTS"
+bucket_name = "roast-screenshots"
+
+[browser]
+binding = "BROWSER"
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "a0e0cee4c5e54235a12ee8dcc262f41a"
+
+[vars]
+ENVIRONMENT = "production"
+BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
