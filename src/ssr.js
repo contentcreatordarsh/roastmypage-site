@@ -1,5 +1,5 @@
 import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
-import { INDUSTRY_BENCHMARKS } from './config.js';
+import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
 
 function generateNotFoundPage(baseUrl) {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Roast Not Found</title><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#000;color:#e5e7eb;font-family:system-ui,sans-serif}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#FF6B35] hover:bg-[#E8552D] text-white font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
@@ -17,8 +17,36 @@ export function renderRoastPage(params) {
     const {
         roast, hostname, scoreColor, score, emoji, dateStr, categories, sections,
         quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
-        heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel
+        heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
+        ogTitle: ogTitleProp, ogDesc: ogDescProp, ogImage: ogImageProp,
+        pageUrl: pageUrlProp, createdAt: createdAtProp,
+        industrySampleSize: industrySampleSizeProp, heatmap,
+        seoDetailsHtml, perfDetailsHtml
     } = params;
+
+    // Use passed-in OG/meta values or compute fallbacks
+    const ogTitle = ogTitleProp || `${hostname} — Roast Score ${score}/10 | Roast My Page`;
+    const ogDesc = ogDescProp || (verdictText
+        ? String(verdictText).substring(0, 155)
+        : `AI-powered landing page analysis of ${hostname}. Score: ${score}/10. See full breakdown.`);
+    const pageUrl = pageUrlProp || `${BASE_URL}/roast/${roast.id}`;
+    const ogImage = ogImageProp || `${BASE_URL}/api/og-image/${roast.id}`;
+    const createdAt = createdAtProp instanceof Date ? createdAtProp
+        : (roast.created_at ? new Date(roast.created_at) : new Date());
+
+    // Compute industry benchmark comparison
+    const roastIndustryKey = roast.industry || 'other';
+    const industryBench = INDUSTRY_BENCHMARKS[roastIndustryKey] || INDUSTRY_BENCHMARKS.other || { label: 'General', emoji: '🏢', scores: { hero: 6, cta: 6, trust: 6, copy: 6, design: 6 } };
+    const industryAvgScore = Number(((industryBench.scores.hero + industryBench.scores.cta + industryBench.scores.trust + industryBench.scores.copy + industryBench.scores.design) / 5).toFixed(1));
+    const scoreDiff = (score - industryAvgScore).toFixed(1);
+    const scoreDiffNum = parseFloat(scoreDiff);
+    const isAboveAvg = scoreDiffNum > 0;
+    const isAtAvg = Math.abs(scoreDiffNum) < 0.3;
+    const industrySampleSize = industrySampleSizeProp || 0;
+
+    // a11y score from seo.accessibility or standalone a11y object
+    const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -109,7 +137,7 @@ export function renderRoastPage(params) {
           <span class="text-xs text-[#a1a1a6]">/10</span>
         </div>
       </div>
-      <div class="text-sm font-semibold" style="color:${scoreColor}">${emoji} ${verdict}</div>
+      <div class="text-sm font-semibold" style="color:${scoreColor}">${emoji} ${scoreLabel}</div>
       <div class="text-xs text-[#6e6e73]">Conversion</div>
     </div>
     <!-- SEO Score -->
@@ -588,7 +616,7 @@ ${JSON.stringify({
 
 export function renderGalleryPage(params) {
     const {
-        roastsResult, total, page, totalPages, prevPageUrl, nextPageUrl, validIndustry, BASE_URL
+        roasts, total, page, totalPages, prevPageUrl, nextPageUrl, validIndustry, BASE_URL, industryMeta
     } = params;
     const galleryHtml = `<!DOCTYPE html>
 <html lang="en">

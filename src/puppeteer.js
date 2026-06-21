@@ -1,6 +1,7 @@
 import puppeteer from '@cloudflare/puppeteer';
 import { VIEWPORTS, CONFIG } from './config.js';
 import { sleep } from './utils.js';
+import { trackBrowserUsage } from './db.js';
 
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;

@@ -1,6 +1,10 @@
 import { CONFIG, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
 import { uint8ArrayToBase64, hashUrl } from './utils.js';
 
+// Bundler shim: __name2 was injected by esbuild to name arrow functions.
+// In the modular source it's a safe no-op passthrough.
+const __name2 = (fn, _name) => fn;
+
 function parseMarkdownResponse(text, isFullPage) {
   try {
     const extractScore = /* @__PURE__ */ __name2((pattern) => {

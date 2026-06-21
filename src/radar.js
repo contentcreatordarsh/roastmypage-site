@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { hashUrl } from './utils.js';
+import { hashUrl, fetchWithTimeout } from './utils.js';
 
 async function getRadarDomainRanking(domain22, apiToken) {
   try {

@@ -40,6 +40,13 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+// Bundler shim: __name2 was injected by esbuild to name arrow functions.
+// In the modular source it's a safe no-op passthrough.
+const __name2 = (fn, _name) => fn;
+
+// Module-level dedup set — prevents duplicate concurrent roast requests for the same URL.
+const inFlightRequests = new Set();
+
 export default {
     async fetch(request, env22, ctx) {
     const url = new URL(request.url);
@@ -2847,7 +2854,7 @@ data: ${JSON.stringify(data)}
         });
       }
     }
-    const BASE_URL = PRODUCTION_ORIGINS[0];
+    const BASE_URL = env22.BASE_URL || PRODUCTION_ORIGINS[0];
     if (url.pathname.match(/^\/roast\/[a-z0-9][\w-]{2,30}$/i) && request.method === "GET") {
       const roastId = url.pathname.split("/").pop();
       const roast = await env22.DB.prepare(`
@@ -3340,10 +3347,14 @@ data: ${JSON.stringify(data)}
           </div>
         </div>`;
       }
+      const verdictText = roast.roast_response || verdict;
+      const scoreLabel = score >= 8 ? 'High Performer' : score >= 6 ? 'Room to Improve' : score >= 4 ? 'Needs Work' : 'Critical Issues';
       const html = renderRoastPage({
           roast, hostname, scoreColor, score, emoji, dateStr, categories, sections,
           quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
-          heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel
+          heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
+          ogTitle, ogDesc, ogImage, pageUrl, createdAt, industrySampleSize, heatmap,
+          seoDetailsHtml, perfDetailsHtml
         });
       return new Response(html, {
         headers: {
@@ -3383,7 +3394,10 @@ data: ${JSON.stringify(data)}
       const roasts = roastsResult.results || [];
       const industryMeta = validIndustry ? INDUSTRY_BENCHMARKS[validIndustry] : null;
       const galleryHtml = renderGalleryPage({
-          roastsResult, total, page, totalPages, prevPageUrl, nextPageUrl, validIndustry, BASE_URL
+          roasts, total, page, totalPages,
+          prevPageUrl: page > 1 ? `/gallery${validIndustry ? `?industry=${validIndustry}&page=${page - 1}` : `?page=${page - 1}`}` : null,
+          nextPageUrl: page < totalPages ? `/gallery${validIndustry ? `?industry=${validIndustry}&page=${page + 1}` : `?page=${page + 1}`}` : null,
+          validIndustry, BASE_URL, industryMeta
         });
       return new Response(galleryHtml, {
         headers: {
@@ -3392,6 +3406,20 @@ data: ${JSON.stringify(data)}
           ...getSecurityHeaders(origin, env22.ENVIRONMENT)
         }
       });
+    }
+    // Alias /api/og-image/:id → /api/og/:id for backward compatibility
+    if (url.pathname.startsWith("/api/og-image/") && request.method === "GET") {
+      const roastId = url.pathname.split("/").pop();
+      const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
+      return Response.redirect(`${base}/api/og/${roastId}`, 301);
+    }
+    // Pricing page — served as SPA route from index.html
+    if (url.pathname === "/pricing" && request.method === "GET") {
+      if (env22.ASSETS) {
+        const indexUrl = new URL(request.url);
+        indexUrl.pathname = "/";
+        return env22.ASSETS.fetch(new Request(indexUrl.toString(), request));
+      }
     }
     if (env22.ASSETS) {
       return env22.ASSETS.fetch(request);

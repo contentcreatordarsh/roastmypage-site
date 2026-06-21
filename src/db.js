@@ -1,5 +1,6 @@
-import { CONFIG } from './config.js';
+import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS } from './config.js';
 import { hashIp, hashUrl, generateId, getApiDayKey, secondsUntilMidnightUTC } from './utils.js';
+import { calculatePercentile } from './ai.js';
 
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();

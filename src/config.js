@@ -110,7 +110,8 @@ const INDUSTRY_KEYS = Object.keys(INDUSTRY_BENCHMARKS);
 
 const PRODUCTION_ORIGINS = [
   "https://roastmypage.site",
-  "https://roast-my-landing-page.falling-hall-ac41.workers.dev"
+  "https://roast-my-landing-page.falling-hall-ac41.workers.dev",
+  "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
 ];
 
 const DEV_ORIGINS = [
@@ -118,4 +119,9 @@ const DEV_ORIGINS = [
   "http://127.0.0.1:8787"
 ];
 
-export { POPULAR_DOMAINS, CONFIG, VIEWPORTS, RUBRIC_CRITERIA, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS };
+const API_V1_LIMITS = {
+  PER_IP_DAILY: 5,
+  GLOBAL_DAILY: 50
+};
+
+export { POPULAR_DOMAINS, CONFIG, VIEWPORTS, RUBRIC_CRITERIA, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS, API_V1_LIMITS };
