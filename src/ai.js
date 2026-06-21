@@ -181,7 +181,15 @@ async function ensureLlamaLicenseAgreed(env22) {
 async function analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage = false, attempt = 1) {
   try {
     await ensureLlamaLicenseAgreed(env22);
-    const prompt = `Analyze this landing page screenshot. Rate each category 1-10. Be specific to what you see.
+    const prompt = `Analyze this landing page screenshot as a conversion optimization expert. Rate each category 1-10 and CALIBRATE carefully using the full range:
+
+- 9-10: Exceptional, best-in-class execution (rare).
+- 7-8: Strong and effective; only minor improvements needed.
+- 5-6: Average; functional but with clear weaknesses.
+- 3-4: Weak; notable problems that hurt conversion.
+- 1-2: Broken or essentially missing (reserve for genuinely severe cases only).
+
+Be fair and consistent: a clean, functional, professional page should typically land in the 6-8 range. Do NOT give 1-2 unless the category is truly absent or broken, and do NOT cluster every score at 4-6 — differentiate based on what you actually see in the screenshot.
 
 Categories: hero, cta, trust, copy, design
 Industry options: saas, ecommerce, agency, fintech, health, education, media, startup, devtools, marketplace, nonprofit, other
@@ -278,6 +286,32 @@ Respond with your analysis.`;
       }
       if (parsed.detailedRoast && placeholders.test(parsed.detailedRoast.trim())) {
         parsed.detailedRoast = "The page needs improvements in visual hierarchy, copy clarity, and conversion optimization. Focus on making the value proposition immediately clear and the call-to-action impossible to miss.";
+      }
+      // Calibration: coerce + clamp each category score to a sane 1-10 range, then
+      // derive the overall as the average of the five categories so the headline
+      // number always matches the breakdown the user sees (no more 1.3-style outliers
+      // that contradict the category bars).
+      const SCORE_CATS = ["hero", "cta", "trust", "copy", "design"];
+      if (parsed.scores && typeof parsed.scores === "object") {
+        let sum = 0;
+        let count = 0;
+        for (const cat of SCORE_CATS) {
+          let v = Number(parsed.scores[cat]);
+          if (!Number.isFinite(v)) v = 5;
+          v = Math.max(1, Math.min(10, v));
+          v = Math.round(v * 2) / 2;
+          parsed.scores[cat] = v;
+          sum += v;
+          count++;
+        }
+        if (count > 0) {
+          parsed.overallScore = Math.round(sum / count * 10) / 10;
+        }
+      }
+      if (!Number.isFinite(Number(parsed.overallScore))) {
+        parsed.overallScore = 5;
+      } else {
+        parsed.overallScore = Math.max(1, Math.min(10, Math.round(Number(parsed.overallScore) * 10) / 10));
       }
       const heatmap = parsed.heatmap || {
         attention: [

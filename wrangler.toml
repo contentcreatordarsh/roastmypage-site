@@ -3,8 +3,13 @@ main = "src/index.js"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# --- SHARED RESOURCES ---
-# These bindings are inherited by all environments so Dev and Prod share the same database/storage
+# ============================================================================
+# DEV / TEST ENVIRONMENT  (default — deploy via:  npx wrangler deploy)
+# ----------------------------------------------------------------------------
+# Uses ISOLATED dev data stores (roast-db-dev / roast-screenshots-dev /
+# roast-config-dev) so testing on the test worker NEVER touches production
+# data. AI + Browser are stateless services and are safe to share.
+# ============================================================================
 [assets]
 directory = "./public"
 binding = "ASSETS"
@@ -17,30 +22,55 @@ binding = "BROWSER"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "roast-db"
-database_id = "7b59df5c-8185-4562-b149-ae28ebf65dca"
+database_name = "roast-db-dev"
+database_id = "f287a4d6-cffa-4ee7-8775-e130a567d9ff"
 
 [[r2_buckets]]
 binding = "SCREENSHOTS"
-bucket_name = "roast-screenshots"
+bucket_name = "roast-screenshots-dev"
 
 [[kv_namespaces]]
 binding = "CONFIG"
-id = "a0e0cee4c5e54235a12ee8dcc262f41a"
+id = "a278379c19e0426298741337ed23a315"
 
-# --- TEST ENVIRONMENT VARS (DEFAULT) ---
-# Deploy via: npx wrangler deploy
 [vars]
 ENVIRONMENT = "development"
 BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
-# Cloudflare Tags (Optional for test, but included for parity)
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
 
-# --- PRODUCTION ENVIRONMENT ---
-# Deploy via: npx wrangler deploy --env production
+# ============================================================================
+# PRODUCTION ENVIRONMENT  (deploy via:  npx wrangler deploy --env production)
+# ----------------------------------------------------------------------------
+# Self-contained: explicitly pins the LIVE production data stores so a deploy
+# is unambiguous and never inherits the dev bindings above. Data wiring is
+# unchanged from the original shared config — promotion is safe.
+# ============================================================================
 [env.production]
 name = "roast-my-landing-page"
+
+[env.production.assets]
+directory = "./public"
+binding = "ASSETS"
+
+[env.production.ai]
+binding = "AI"
+
+[env.production.browser]
+binding = "BROWSER"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "roast-db"
+database_id = "7b59df5c-8185-4562-b149-ae28ebf65dca"
+
+[[env.production.r2_buckets]]
+binding = "SCREENSHOTS"
+bucket_name = "roast-screenshots"
+
+[[env.production.kv_namespaces]]
+binding = "CONFIG"
+id = "a0e0cee4c5e54235a12ee8dcc262f41a"
 
 [env.production.vars]
 ENVIRONMENT = "production"

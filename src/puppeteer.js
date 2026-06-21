@@ -1,6 +1,6 @@
 import puppeteer from '@cloudflare/puppeteer';
 import { VIEWPORTS, CONFIG } from './config.js';
-import { sleep } from './utils.js';
+import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
 
@@ -17,10 +17,33 @@ async function capturePageWithMetrics(env22, url, options = {}) {
       mobile: "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 Safari/605.1.15"
     };
     await page.setUserAgent(userAgents[device] || userAgents.desktop);
+    // SSRF defense-in-depth: the caller validated the submitted URL, but a page can
+    // redirect (3xx / meta-refresh / JS) or embed resources pointing at internal or
+    // private addresses. Block any http(s) request to a non-public host — covers the
+    // main navigation, redirect hops, sub-resources and iframes. Non-http(s) schemes
+    // (data:, blob:, about:) are left alone so normal rendering is unaffected.
+    try {
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        const reqUrl = req.url();
+        if ((reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) && !isUrlSafeForFetching(reqUrl)) {
+          req.abort().catch(() => {});
+        } else {
+          req.continue().catch(() => {});
+        }
+      });
+    } catch (e) {
+      console.warn("Request interception unavailable; relying on post-navigation URL check:", e?.message || e);
+    }
     const startTime = Date.now();
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
       await sleep(fullPage ? 2e3 : 1500);
+      // Re-validate the final landed URL in case a redirect slipped through interception.
+      const finalUrl = page.url();
+      if (!isUrlSafeForFetching(finalUrl)) {
+        throw new Error("Blocked: page redirected to an internal or private address");
+      }
       const loadTime = Date.now() - startTime;
       const seoData = await page.evaluate(() => {
         const title22 = document.title || "";
@@ -348,6 +371,9 @@ async function capturePageWithMetrics(env22, url, options = {}) {
   } catch (error32) {
     const errorMsg = error32.message || String(error32);
     console.error(`Capture attempt ${attempt} failed:`, errorMsg, error32.stack);
+    if (errorMsg.startsWith("Blocked:")) {
+      throw error32; // SSRF redirect block — fail fast, never retry or screenshot
+    }
     if (errorMsg.includes("429") || errorMsg.includes("Rate limit") || errorMsg.includes("rate limit") || errorMsg.includes("Browser") || errorMsg.includes("browser") || errorMsg.includes("limit")) {
       if (attempt < CONFIG.MAX_BROWSER_RETRIES) {
         const waitTime = CONFIG.BROWSER_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
