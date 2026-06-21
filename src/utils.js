@@ -41,7 +41,12 @@ async function hashUrl(url, device = "desktop") {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+let _ipSaltWarned = false;
 async function hashIp(ip, salt) {
+  if (!salt && !_ipSaltWarned) {
+    _ipSaltWarned = true;
+    console.warn("[security] IP_HASH_SALT is not set — IP hashes fall back to a public constant and are reversible. Set it with: wrangler secret put IP_HASH_SALT");
+  }
   const encoder = new TextEncoder();
   const data = encoder.encode(ip + "-" + (salt || "roast-salt"));
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
