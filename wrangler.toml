@@ -1,4 +1,4 @@
-name = "roast-my-landing-page-test"
+name = "roast-my-landing-page"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -28,4 +28,6 @@ id = "a0e0cee4c5e54235a12ee8dcc262f41a"
 
 [vars]
 ENVIRONMENT = "production"
-BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
+BASE_URL = "https://roastmypage.site"
+CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
+CF_ZONE_TAG = "1147710735"
