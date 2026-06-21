@@ -2045,16 +2045,7 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/platform-stats" && request.method === "GET") {
       try {
-        if (!env22.ANALYTICS_API_TOKEN) {
-          return Response.json({
-            error: "Analytics not configured",
-            // Return mock data for development
-            cdnRequests24h: 0,
-            workerCalls24h: 0,
-            screenshots24h: 0,
-            growth: 0
-          }, { headers: corsHeaders });
-        }
+        // Removed early return to allow D1 stats to load even if CF API token is missing
         const cacheKey = "platform-stats";
         const cached = await env22.CONFIG.get(cacheKey);
         if (cached) {
@@ -2104,28 +2095,33 @@ data: ${JSON.stringify(data)}
             }
           }
         `;
-        const [cdnCurrent, cdnPrevious, workerCurrent, workerPrevious] = await Promise.all([
-          queryCloudflareGraphQL(cdnQuery, {
-            zoneTag: env22.CF_ZONE_TAG || "",
-            start: startTime24h,
-            end: endTime
-          }, env22.ANALYTICS_API_TOKEN),
-          queryCloudflareGraphQL(cdnQuery, {
-            zoneTag: env22.CF_ZONE_TAG || "",
-            start: startTime48h,
-            end: startTime24h
-          }, env22.ANALYTICS_API_TOKEN),
-          queryCloudflareGraphQL(workerQuery, {
-            accountTag: env22.CF_ACCOUNT_TAG || "",
-            start: startTime24h,
-            end: endTime
-          }, env22.ANALYTICS_API_TOKEN),
-          queryCloudflareGraphQL(workerQuery, {
-            accountTag: env22.CF_ACCOUNT_TAG || "",
-            start: startTime48h,
-            end: startTime24h
-          }, env22.ANALYTICS_API_TOKEN)
-        ]);
+        let cdnCurrent = null, cdnPrevious = null, workerCurrent = null, workerPrevious = null;
+        if (env22.ANALYTICS_API_TOKEN) {
+          try {
+            [cdnCurrent, cdnPrevious, workerCurrent, workerPrevious] = await Promise.all([
+              queryCloudflareGraphQL(cdnQuery, {
+                zoneTag: env22.CF_ZONE_TAG || "",
+                start: startTime24h,
+                end: endTime
+              }, env22.ANALYTICS_API_TOKEN),
+              queryCloudflareGraphQL(cdnQuery, {
+                zoneTag: env22.CF_ZONE_TAG || "",
+                start: startTime48h,
+                end: startTime24h
+              }, env22.ANALYTICS_API_TOKEN),
+              queryCloudflareGraphQL(workerQuery, {
+                accountTag: env22.CF_ACCOUNT_TAG || "",
+                start: startTime24h,
+                end: endTime
+              }, env22.ANALYTICS_API_TOKEN),
+              queryCloudflareGraphQL(workerQuery, {
+                accountTag: env22.CF_ACCOUNT_TAG || "",
+                start: startTime48h,
+                end: startTime24h
+              }, env22.ANALYTICS_API_TOKEN)
+            ]);
+          } catch(e) { console.error('CF GraphQL Error', e); }
+        }
         const cdnRequests24h = cdnCurrent?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups?.[0]?.sum?.requests || 0;
         const cdnRequestsPrevious = cdnPrevious?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups?.[0]?.sum?.requests || 0;
         const workerCalls24h = workerCurrent?.viewer?.accounts?.[0]?.workersInvocationsAdaptive?.[0]?.sum?.requests || 0;
