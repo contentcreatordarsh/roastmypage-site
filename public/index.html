@@ -1032,7 +1032,7 @@
                         </div>
                     </div>
                     
-                    <button onclick="comparePaqes()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
+                    <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
                         Compare Pages
                     </button>
                 </div>
@@ -4951,7 +4951,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         }
 
         // Compare Function
-        async function comparePaqes() {
+        async function comparePages() {
             const url1 = document.getElementById('compare-url1').value.trim();
             const url2 = document.getElementById('compare-url2').value.trim();
             if (!url1 || !url2) return showToast('Enter both URLs', 'error');
