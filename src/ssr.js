@@ -2,7 +2,7 @@ import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
 import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
 
 function generateNotFoundPage(baseUrl) {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Roast Not Found</title><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#000;color:#e5e7eb;font-family:system-ui,sans-serif}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#FF6B35] hover:bg-[#E8552D] text-white font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#000;color:#e5e7eb;font-family:system-ui,sans-serif}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#FF6B35] hover:bg-[#E8552D] text-white font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
 }
 var PRODUCTION_ORIGINS = [
   "https://roastmypage.site",
@@ -52,6 +52,8 @@ export function renderRoastPage(params) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Google AdSense -->
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script>
 <title>${escapeHtml(ogTitle)}</title>
 <meta name="description" content="${escapeHtml(ogDesc)}">
 <meta name="robots" content="index, follow">
@@ -623,6 +625,8 @@ export function renderGalleryPage(params) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Google AdSense -->
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script>
 <title>Roast Gallery - ${total} Landing Pages Analyzed | Roast My Landing Page</title>
 <meta name="description" content="Browse ${total} landing page roasts. See real AI conversion scores, SEO audits, and design critiques from pages across the web.">
 <meta name="robots" content="index, follow">

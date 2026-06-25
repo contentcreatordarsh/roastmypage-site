@@ -138,12 +138,13 @@ function getSecurityHeaders(origin, environment) {
     // Content Security Policy
     "Content-Security-Policy": [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net",
+      "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.googleadservices.com https://adservice.google.com https://*.google.com",
       // TODO: migrate inline scripts to nonces to remove unsafe-inline
       "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: blob: https: http:",
-      "connect-src 'self' https://cloudflare-dns.com https://twitter.com https://www.instagram.com",
+      "connect-src 'self' https://cloudflare-dns.com https://twitter.com https://www.instagram.com https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.google.com https://*.doubleclick.net https://*.googleadservices.com",
+      "frame-src 'self' https://googleads.g.doubleclick.net https://*.doubleclick.net https://*.googlesyndication.com https://tpc.googlesyndication.com https://www.google.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'"
