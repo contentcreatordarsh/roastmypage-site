@@ -1032,7 +1032,7 @@
                         </div>
                     </div>
                     
-                    <button onclick="comparePaqes()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
+                    <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
                         Compare Pages
                     </button>
                 </div>
@@ -2763,13 +2763,13 @@
             <!-- Email Capture -->
             <div id="email-capture" class="card p-6 mt-8 max-w-md mx-auto text-center">
                 <div class="text-lg mb-2">📧</div>
-                <h3 class="text-[15px] font-semibold mb-2">Get Your Report via Email</h3>
-                <p class="text-sm text-[#a1a1a6] mb-4">We'll send you the full analysis + tips for improvement</p>
+                <h3 class="text-[15px] font-semibold mb-2">Stay in the loop</h3>
+                <p class="text-sm text-[#a1a1a6] mb-4">Subscribe for product updates and landing page tips</p>
                 <div class="flex gap-2">
                     <input type="email" id="email-input" placeholder="your@email.com" class="input-dark flex-1 px-4 py-2 rounded-lg text-sm">
                     <button onclick="submitEmail()" id="email-btn" class="btn-primary px-4 py-2 rounded-lg text-sm font-medium">Send</button>
                 </div>
-                <div id="email-success" class="hidden mt-3 text-green-400 text-sm">✓ Report sent! Check your inbox.</div>
+                <div id="email-success" class="hidden mt-3 text-green-400 text-sm">✓ You're subscribed! We'll be in touch.</div>
                 <div id="email-error" class="hidden mt-3 text-red-400 text-sm"></div>
             </div>
         </div>
@@ -2782,7 +2782,7 @@
                 <svg class="w-6 h-6 text-[#a1a1a6]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             </div>
             <h3 class="text-lg font-semibold mb-2">Download Your Report</h3>
-            <p class="text-sm text-[#a1a1a6] mb-6">Enter your email to export the full PDF report. We'll also send you improvement tips.</p>
+            <p class="text-sm text-[#a1a1a6] mb-6">Enter your email to unlock PDF export and subscribe to product updates.</p>
             <div class="space-y-3">
                 <input type="email" id="email-gate-input" placeholder="you@company.com" class="input-dark w-full px-4 py-3 rounded-xl text-white placeholder-[#424245] text-center">
                 <button onclick="submitEmailGate()" id="email-gate-btn" class="w-full btn-primary px-6 py-3 rounded-xl font-semibold text-sm transition-all">
@@ -4951,7 +4951,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         }
 
         // Compare Function
-        async function comparePaqes() {
+        async function comparePages() {
             const url1 = document.getElementById('compare-url1').value.trim();
             const url2 = document.getElementById('compare-url2').value.trim();
             if (!url1 || !url2) return showToast('Enter both URLs', 'error');
@@ -6214,72 +6214,119 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             const section = document.getElementById('before-after-section');
             if (!section) return;
             section.classList.add('hidden');
-            
-            try {
-                const history = JSON.parse(localStorage.getItem('roastHistory') || '[]');
-                const previousRoasts = history.filter(h => {
-                    try { return new URL(h.url).hostname === new URL(data.url).hostname && h.id !== data.id; } catch { return false; }
-                });
-                
-                if (previousRoasts.length > 0) {
-                    const sorted = previousRoasts.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-                    const previous = sorted[0];
-                    
-                    if (previous && previous.screenshotUrl) {
-                        section.classList.remove('hidden');
-                        document.getElementById('ba-before-img').src = previous.screenshotUrl;
-                        document.getElementById('ba-after-img').src = data.screenshotUrl;
-                        document.getElementById('ba-before-score').textContent = previous.overallScore?.toFixed(1) || '-';
-                        document.getElementById('ba-after-score').textContent = data.overallScore?.toFixed(1) || '-';
-                        
-                        const change = data.overallScore - (previous.overallScore || 0);
-                        const changeEl = document.getElementById('ba-score-change');
-                        if (changeEl) {
-                            if (change > 0) {
-                                changeEl.innerHTML = `<span class="text-green-400 font-semibold">\u2191 +${change.toFixed(1)} points improvement</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
-                            } else if (change < 0) {
-                                changeEl.innerHTML = `<span class="text-red-400 font-semibold">\u2193 ${change.toFixed(1)} points</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
-                            } else {
-                                changeEl.innerHTML = `<span class="text-[#a1a1a6] font-semibold">No change</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
-                            }
-                        }
+            if (!data || data.isExample) return;
+
+            const showComparison = (previous) => {
+                if (!previous?.screenshotUrl && !previous?.id) return;
+                const screenshotUrl = previous.screenshotUrl || `/api/screenshot/${previous.id}`;
+                section.classList.remove('hidden');
+                document.getElementById('ba-before-img').src = screenshotUrl;
+                document.getElementById('ba-after-img').src = data.screenshotUrl;
+                document.getElementById('ba-before-score').textContent = previous.overallScore?.toFixed(1) ?? previous.score?.toFixed(1) ?? '-';
+                document.getElementById('ba-after-score').textContent = data.overallScore?.toFixed(1) || '-';
+
+                const previousScore = previous.overallScore ?? previous.score ?? 0;
+                const change = data.overallScore - previousScore;
+                const changeEl = document.getElementById('ba-score-change');
+                if (changeEl) {
+                    if (change > 0) {
+                        changeEl.innerHTML = `<span class="text-green-400 font-semibold">\u2191 +${change.toFixed(1)} points improvement</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
+                    } else if (change < 0) {
+                        changeEl.innerHTML = `<span class="text-red-400 font-semibold">\u2193 ${change.toFixed(1)} points</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
+                    } else {
+                        changeEl.innerHTML = `<span class="text-[#a1a1a6] font-semibold">No change</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
                     }
                 }
-            } catch (e) { /* ignore */ }
+            };
+
+            const loadFromLocalHistory = () => {
+                try {
+                    const history = JSON.parse(localStorage.getItem('roastHistory') || '[]');
+                    const previousRoasts = history.filter(h => {
+                        try { return new URL(h.url).hostname === new URL(data.url).hostname && h.id !== data.id; } catch { return false; }
+                    });
+                    if (previousRoasts.length > 0) {
+                        const sorted = previousRoasts.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+                        showComparison(sorted[0]);
+                    }
+                } catch (e) { /* ignore */ }
+            };
+
+            if (data.urlHash) {
+                fetch(`/api/improvement/${data.urlHash}`)
+                    .then(res => res.ok ? res.json() : null)
+                    .then(improvement => {
+                        if (improvement?.totalRoasts > 1 && improvement.latestRoast?.id === data.id) {
+                            const previous = improvement.history[improvement.history.length - 2];
+                            if (previous) {
+                                showComparison({
+                                    id: previous.id,
+                                    score: previous.score,
+                                    screenshotUrl: `/api/screenshot/${previous.id}`
+                                });
+                                return;
+                            }
+                        }
+                        loadFromLocalHistory();
+                    })
+                    .catch(() => loadFromLocalHistory());
+                return;
+            }
+
+            loadFromLocalHistory();
         }
         
         async function checkImprovement(data) {
             const badge = document.getElementById('improvement-badge');
             if (!badge) return;
             badge.classList.add('hidden');
-            
-            // Check local history for previous roasts of same URL
-            try {
-                const history = JSON.parse(localStorage.getItem('roastHistory') || '[]');
-                const previousRoasts = history.filter(h => {
-                    try { return new URL(h.url).hostname === new URL(data.url).hostname; } catch { return false; }
-                });
-                
-                if (previousRoasts.length > 1) {
-                    // Sort by date, get the second-to-last (previous roast)
-                    const sorted = previousRoasts.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-                    const previous = sorted[1]; // previous roast (sorted desc, [0] is current)
-                    
-                    if (previous && previous.overallScore !== undefined) {
-                        const change = data.overallScore - previous.overallScore;
-                        if (Math.abs(change) >= 0.1) {
-                            badge.classList.remove('hidden');
-                            if (change > 0) {
-                                badge.textContent = `\u2191 +${change.toFixed(1)} improvement`;
-                                badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-green-500/20 text-green-400 animate-pulse';
-                            } else {
-                                badge.textContent = `\u2193 ${change.toFixed(1)} from last`;
-                                badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-red-500/20 text-red-400';
+            if (!data || data.isExample) return;
+
+            const showBadge = (change) => {
+                if (Math.abs(change) < 0.1) return;
+                badge.classList.remove('hidden');
+                if (change > 0) {
+                    badge.textContent = `\u2191 +${change.toFixed(1)} improvement`;
+                    badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-green-500/20 text-green-400 animate-pulse';
+                } else {
+                    badge.textContent = `\u2193 ${change.toFixed(1)} from last`;
+                    badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-red-500/20 text-red-400';
+                }
+            };
+
+            const loadFromLocalHistory = () => {
+                try {
+                    const history = JSON.parse(localStorage.getItem('roastHistory') || '[]');
+                    const previousRoasts = history.filter(h => {
+                        try { return new URL(h.url).hostname === new URL(data.url).hostname; } catch { return false; }
+                    });
+                    if (previousRoasts.length > 1) {
+                        const sorted = previousRoasts.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+                        const previous = sorted[1];
+                        if (previous?.overallScore !== undefined) {
+                            showBadge(data.overallScore - previous.overallScore);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            };
+
+            if (data.urlHash) {
+                try {
+                    const res = await fetch(`/api/improvement/${data.urlHash}`);
+                    if (res.ok) {
+                        const improvement = await res.json();
+                        if (improvement.totalRoasts > 1 && improvement.latestRoast?.id === data.id) {
+                            const previous = improvement.history[improvement.history.length - 2];
+                            if (previous) {
+                                showBadge(data.overallScore - previous.score);
+                                return;
                             }
                         }
                     }
-                }
-            } catch (e) { /* ignore */ }
+                } catch (e) { /* fall through */ }
+            }
+
+            loadFromLocalHistory();
         }
 
         // ===== COMPARE QUICK WIN FUNCTIONS =====

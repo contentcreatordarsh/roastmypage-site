@@ -76,13 +76,6 @@ export default {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
-        if (!rateLimit.allowed) {
-          return Response.json(
-            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
-            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
-          );
-        }
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
@@ -94,6 +87,13 @@ export default {
         }
         if (!isUrlSafeForFetching(targetUrl)) {
           return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
+        if (!rateLimit.allowed) {
+          return Response.json(
+            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
@@ -152,6 +152,7 @@ export default {
             return {
               id: roastId,
               url: targetUrl,
+              urlHash,
               overallScore: analysis.overallScore,
               scores: analysis.scores,
               sections: analysis.sections || {},
@@ -217,13 +218,6 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "compare");
-        if (!rateLimit.allowed) {
-          return Response.json(
-            { error: `Compare rate limit exceeded (${CONFIG.RATE_LIMIT_COMPARE_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
-            { status: 429, headers: corsHeaders }
-          );
-        }
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const url1 = sanitizeUrl(body.url1);
@@ -235,6 +229,13 @@ export default {
           if (!isUrlSafeForFetching(checkUrl)) {
             return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
           }
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "compare");
+        if (!rateLimit.allowed) {
+          return Response.json(
+            { error: `Compare rate limit exceeded (${CONFIG.RATE_LIMIT_COMPARE_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { status: 429, headers: corsHeaders }
+          );
         }
         const [hash1, hash2] = await Promise.all([
           hashUrl(url1, device),
@@ -510,13 +511,6 @@ export default {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "batch");
-        if (!rateLimit.allowed) {
-          return Response.json(
-            { error: `Batch rate limit exceeded (${CONFIG.RATE_LIMIT_BATCH_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
-            { status: 429, headers: corsHeaders }
-          );
-        }
         const body = await request.json();
         const { urls, device = "desktop" } = body;
         if (!urls || !Array.isArray(urls) || urls.length === 0) {
@@ -528,6 +522,13 @@ export default {
         const validUrls = urls.filter((u) => isValidUrl(u) && isUrlSafeForFetching(u));
         if (validUrls.length === 0) {
           return Response.json({ error: "No valid URLs provided" }, { status: 400, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "batch");
+        if (!rateLimit.allowed) {
+          return Response.json(
+            { error: `Batch rate limit exceeded (${CONFIG.RATE_LIMIT_BATCH_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { status: 429, headers: corsHeaders }
+          );
         }
         await trackBrowserUsage(env22, validUrls.length);
         const results = [];
@@ -617,13 +618,6 @@ export default {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
-        if (!rateLimit.allowed) {
-          return Response.json(
-            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
-            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
-          );
-        }
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
@@ -634,6 +628,13 @@ export default {
         }
         if (!isUrlSafeForFetching(targetUrl)) {
           return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
+        if (!rateLimit.allowed) {
+          return Response.json(
+            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
@@ -706,6 +707,7 @@ data: ${JSON.stringify(data)}
                 const result = {
                   id: roastId,
                   url: targetUrl,
+                  urlHash,
                   overallScore: analysis.overallScore,
                   scores: analysis.scores,
                   sections: analysis.sections || {},
@@ -876,16 +878,16 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/feedback" && request.method === "POST") {
       try {
-        const fbIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT);
-        const fbLimit = await checkOperationRateLimit(env22, fbIpHash, "roast");
-        if (!fbLimit.allowed) {
-          return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
-        }
         const body = await request.json();
         const vote = body.vote === "up" || body.vote === "down" ? body.vote : null;
         if (!vote) {
           return Response.json({ error: "Invalid vote" }, { status: 400, headers: corsHeaders });
+        }
+        const fbIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT);
+        const fbLimit = await checkOperationRateLimit(env22, fbIpHash, "feedback");
+        if (!fbLimit.allowed) {
+          return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
         }
         const context3 = (body.context || "roast").substring(0, 20);
         const reasons = Array.isArray(body.reasons) ? body.reasons.slice(0, 10).map((r) => String(r).substring(0, 50)).join(",") : "";
@@ -919,18 +921,18 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/subscribe" && request.method === "POST") {
       try {
-        const subIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT);
-        const subLimit = await checkOperationRateLimit(env22, subIpHash, "roast");
-        if (!subLimit.allowed) {
-          return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
-        }
         const body = await request.json();
         const rawEmail = body.email;
         const roastId = body.roastId;
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!rawEmail || rawEmail.length > 254 || !emailRegex.test(rawEmail)) {
           return Response.json({ error: "Please provide a valid email address" }, { status: 400, headers: corsHeaders });
+        }
+        const subIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT);
+        const subLimit = await checkOperationRateLimit(env22, subIpHash, "subscribe");
+        if (!subLimit.allowed) {
+          return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
         }
         const email = rawEmail.toLowerCase().trim();
         const validRoastId = isValidRoastIdLoose(roastId) ? roastId : null;
@@ -2236,10 +2238,6 @@ data: ${JSON.stringify(data)}
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
-        if (!rateLimit.allowed) {
-          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
-        }
         const body = await request.json();
         let targetDomain;
         let brandName;
@@ -2267,6 +2265,10 @@ data: ${JSON.stringify(data)}
           brandName = sanitizeHtml(targetDomain.split(".")[0]).slice(0, 50);
         } else {
           return Response.json({ error: "URL or domain required" }, { status: 400, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
+        if (!rateLimit.allowed) {
+          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
         }
         const [typosquats, securityGrade, socialImposters] = await Promise.all([
           // 1. Generate and check typosquats
@@ -2325,10 +2327,6 @@ data: ${JSON.stringify(data)}
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
-        if (!rateLimit.allowed) {
-          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
-        }
         const body = await request.json();
         if (!body.url) {
           return Response.json({ error: "URL required" }, { status: 400, headers: corsHeaders });
@@ -2336,6 +2334,10 @@ data: ${JSON.stringify(data)}
         const sanitizedUrl = sanitizeUrl(body.url);
         if (!sanitizedUrl || !isUrlSafeForFetching(sanitizedUrl)) {
           return Response.json({ error: "Invalid or unsafe URL" }, { status: 400, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
+        if (!rateLimit.allowed) {
+          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
         }
         const cacheKey = `tech-scan:${await hashUrl(sanitizedUrl)}`;
         const cached = await env22.CONFIG.get(cacheKey);
