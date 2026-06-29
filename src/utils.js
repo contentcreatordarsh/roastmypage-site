@@ -164,11 +164,57 @@ function sanitizeUrl(url) {
   }
   return url;
 }
+function parseIpv4Part(p) {
+  if (/^0x[0-9a-f]+$/i.test(p)) return parseInt(p, 16);
+  if (/^0[0-7]+$/.test(p)) return parseInt(p, 8);
+  if (/^[0-9]+$/.test(p)) return parseInt(p, 10);
+  return null;
+}
+function ipv4ToInt(host) {
+  const parts = host.replace(/\.$/, "").split(".");
+  if (parts.length < 1 || parts.length > 4) return null;
+  const nums = parts.map(parseIpv4Part);
+  if (nums.some((n) => n === null || !Number.isFinite(n) || n < 0)) return null;
+  const n = nums.length;
+  for (let i = 0; i < n - 1; i++) if (nums[i] > 255) return null;
+  let result;
+  if (n === 1) result = nums[0];
+  else if (n === 2) { if (nums[1] > 0xffffff) return null; result = nums[0] * 0x1000000 + nums[1]; }
+  else if (n === 3) { if (nums[2] > 0xffff) return null; result = nums[0] * 0x1000000 + nums[1] * 0x10000 + nums[2]; }
+  else { if (nums[3] > 0xff) return null; result = nums[0] * 0x1000000 + nums[1] * 0x10000 + nums[2] * 0x100 + nums[3]; }
+  if (result < 0 || result > 0xffffffff) return null;
+  return result >>> 0;
+}
+function isBlockedIpv4Int(ip) {
+  const a = (ip >>> 24) & 0xff;
+  const b = (ip >>> 16) & 0xff;
+  if (a === 0) return true;                          // 0.0.0.0/8
+  if (a === 127) return true;                        // loopback
+  if (a === 10) return true;                         // private
+  if (a === 172 && b >= 16 && b <= 31) return true;  // private
+  if (a === 192 && b === 168) return true;           // private
+  if (a === 169 && b === 254) return true;           // link-local / cloud metadata
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+  if (a >= 224) return true;                         // multicast + reserved
+  return false;
+}
 function isUrlSafeForFetching(urlString) {
   try {
     const parsed = new URL(urlString);
     const hostname = parsed.hostname.toLowerCase();
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return false;
+    }
+    // #25 SSRF hardening: block ALL IPv6 literals (legit targets use hostnames) —
+    // covers [::1], [::], [::ffff:127.0.0.1], [::ffff:7f00:1], [fe80::], [fc00::], etc.
+    if (hostname.startsWith("[")) {
+      return false;
+    }
+    // #25 SSRF hardening: canonicalize ANY IPv4 encoding (decimal integer, hex,
+    // octal, and shorthand like 127.1 / 0x7f.1 / 0177.0.0.1 / 2130706433) and
+    // block it if it maps to a private/reserved range.
+    const ipInt = ipv4ToInt(hostname);
+    if (ipInt !== null && isBlockedIpv4Int(ipInt)) {
       return false;
     }
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "0.0.0.0") {
