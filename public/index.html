@@ -966,9 +966,10 @@
             </div>
 
             <!-- Tabs -->
-            <div class="segmented-control max-w-[240px] mx-auto mb-10">
+            <div class="segmented-control max-w-[320px] mx-auto mb-10">
                 <button onclick="showTab('single')" id="tab-single" class="active">Roast</button>
                 <button onclick="showTab('compare')" id="tab-compare">Compare</button>
+                <button onclick="showTab('batch')" id="tab-batch">Batch</button>
             </div>
             
             <!-- Single Roast Form -->
@@ -1035,6 +1036,30 @@
                     <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
                         Compare Pages
                     </button>
+                </div>
+            </div>
+
+            <!-- Batch Roast Form -->
+            <div id="form-batch" class="hidden card p-8 md:p-10 max-w-2xl mx-auto mb-6">
+                <div class="flex flex-col gap-5">
+                    <p class="text-[13px] text-[#6e6e73]">Roast up to 3 landing pages at once. Great for auditing multiple client pages or variants.</p>
+                    <div class="space-y-3">
+                        <input type="url" id="batch-url-1" placeholder="https://page-one.com" class="input-dark w-full px-5 py-4 text-white">
+                        <input type="url" id="batch-url-2" placeholder="https://page-two.com (optional)" class="input-dark w-full px-5 py-4 text-white">
+                        <input type="url" id="batch-url-3" placeholder="https://page-three.com (optional)" class="input-dark w-full px-5 py-4 text-white">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-[13px] text-[#6e6e73] font-medium tracking-wide">Device</span>
+                        <div class="segmented-control">
+                            <button onclick="setDevice('desktop')" id="batch-device-desktop" class="active">Desktop</button>
+                            <button onclick="setDevice('tablet')" id="batch-device-tablet">Tablet</button>
+                            <button onclick="setDevice('mobile')" id="batch-device-mobile">Mobile</button>
+                        </div>
+                    </div>
+                    <button onclick="batchRoastPages()" id="batch-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
+                        Roast All Pages
+                    </button>
+                    <div id="batch-results" class="hidden space-y-3 pt-2 border-t border-white/[0.04]"></div>
                 </div>
             </div>
             
@@ -3919,6 +3944,7 @@
                         <li><a href="#roast" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Roast a Page</a></li>
                         <li><a href="#roast" onclick="document.querySelector('[data-tab=compare]')?.click()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Compare Pages</a></li>
                         <li><a href="/gallery" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Gallery</a></li>
+                        <li><a href="/pricing" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Pricing</a></li>
                         <li><a href="#leaderboard-section" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Leaderboard</a></li>
                         <li><button onclick="showChangelogModal()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">What's New</button></li>
                     </ul>
@@ -3980,6 +4006,60 @@
             </div>
         </div>
     </footer>
+
+    <!-- Pricing Page (shown on /pricing) -->
+    <div id="pricing-page" class="hidden fixed inset-0 z-40 bg-black overflow-y-auto">
+        <div class="pt-28 pb-20 px-6 max-w-5xl mx-auto">
+            <div class="text-center mb-12">
+                <a href="/" class="inline-flex items-center gap-2 text-[13px] text-[#6e6e73] hover:text-white mb-8 transition-colors">← Back to roaster</a>
+                <h1 class="text-4xl md:text-5xl font-black tracking-[-0.03em] mb-4">Simple, transparent pricing</h1>
+                <p class="text-[#6e6e73] text-lg max-w-xl mx-auto">Start free. Upgrade when you need more roasts, API access, or team features.</p>
+            </div>
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="card p-8 border border-white/[0.06]">
+                    <div class="text-[11px] font-semibold uppercase tracking-widest text-[#6e6e73] mb-2">Free</div>
+                    <div class="text-4xl font-black mb-1">$0</div>
+                    <div class="text-[13px] text-[#6e6e73] mb-6">forever</div>
+                    <ul class="space-y-3 text-[13px] text-[#a1a1a6] mb-8">
+                        <li>✓ 30 roasts per hour</li>
+                        <li>✓ Full AI analysis + heatmap</li>
+                        <li>✓ SEO, performance & a11y audit</li>
+                        <li>✓ Compare 2 pages</li>
+                        <li>✓ PDF export</li>
+                    </ul>
+                    <a href="/#roast" class="btn-primary block text-center py-3 rounded-xl text-white text-sm font-semibold">Get started free</a>
+                </div>
+                <div class="card p-8 border-2 border-[#FF6B35]/40 relative">
+                    <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-[#FF6B35] rounded-full text-[10px] font-bold text-white uppercase tracking-wide">Popular</div>
+                    <div class="text-[11px] font-semibold uppercase tracking-widest text-[#FF6B35] mb-2">Pro</div>
+                    <div class="text-4xl font-black mb-1">$29</div>
+                    <div class="text-[13px] text-[#6e6e73] mb-6">per month</div>
+                    <ul class="space-y-3 text-[13px] text-[#a1a1a6] mb-8">
+                        <li>✓ 200 roasts per hour</li>
+                        <li>✓ API key with 500 calls/day</li>
+                        <li>✓ Batch roast (up to 10 URLs)</li>
+                        <li>✓ Priority queue</li>
+                        <li>✓ Email reports & reminders</li>
+                    </ul>
+                    <a href="mailto:contentcreatordarsh@gmail.com?subject=Roast%20My%20Page%20Pro" class="btn-primary block text-center py-3 rounded-xl text-white text-sm font-semibold">Contact for Pro</a>
+                </div>
+                <div class="card p-8 border border-white/[0.06]">
+                    <div class="text-[11px] font-semibold uppercase tracking-widest text-[#6e6e73] mb-2">Agency</div>
+                    <div class="text-4xl font-black mb-1">Custom</div>
+                    <div class="text-[13px] text-[#6e6e73] mb-6">for teams</div>
+                    <ul class="space-y-3 text-[13px] text-[#a1a1a6] mb-8">
+                        <li>✓ Unlimited team members</li>
+                        <li>✓ White-label PDF reports</li>
+                        <li>✓ Client workspaces</li>
+                        <li>✓ Webhooks & integrations</li>
+                        <li>✓ Dedicated support</li>
+                    </ul>
+                    <a href="mailto:contentcreatordarsh@gmail.com?subject=Roast%20My%20Page%20Agency" class="block text-center py-3 rounded-xl text-sm font-semibold border border-white/[0.1] text-[#a1a1a6] hover:border-white/[0.2] hover:text-white transition-colors">Talk to us</a>
+                </div>
+            </div>
+            <p class="text-center text-[12px] text-[#424245] mt-10">Pro and Agency tiers are coming soon. Contact us to join the early access list.</p>
+        </div>
+    </div>
 
     <script>
         // ===== SECURITY: XSS Prevention =====
@@ -4157,8 +4237,10 @@
             currentTab = tab;
             document.getElementById('form-single').classList.toggle('hidden', tab !== 'single');
             document.getElementById('form-compare').classList.toggle('hidden', tab !== 'compare');
+            document.getElementById('form-batch').classList.toggle('hidden', tab !== 'batch');
             document.getElementById('tab-single').classList.toggle('active', tab === 'single');
             document.getElementById('tab-compare').classList.toggle('active', tab === 'compare');
+            document.getElementById('tab-batch').classList.toggle('active', tab === 'batch');
         }
 
         function showResultTab(tab) {
@@ -4525,13 +4607,11 @@
             
             const d = currentThreatData;
             const imposterCount = d.socialMedia?.impostersFound || 0;
-            const similarCount = d.visualSimilarity?.found || 0;
             
             const text = `Brand Threat Report for ${d.domain}:\n\n` +
                 `Threat Score: ${d.threatScore}/100 (${d.riskLevel} risk)\n` +
                 `Lookalike Domains: ${d.lookalikes.registered} found\n` +
                 `Social Imposters: ${imposterCount} found\n` +
-                `Similar Sites: ${similarCount} detected\n` +
                 `Security Grade: ${d.security.grade}\n\n` +
                 `Scan your brand at:`;
             
@@ -4546,10 +4626,86 @@
             }
         }
 
-        function exportThreatPDF() {
+        async function exportThreatPDF() {
             if (!currentThreatData) return;
-            showToast('PDF export coming soon!', 'info');
-            // TODO: Implement PDF export for threat report
+            if (!window.jspdf?.jsPDF) {
+                showToast('PDF library still loading — try again in a moment', 'error');
+                return;
+            }
+
+            showToast('Generating threat report PDF...', 'info');
+            const d = currentThreatData;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const margin = 20;
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const contentWidth = pageWidth - margin * 2;
+            let y = 24;
+
+            doc.setFillColor(255, 107, 53);
+            doc.rect(0, 0, pageWidth, 8, 'F');
+            doc.setFontSize(22);
+            doc.setTextColor(255, 107, 53);
+            doc.text('Brand Threat Report', margin, y);
+            y += 10;
+            doc.setFontSize(11);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`Domain: ${d.domain}`, margin, y);
+            y += 6;
+            doc.text(`Scanned: ${new Date(d.scannedAt || Date.now()).toLocaleString()}`, margin, y);
+            y += 14;
+
+            doc.setFontSize(36);
+            const scoreColor = d.threatScore >= 80 ? [34, 197, 94] : d.threatScore >= 60 ? [234, 179, 8] : d.threatScore >= 40 ? [249, 115, 22] : [239, 68, 68];
+            doc.setTextColor(...scoreColor);
+            doc.text(`${d.threatScore}`, margin, y);
+            doc.setFontSize(14);
+            doc.text('/100 threat score', margin + 28, y);
+            y += 8;
+            doc.setFontSize(12);
+            doc.text(`Risk level: ${d.riskLevel}`, margin, y);
+            y += 16;
+
+            const stats = [
+                ['Registered lookalikes', String(d.lookalikes?.registered ?? 0)],
+                ['Suspicious domains', String(d.lookalikes?.suspicious ?? 0)],
+                ['Social imposters', String(d.socialMedia?.impostersFound ?? 0)],
+                ['Security grade', `${d.security?.grade ?? '-'} (${d.security?.score ?? 0}/100)`]
+            ];
+            doc.setFontSize(11);
+            doc.setTextColor(60, 60, 60);
+            stats.forEach(([label, value]) => {
+                doc.text(`${label}:`, margin, y);
+                doc.setTextColor(30, 30, 30);
+                doc.text(value, margin + 70, y);
+                doc.setTextColor(60, 60, 60);
+                y += 8;
+            });
+            y += 8;
+
+            if (d.recommendations?.length) {
+                doc.setFontSize(13);
+                doc.setTextColor(255, 107, 53);
+                doc.text('Recommendations', margin, y);
+                y += 8;
+                doc.setFontSize(10);
+                doc.setTextColor(50, 50, 50);
+                d.recommendations.slice(0, 8).forEach((rec, i) => {
+                    const lines = doc.splitTextToSize(`${i + 1}. ${rec}`, contentWidth);
+                    if (y + lines.length * 5 > 270) {
+                        doc.addPage();
+                        y = 24;
+                    }
+                    doc.text(lines, margin, y);
+                    y += lines.length * 5 + 3;
+                });
+            }
+
+            doc.setFontSize(8);
+            doc.setTextColor(150, 150, 150);
+            doc.text('Generated by Roast My Landing Page | roastmypage.site', margin, 285);
+            doc.save(`threat-report-${d.domain.replace(/\./g, '-')}.pdf`);
+            showToast('Threat report downloaded!', 'success');
         }
 
         // ===== END THREAT SCAN FUNCTIONS =====
@@ -4560,6 +4716,7 @@
             ['desktop', 'tablet', 'mobile'].forEach(d => {
                 document.getElementById(`device-${d}`)?.classList.toggle('active', d === device);
                 document.getElementById(`compare-device-${d}`)?.classList.toggle('active', d === device);
+                document.getElementById(`batch-device-${d}`)?.classList.toggle('active', d === device);
             });
         }
 
@@ -5027,6 +5184,68 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 showToast(error.message || 'Comparison failed. Please try again.', 'error');
             } finally {
                 document.getElementById('compare-btn').disabled = false;
+            }
+        }
+
+        async function batchRoastPages() {
+            const urls = [1, 2, 3]
+                .map(i => document.getElementById(`batch-url-${i}`)?.value.trim())
+                .filter(Boolean)
+                .map(u => u.startsWith('http') ? u : `https://${u}`);
+
+            if (urls.length === 0) return showToast('Enter at least one URL', 'error');
+
+            const btn = document.getElementById('batch-btn');
+            const resultsEl = document.getElementById('batch-results');
+            btn.disabled = true;
+            btn.textContent = `Roasting ${urls.length} page${urls.length > 1 ? 's' : ''}...`;
+            resultsEl.classList.add('hidden');
+            resultsEl.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/batch-roast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls, device: currentDevice })
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    if (response.status === 429) {
+                        showRateLimitWarning(data.error, data.retryAfter || 60);
+                        return;
+                    }
+                    throw new Error(data.error || 'Batch roast failed');
+                }
+
+                resultsEl.classList.remove('hidden');
+                const summary = data.summary || {};
+                resultsEl.innerHTML = `
+                    <div class="text-[13px] text-[#a1a1a6] mb-3">
+                        ${summary.successful ?? data.results?.length ?? 0} succeeded · ${summary.failed ?? data.errors?.length ?? 0} failed
+                        ${summary.avgScore ? ` · avg score ${summary.avgScore}/10` : ''}
+                    </div>
+                    ${(data.results || []).map(r => {
+                        let host = r.url;
+                        try { host = new URL(r.url).hostname.replace('www.', ''); } catch {}
+                        const color = r.overallScore >= 7 ? 'text-green-400' : r.overallScore >= 5 ? 'text-yellow-400' : 'text-red-400';
+                        return `<a href="/roast/${r.id}" class="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.04] hover:border-white/[0.1] transition-colors">
+                            <span class="text-sm text-[#d1d1d6] truncate flex-1 mr-3">${sanitizeHtml(host)}</span>
+                            <span class="text-sm font-bold ${color}">${r.overallScore?.toFixed(1)}/10</span>
+                        </a>`;
+                    }).join('')}
+                    ${(data.errors || []).map(e => `
+                        <div class="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-[13px] text-red-400">
+                            ${sanitizeHtml(e.url)} — ${sanitizeHtml(e.error)}
+                        </div>
+                    `).join('')}
+                `;
+                showToast(`Batch complete: ${summary.successful ?? 0} roasts ready`, 'success');
+            } catch (error) {
+                showToast(error.message || 'Batch roast failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Roast All Pages';
             }
         }
 
@@ -9033,11 +9252,19 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             if (largeBadge) largeBadge.src = `/api/badge/${currentRoast.id}/large`;
         }
 
+        function applyAppRoute() {
+            const isPricing = window.location.pathname === '/pricing';
+            document.getElementById('pricing-page')?.classList.toggle('hidden', !isPricing);
+            document.body.classList.toggle('overflow-hidden', isPricing);
+        }
+
         // Initialize leaderboard, wall of shame, and feed on load
         window.addEventListener('load', () => {
+            applyAppRoute();
             loadLeaderboard('weekly');
             loadWallOfShame();
             loadFeed();
+            if (window.location.hash === '#batch') showTab('batch');
         });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
