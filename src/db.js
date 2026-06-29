@@ -52,7 +52,10 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
   const limits2 = {
     roast: CONFIG.RATE_LIMIT_MAX_REQUESTS,
     compare: CONFIG.RATE_LIMIT_COMPARE_MAX,
-    batch: CONFIG.RATE_LIMIT_BATCH_MAX
+    batch: CONFIG.RATE_LIMIT_BATCH_MAX,
+    feedback: CONFIG.RATE_LIMIT_FEEDBACK_MAX,
+    subscribe: CONFIG.RATE_LIMIT_SUBSCRIBE_MAX,
+    threat: CONFIG.RATE_LIMIT_THREAT_MAX
   };
   const maxRequests = limits2[operation];
   const now = /* @__PURE__ */ new Date();
@@ -107,7 +110,7 @@ async function getCachedRoast(env22, urlHash, url) {
   }
   const cacheExpiry = new Date(Date.now() - cacheTTLHours * 60 * 60 * 1e3);
   const cached = await env22.DB.prepare(`
-    SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry
+    SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
   `).bind(urlHash, cacheExpiry.toISOString()).first();
   if (!cached) return null;
@@ -137,6 +140,7 @@ async function getCachedRoast(env22, urlHash, url) {
   return {
     id: cached.id,
     url: cached.url,
+    urlHash: cached.url_hash,
     overallScore: cached.overall_score,
     scores: { hero: cached.hero_score, cta: cached.cta_score, trust: cached.trust_score, copy: cached.copy_score, design: cached.design_score },
     roast: cached.roast_response,
