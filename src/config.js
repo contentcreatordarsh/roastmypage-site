@@ -33,6 +33,12 @@ const CONFIG = {
   // NEW: Compare uses 2x resources
   RATE_LIMIT_BATCH_MAX: 3,
   // NEW: Batch uses up to 5x resources
+  RATE_LIMIT_FEEDBACK_MAX: 20,
+  // Feedback submissions per hour
+  RATE_LIMIT_SUBSCRIBE_MAX: 10,
+  // Email subscribe per hour
+  RATE_LIMIT_THREAT_MAX: 10,
+  // Threat scans per hour
   RATE_LIMIT_WINDOW_MINUTES: 60,
   // Global limits (circuit breaker)
   GLOBAL_HOURLY_LIMIT: 2e3,
