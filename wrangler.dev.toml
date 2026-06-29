@@ -1,0 +1,34 @@
+name = "roast-my-landing-page-test"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Local-only dev config (NOT committed). Mirrors wrangler.toml's default (dev)
+# environment but omits the [browser] binding, which Wrangler v3 cannot simulate
+# locally. AI/Browser-backed roasting still needs Cloudflare credentials + --remote;
+# everything else (pages, D1/R2/KV-backed APIs) runs fully locally.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "roast-db-dev"
+database_id = "f287a4d6-cffa-4ee7-8775-e130a567d9ff"
+
+[[r2_buckets]]
+binding = "SCREENSHOTS"
+bucket_name = "roast-screenshots-dev"
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "a278379c19e0426298741337ed23a315"
+
+[vars]
+ENVIRONMENT = "development"
+BASE_URL = "http://localhost:8787"
+CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
+CF_ZONE_TAG = "1147710735"
