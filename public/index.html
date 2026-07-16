@@ -5330,11 +5330,11 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                         const { done, value } = await reader.read();
                         if (done) break;
                         buffer += decoder.decode(value, { stream: true });
-                        const chunks = buffer.split('\\n\\n');
+                        const chunks = buffer.split('\n\n');
                         buffer = chunks.pop() || '';
                         for (const chunk of chunks) {
                             if (!chunk.trim()) continue;
-                            const event = (chunk.match(/event: (\\w+)/) || [])[1];
+                            const event = (chunk.match(/event: (\w+)/) || [])[1];
                             const dataStr = (chunk.match(/data: (.+)/s) || [])[1];
                             if (!event || !dataStr) continue;
                             const data = JSON.parse(dataStr);
