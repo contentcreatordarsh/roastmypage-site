@@ -1034,6 +1034,14 @@
                         </div>
                     </div>
                     
+                    <div class="flex items-center justify-between">
+                        <span class="text-[13px] text-[#6e6e73] font-medium tracking-wide">Capture</span>
+                        <div class="segmented-control">
+                            <button onclick="setFullPage(false)" id="compare-fullpage-viewport" class="active">Viewport</button>
+                            <button onclick="setFullPage(true)" id="compare-fullpage-full">Full Page</button>
+                        </div>
+                    </div>
+                    
                     <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
                         Compare Pages
                     </button>
@@ -5153,7 +5161,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 const response = await fetch('/api/compare', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url1: finalUrl1, url2: finalUrl2, device: currentDevice })
+                    body: JSON.stringify({ url1: finalUrl1, url2: finalUrl2, device: currentDevice, fullPage: fullPageMode })
                 });
                 
                 clearInterval(progressInterval);
