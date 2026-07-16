@@ -42,7 +42,10 @@ async function hashUrl(url, device = "desktop") {
   return hashArray.slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 let _ipSaltWarned = false;
-async function hashIp(ip, salt) {
+async function hashIp(ip, salt, environment = "development") {
+  if (!salt && environment === "production") {
+    throw new Error("IP_HASH_SALT must be configured in production");
+  }
   if (!salt && !_ipSaltWarned) {
     _ipSaltWarned = true;
     console.warn("[security] IP_HASH_SALT is not set — IP hashes fall back to a public constant and are reversible. Set it with: wrangler secret put IP_HASH_SALT");

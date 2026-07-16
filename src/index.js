@@ -1,13 +1,15 @@
 import { 
     CONFIG, VIEWPORTS, POPULAR_DOMAINS, RUBRIC_CRITERIA, 
-    INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS 
+    INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS,
+    API_V1_LIMITS
 } from './config.js';
 
 import {
     generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, 
     hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, 
     fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, 
-    sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getAllowedOrigins, getSecurityHeaders
+    sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, secondsUntilMidnightUTC,
+    getAllowedOrigins, getSecurityHeaders
 } from './utils.js';
 
 import {
@@ -17,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    incrementApiV1Counters, apiV1RateLimitHeaders
+    consumeApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -75,7 +77,7 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
@@ -217,7 +219,7 @@ export default {
           );
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const fullPage = body.fullPage === true;
@@ -513,7 +515,7 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const { urls, device = "desktop" } = body;
         if (!urls || !Array.isArray(urls) || urls.length === 0) {
@@ -623,7 +625,7 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
@@ -893,7 +895,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: "Invalid vote" }, { status: 400, headers: corsHeaders });
         }
         const fbIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT);
+        const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const fbLimit = await checkOperationRateLimit(env22, fbIpHash, "feedback");
         if (!fbLimit.allowed) {
           return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
@@ -905,19 +907,6 @@ data: ${JSON.stringify(data)}
         const roastId = isValidRoastIdLoose(body.roastId) ? body.roastId : null;
         const feedbackUrl = body.url ? String(body.url).substring(0, 500) : null;
         const country = request.cf?.country || null;
-        await env22.DB.prepare(`CREATE TABLE IF NOT EXISTS feedback (
-          id TEXT PRIMARY KEY,
-          vote TEXT NOT NULL,
-          context TEXT,
-          reasons TEXT,
-          message TEXT,
-          email TEXT,
-          roast_id TEXT,
-          url TEXT,
-          ip_hash TEXT,
-          country TEXT,
-          created_at TEXT DEFAULT (datetime('now'))
-        )`).run();
         const id = generateId();
         await env22.DB.prepare(
           `INSERT INTO feedback (id, vote, context, reasons, message, email, roast_id, url, ip_hash, country) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -938,7 +927,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: "Please provide a valid email address" }, { status: 400, headers: corsHeaders });
         }
         const subIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT);
+        const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const subLimit = await checkOperationRateLimit(env22, subIpHash, "subscribe");
         if (!subLimit.allowed) {
           return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
@@ -2246,7 +2235,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         let targetDomain;
         let brandName;
@@ -2335,7 +2324,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         if (!body.url) {
           return Response.json({ error: "URL required" }, { status: 400, headers: corsHeaders });
@@ -2478,83 +2467,6 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Failed to fetch results" }, { status: 500, headers: corsHeaders });
       }
     }
-    const API_V1_LIMITS = {
-      PER_IP_DAILY: 5,
-      GLOBAL_DAILY: 50
-    };
-    function getApiDayKey() {
-      const now = /* @__PURE__ */ new Date();
-      return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
-    }
-    function secondsUntilMidnightUTC() {
-      const now = /* @__PURE__ */ new Date();
-      const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-      return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
-    }
-    async function checkApiV1RateLimits(env3, ipHash) {
-      const dayKey = getApiDayKey();
-      const ipKey = `apiv1:ip:${ipHash}:${dayKey}`;
-      const globalKey = `apiv1:global:${dayKey}`;
-      try {
-        const [ipCountStr, globalCountStr] = await Promise.all([
-          env3.CONFIG.get(ipKey),
-          env3.CONFIG.get(globalKey)
-        ]);
-        const ipCount = parseInt(ipCountStr || "0");
-        const globalCount = parseInt(globalCountStr || "0");
-        if (globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
-          return {
-            allowed: false,
-            ipCount,
-            globalCount,
-            error: "The API has reached its daily capacity of 50 roasts. Please try again tomorrow.",
-            errorType: "global_limit"
-          };
-        }
-        if (ipCount >= API_V1_LIMITS.PER_IP_DAILY) {
-          return {
-            allowed: false,
-            ipCount,
-            globalCount,
-            error: `You've reached the daily limit of ${API_V1_LIMITS.PER_IP_DAILY} roasts. Please try again tomorrow.`,
-            errorType: "ip_limit"
-          };
-        }
-        return { allowed: true, ipCount, globalCount };
-      } catch (error32) {
-        console.error("API v1 rate limit check failed:", error32);
-        return { allowed: false, ipCount: 0, globalCount: 0, error: "Rate limiting unavailable. Please try again later.", errorType: "global_limit" };
-      }
-    }
-    async function incrementApiV1Counters(env3, ipHash) {
-      const dayKey = getApiDayKey();
-      const ipKey = `apiv1:ip:${ipHash}:${dayKey}`;
-      const globalKey = `apiv1:global:${dayKey}`;
-      const ttl = secondsUntilMidnightUTC() + 3600;
-      try {
-        const [ipCountStr, globalCountStr] = await Promise.all([
-          env3.CONFIG.get(ipKey),
-          env3.CONFIG.get(globalKey)
-        ]);
-        await Promise.all([
-          env3.CONFIG.put(ipKey, String(parseInt(ipCountStr || "0") + 1), { expirationTtl: ttl }),
-          env3.CONFIG.put(globalKey, String(parseInt(globalCountStr || "0") + 1), { expirationTtl: ttl })
-        ]);
-      } catch (error32) {
-        console.error("API v1 counter increment failed:", error32);
-      }
-    }
-    function apiV1RateLimitHeaders(ipCount, globalCount) {
-      const resetAt = /* @__PURE__ */ new Date();
-      resetAt.setUTCHours(24, 0, 0, 0);
-      return {
-        "X-RateLimit-Limit": String(API_V1_LIMITS.PER_IP_DAILY),
-        "X-RateLimit-Remaining": String(Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount)),
-        "X-RateLimit-Reset": String(Math.floor(resetAt.getTime() / 1e3)),
-        "X-RateLimit-Global-Limit": String(API_V1_LIMITS.GLOBAL_DAILY),
-        "X-RateLimit-Global-Remaining": String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount))
-      };
-    }
     const apiV1CorsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -2567,14 +2479,10 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/v1/usage" && request.method === "GET") {
       const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-      const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-      const dayKey = getApiDayKey();
-      const [ipCountStr, globalCountStr] = await Promise.all([
-        env22.CONFIG.get(`apiv1:ip:${ipHash}:${dayKey}`),
-        env22.CONFIG.get(`apiv1:global:${dayKey}`)
-      ]);
-      const ipCount = parseInt(ipCountStr || "0");
-      const globalCount = parseInt(globalCountStr || "0");
+      const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+      const usage = await checkApiV1RateLimits(env22, ipHash);
+      const ipCount = usage.ipCount;
+      const globalCount = usage.globalCount;
       const resetAt = /* @__PURE__ */ new Date();
       resetAt.setUTCHours(24, 0, 0, 0);
       return Response.json({
@@ -2596,7 +2504,7 @@ data: ${JSON.stringify(data)}
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const rateLimits = await checkApiV1RateLimits(env22, ipHash);
         if (!rateLimits.allowed) {
           const statusCode = rateLimits.errorType === "global_limit" ? 503 : 429;
@@ -2658,12 +2566,29 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
+        const quota = await consumeApiV1Quota(env22, ipHash);
+        if (!quota.allowed) {
+          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+          return Response.json({
+            success: false,
+            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
+            message: quota.error,
+            limits: {
+              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
+              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
+            }
+          }, {
+            status: statusCode,
+            headers: {
+              ...apiV1CorsHeaders,
+              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              "Retry-After": String(secondsUntilMidnightUTC())
+            }
+          });
+        }
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          await incrementApiV1Counters(env22, ipHash);
-          const updatedIp2 = rateLimits.ipCount + 1;
-          const updatedGlobal2 = rateLimits.globalCount + 1;
           return Response.json({
             success: true,
             cached: true,
@@ -2689,7 +2614,7 @@ data: ${JSON.stringify(data)}
           }, {
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(updatedIp2, updatedGlobal2),
+              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
               "X-Cache": "HIT"
             }
           });
@@ -2738,9 +2663,6 @@ data: ${JSON.stringify(data)}
             industry
           ).run()
         );
-        await incrementApiV1Counters(env22, ipHash);
-        const updatedIp = rateLimits.ipCount + 1;
-        const updatedGlobal = rateLimits.globalCount + 1;
         return Response.json({
           success: true,
           cached: false,
@@ -2769,7 +2691,7 @@ data: ${JSON.stringify(data)}
         }, {
           headers: {
             ...apiV1CorsHeaders,
-            ...apiV1RateLimitHeaders(updatedIp, updatedGlobal),
+            ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
             "X-Cache": "MISS"
           }
         });

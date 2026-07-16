@@ -6,7 +6,8 @@ import {
   isUrlSafeForFetching,
   isValidRoastId,
   sanitizeUrl,
-  hashUrl
+  hashUrl,
+  hashIp
 } from "../src/utils.js";
 
 test("isValidUrl accepts http and https", () => {
@@ -30,6 +31,22 @@ test("isUrlSafeForFetching blocks private and local addresses", () => {
   assert.equal(isUrlSafeForFetching("javascript:alert(1)"), false);
 });
 
+test("isUrlSafeForFetching blocks encoded and IPv6 loopback addresses", () => {
+  const blocked = [
+    "http://2130706433",
+    "http://0x7f.1",
+    "http://0177.0.0.1",
+    "http://127.1",
+    "http://[::1]",
+    "http://[::ffff:127.0.0.1]",
+    "http://169.254.169.254",
+    "http://metadata.google.internal"
+  ];
+  for (const url of blocked) {
+    assert.equal(isUrlSafeForFetching(url), false, `${url} should be blocked`);
+  }
+});
+
 test("sanitizeUrl blocks dangerous schemes", () => {
   assert.equal(sanitizeUrl("javascript:alert(1)"), "");
   assert.equal(sanitizeUrl("https://safe.com"), "https://safe.com");
@@ -48,4 +65,13 @@ test("hashUrl includes device/full marker", async () => {
   assert.notEqual(h1, h2);
   assert.notEqual(h1, h3);
   assert.notEqual(h2, h3);
+});
+
+test("hashIp requires a private salt in production", async () => {
+  await assert.rejects(
+    hashIp("203.0.113.10", undefined, "production"),
+    /IP_HASH_SALT must be configured/
+  );
+  const hash = await hashIp("203.0.113.10", undefined, "development");
+  assert.match(hash, /^[a-f0-9]{32}$/);
 });
