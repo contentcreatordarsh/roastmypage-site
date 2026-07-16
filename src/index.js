@@ -2832,7 +2832,9 @@ data: ${JSON.stringify(data)}
         }
         if (roasts.results) {
           for (const roast of roasts.results) {
-            const lastmod = roast.created_at ? (/* @__PURE__ */ new Date(roast.created_at + "Z")).toISOString().split("T")[0] : now;
+            const created = roast.created_at || now;
+            const hasZ = /Z$/.test(created);
+            const lastmod = (/* @__PURE__ */ new Date(hasZ ? created : (created + "Z"))).toISOString().split("T")[0];
             xml += `
   <url>
     <loc>${BASE_URL_SM}/roast/${roast.id}</loc>

@@ -1191,6 +1191,10 @@
             <div id="gallery-empty" class="hidden text-center py-8 text-[#6e6e73]">
                 No roasts yet. Be the first!
             </div>
+            <div class="text-center mt-2">
+                <button id="gallery-load-more" class="hidden inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] text-[13px] text-[#a1a1a6] hover:text-white hover:border-white/[0.16] transition-colors"
+                    onclick="loadGallery(true)">Load more</button>
+            </div>
         </div>
     </section>
 
@@ -8446,20 +8450,24 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         }
 
         // Gallery
-        async function loadGallery() {
+        let _galleryPage = 1;
+        let _galleryLoading = false;
+        async function loadGallery(next = false) {
+            if (_galleryLoading) return;
+            _galleryLoading = true;
             try {
-                const res = await fetch('/api/gallery');
+                const res = await fetch(`/api/gallery?page=${_galleryPage}`);
                 const roasts = await res.json();
                 
                 document.getElementById('gallery-loading').classList.add('hidden');
                 
                 if (!roasts || roasts.length === 0) {
-                    document.getElementById('gallery-empty').classList.remove('hidden');
+                    if (_galleryPage === 1) document.getElementById('gallery-empty').classList.remove('hidden');
                     return;
                 }
 
                 const grid = document.getElementById('gallery-grid');
-                grid.innerHTML = roasts.map(roast => `
+                const html = roasts.map(roast => `
                     <a href="/roast/${roast.id}" class="gallery-card card p-3 block hover:no-underline">
                         <div class="aspect-video bg-white/[0.05] rounded-lg overflow-hidden mb-2">
                             <img src="${roast.screenshotUrl}" alt="${roast.hostname}" class="w-full h-full object-cover object-top" loading="lazy">
@@ -8470,9 +8478,14 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                         </div>
                     </a>
                 `).join('');
+                if (next) grid.insertAdjacentHTML('beforeend', html);
+                else grid.innerHTML = html;
+                _galleryPage += 1;
+                document.getElementById('gallery-load-more')?.classList.remove('hidden');
             } catch (err) {
                 document.getElementById('gallery-loading').textContent = 'Failed to load gallery';
             }
+            _galleryLoading = false;
         }
 
         // Country code to flag emoji
