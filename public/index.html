@@ -1036,6 +1036,14 @@
                         </div>
                     </div>
                     
+                    <div class="flex items-center justify-between">
+                        <span class="text-[13px] text-[#6e6e73] font-medium tracking-wide">Capture</span>
+                        <div class="segmented-control">
+                            <button onclick="setFullPage(false)" id="compare-fullpage-viewport" class="active">Viewport</button>
+                            <button onclick="setFullPage(true)" id="compare-fullpage-full">Full Page</button>
+                        </div>
+                    </div>
+                    
                     <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-[18px] rounded-2xl text-white text-[17px] tracking-[-0.01em]">
                         Compare Pages
                     </button>
@@ -1184,6 +1192,10 @@
             </div>
             <div id="gallery-empty" class="hidden text-center py-8 text-[#6e6e73]">
                 No roasts yet. Be the first!
+            </div>
+            <div class="text-center mt-2">
+                <button id="gallery-load-more" class="hidden inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] text-[13px] text-[#a1a1a6] hover:text-white hover:border-white/[0.16] transition-colors"
+                    onclick="loadGallery(true)">Load more</button>
             </div>
         </div>
     </section>
@@ -3307,10 +3319,76 @@
             </div>
             <div class="p-6 overflow-y-auto flex-1 space-y-8">
 
-                <!-- Mar 10, 2026 -->
+                <!-- Jul 16, 2026 -->
                 <div>
                     <div class="flex items-center gap-3 mb-4">
                         <span class="px-2.5 py-1 bg-green-500/20 text-green-400 rounded-lg text-xs font-semibold">LATEST</span>
+                        <span class="text-sm text-[#a1a1a6]">Jul 16, 2026</span>
+                    </div>
+                    <div class="space-y-3 pl-4 border-l-2 border-orange-500/30">
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🧾</span>
+                            <div>
+                                <div class="text-sm font-medium">Threat Report PDF Export</div>
+                                <p class="text-xs text-[#6e6e73]">Download a professional PDF of your brand threat scan, including threat score, lookalikes, social imposters, security grade, and recommendations.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">📦</span>
+                            <div>
+                                <div class="text-sm font-medium">Batch Roast (3 URLs)</div>
+                                <p class="text-xs text-[#6e6e73]">New Batch tab lets you analyze up to three URLs at once. Results now persist full SEO, performance, and heatmap data in the database.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">💳</span>
+                            <div>
+                                <div class="text-sm font-medium">Pricing Page</div>
+                                <p class="text-xs text-[#6e6e73]">Introduced a simple pricing page with Free, Pro, and Agency tiers. Contact us to join the early access list.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🖼️</span>
+                            <div>
+                                <div class="text-sm font-medium">Compare: Full Page Mode</div>
+                                <p class="text-xs text-[#6e6e73]">Compare now supports full-page screenshots, not just viewport captures — flip the Capture toggle in the Compare tab.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🗂️</span>
+                            <div>
+                                <div class="text-sm font-medium">Gallery API Pagination</div>
+                                <p class="text-xs text-[#6e6e73]">`/api/gallery` now supports `?page` with 24 items per page to match the SSR gallery.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🚦</span>
+                            <div>
+                                <div class="text-sm font-medium">Smarter Rate Limiting</div>
+                                <p class="text-xs text-[#6e6e73]">Validation happens before burning quota; separate buckets for feedback, subscribe, and threat scans. Fewer false 429s.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">📈</span>
+                            <div>
+                                <div class="text-sm font-medium">Improvement Tracking</div>
+                                <p class="text-xs text-[#6e6e73]">Re-roast detection now uses server history (`/api/improvement/:urlHash`) for cross-device before/after and improvement badges.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">✅</span>
+                            <div>
+                                <div class="text-sm font-medium">CI + Unit Tests</div>
+                                <p class="text-xs text-[#6e6e73]">Added GitHub Actions CI and initial URL safety tests to prevent regressions.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mar 10, 2026 -->
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="px-2.5 py-1 bg-orange-500/20 text-orange-400 rounded-lg text-xs font-semibold">UPDATE</span>
                         <span class="text-sm text-[#a1a1a6]">Mar 10, 2026</span>
                     </div>
                     <div class="space-y-3 pl-4 border-l-2 border-orange-500/30">
@@ -5155,7 +5233,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 const response = await fetch('/api/compare', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url1: finalUrl1, url2: finalUrl2, device: currentDevice })
+                    body: JSON.stringify({ url1: finalUrl1, url2: finalUrl2, device: currentDevice, fullPage: fullPageMode })
                 });
                 
                 clearInterval(progressInterval);
@@ -5191,84 +5269,123 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         }
 
         async function batchRoastPages() {
-            const urls = [1, 2, 3]
-                .map(i => document.getElementById(`batch-url-${i}`)?.value.trim())
-                .filter(Boolean)
-                .map(u => u.startsWith('http') ? u : `https://${u}`);
-
+            const raw = [1, 2, 3].map(i => document.getElementById(`batch-url-${i}`)?.value.trim()).filter(Boolean);
+            const urls = raw.map(u => u.startsWith('http') ? u : `https://${u}`);
             if (urls.length === 0) return showToast('Enter at least one URL', 'error');
 
             const btn = document.getElementById('batch-btn');
             const resultsEl = document.getElementById('batch-results');
+            resultsEl.classList.remove('hidden');
+            resultsEl.innerHTML = urls.map((u, i) => {
+                let host = u;
+                try { host = new URL(u).hostname.replace('www.', ''); } catch {}
+                return `
+                <div id="batch-item-${i}" class="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                  <div class="flex items-center justify-between">
+                    <div class="text-sm text-[#d1d1d6] truncate">${sanitizeHtml(host)}</div>
+                    <div id="batch-score-${i}" class="text-sm text-[#6e6e73]">Queued</div>
+                  </div>
+                  <div class="mt-2 h-1.5 w-full bg-white/[0.05] rounded overflow-hidden">
+                    <div id="batch-progress-${i}" class="h-full bg-orange-500/70" style="width: 0%"></div>
+                  </div>
+                  <div id="batch-status-${i}" class="mt-2 text-[12px] text-[#6e6e73]">Waiting...</div>
+                </div>`;
+            }).join('');
+
             btn.disabled = true;
             btn.textContent = `Roasting ${urls.length} page${urls.length > 1 ? 's' : ''}...`;
-            // Show an immediate progress state — batch runs the pages sequentially and can
-            // take up to ~30s per page, so without this the UI looks frozen/broken.
-            const etaSeconds = urls.length * 30;
-            resultsEl.classList.remove('hidden');
-            resultsEl.innerHTML = `
-                <div class="flex items-center gap-3 text-[13px] text-[#a1a1a6] mb-1">
-                    <div class="w-4 h-4 border-2 border-white/20 border-t-orange-500 rounded-full animate-spin"></div>
-                    <span>Roasting ${urls.length} page${urls.length > 1 ? 's' : ''}… up to ~${etaSeconds}s. Keep this tab open.</span>
-                </div>
-                ${urls.map(u => {
-                    let host = u; try { host = new URL(u).hostname.replace('www.', ''); } catch {}
-                    return `<div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.04]">
-                        <span class="text-sm text-[#6e6e73] truncate flex-1 mr-3">${sanitizeHtml(host)}</span>
-                        <span class="text-xs text-[#6e6e73]">in queue…</span>
-                    </div>`;
-                }).join('')}
-            `;
 
-            try {
-                const response = await fetch('/api/batch-roast', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ urls, device: currentDevice })
-                });
-                const data = await response.json();
-
-                if (!response.ok) {
-                    if (response.status === 429) {
-                        resultsEl.classList.add('hidden');
-                        resultsEl.innerHTML = '';
-                        showRateLimitWarning(data.error, data.retryAfter || 60);
-                        return;
+            async function roastOne(u, i) {
+                const set = (sel, txt) => { const el = document.getElementById(sel); if (el) el.textContent = txt; };
+                const setBar = (sel, pct) => { const el = document.getElementById(sel); if (el) el.style.width = `${Math.max(0, Math.min(100, pct))}%`; };
+                try {
+                    set(`batch-status-${i}`, 'Starting...');
+                    const resp = await fetch('/api/roast-stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: u, device: currentDevice, fullPage: false })
+                    });
+                    if (resp.status === 429) {
+                        const d = await resp.json();
+                        set(`batch-status-${i}`, d.error || 'Rate limited');
+                        setBar(`batch-progress-${i}`, 0);
+                        return null;
                     }
-                    throw new Error(data.error || 'Batch roast failed');
+                    const contentType = resp.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        const d = await resp.json();
+                        if (d.error) throw new Error(d.error);
+                        // Completed without streaming (cache hit path)
+                        const color = d.overallScore >= 7 ? 'text-green-400' : d.overallScore >= 5 ? 'text-yellow-400' : 'text-red-400';
+                        set(`batch-score-${i}`, `${d.overallScore.toFixed(1)}/10`);
+                        document.getElementById(`batch-score-${i}`).className = `text-sm font-bold ${color}`;
+                        setBar(`batch-progress-${i}`, 100);
+                        set(`batch-status-${i}`, 'Complete (cached)');
+                        return d;
+                    }
+                    const reader = resp.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const chunks = buffer.split('\n\n');
+                        buffer = chunks.pop() || '';
+                        for (const chunk of chunks) {
+                            if (!chunk.trim()) continue;
+                            const event = (chunk.match(/event: (\w+)/) || [])[1];
+                            const dataStr = (chunk.match(/data: (.+)/s) || [])[1];
+                            if (!event || !dataStr) continue;
+                            const data = JSON.parse(dataStr);
+                            if (event === 'progress') {
+                                set(`batch-status-${i}`, data.message || 'Working...');
+                                setBar(`batch-progress-${i}`, data.progress || 0);
+                            } else if (event === 'seo' || event === 'performance') {
+                                // optional: could reflect intermediate metrics
+                            } else if (event === 'complete') {
+                                const color = data.overallScore >= 7 ? 'text-green-400' : data.overallScore >= 5 ? 'text-yellow-400' : 'text-red-400';
+                                set(`batch-score-${i}`, `${data.overallScore.toFixed(1)}/10`);
+                                document.getElementById(`batch-score-${i}`).className = `text-sm font-bold ${color}`;
+                                setBar(`batch-progress-${i}`, 100);
+                                set(`batch-status-${i}`, `Done · ${data.quickWins?.length || 0} quick wins · ` +
+                                    `<a href=\"/roast/${data.id}\" class=\"text-orange-400 hover:text-orange-300\">Open</a>`);
+                                // Convert status to HTML safely
+                                const el = document.getElementById(`batch-status-${i}`);
+                                if (el) {
+                                    el.innerHTML = `Done · ${data.quickWins?.length || 0} quick wins · ` +
+                                      `<a href=\"/roast/${data.id}\" class=\"text-orange-400 hover:text-orange-300\">Open</a>`;
+                                }
+                                return data;
+                            } else if (event === 'error') {
+                                set(`batch-status-${i}`, data.message || 'Failed');
+                                setBar(`batch-progress-${i}`, 0);
+                                return null;
+                            }
+                        }
+                    }
+                    return null;
+                } catch (e) {
+                    set(`batch-status-${i}`, (e && e.message) || 'Failed');
+                    setBar(`batch-progress-${i}`, 0);
+                    return null;
                 }
-
-                resultsEl.classList.remove('hidden');
-                const summary = data.summary || {};
-                resultsEl.innerHTML = `
-                    <div class="text-[13px] text-[#a1a1a6] mb-3">
-                        ${summary.successful ?? data.results?.length ?? 0} succeeded · ${summary.failed ?? data.errors?.length ?? 0} failed
-                        ${summary.avgScore ? ` · avg score ${summary.avgScore}/10` : ''}
-                    </div>
-                    ${(data.results || []).map(r => {
-                        let host = r.url;
-                        try { host = new URL(r.url).hostname.replace('www.', ''); } catch {}
-                        const color = r.overallScore >= 7 ? 'text-green-400' : r.overallScore >= 5 ? 'text-yellow-400' : 'text-red-400';
-                        return `<a href="/roast/${r.id}" class="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.04] hover:border-white/[0.1] transition-colors">
-                            <span class="text-sm text-[#d1d1d6] truncate flex-1 mr-3">${sanitizeHtml(host)}</span>
-                            <span class="text-sm font-bold ${color}">${r.overallScore?.toFixed(1)}/10</span>
-                        </a>`;
-                    }).join('')}
-                    ${(data.errors || []).map(e => `
-                        <div class="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-[13px] text-red-400">
-                            ${sanitizeHtml(e.url)} — ${sanitizeHtml(e.error)}
-                        </div>
-                    `).join('')}
-                `;
-                showToast(`Batch complete: ${summary.successful ?? 0} roasts ready`, 'success');
-            } catch (error) {
-                resultsEl.classList.add('hidden');
-                resultsEl.innerHTML = '';
-                showToast(error.message || 'Batch roast failed', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Roast All Pages';
             }
+
+            let success = 0, fail = 0, totalScore = 0;
+            for (let i = 0; i < urls.length; i++) {
+                const result = await roastOne(urls[i], i);
+                if (result && result.overallScore != null) {
+                    success++;
+                    totalScore += result.overallScore;
+                } else {
+                    fail++;
+                }
+            }
+            const avg = success > 0 ? (totalScore / success).toFixed(1) : '-';
+            showToast(`Batch complete: ${success} succeeded, ${fail} failed · avg ${avg}`, success > 0 ? 'success' : 'error');
+            btn.disabled = false;
+            btn.textContent = 'Roast All Pages';
         }
 
         // Display Results
@@ -8393,20 +8510,24 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         }
 
         // Gallery
-        async function loadGallery() {
+        let _galleryPage = 1;
+        let _galleryLoading = false;
+        async function loadGallery(next = false) {
+            if (_galleryLoading) return;
+            _galleryLoading = true;
             try {
-                const res = await fetch('/api/gallery');
+                const res = await fetch(`/api/gallery?page=${_galleryPage}`);
                 const roasts = await res.json();
                 
                 document.getElementById('gallery-loading').classList.add('hidden');
                 
                 if (!roasts || roasts.length === 0) {
-                    document.getElementById('gallery-empty').classList.remove('hidden');
+                    if (_galleryPage === 1) document.getElementById('gallery-empty').classList.remove('hidden');
                     return;
                 }
 
                 const grid = document.getElementById('gallery-grid');
-                grid.innerHTML = roasts.map(roast => `
+                const html = roasts.map(roast => `
                     <a href="/roast/${roast.id}" class="gallery-card card p-3 block hover:no-underline">
                         <div class="aspect-video bg-white/[0.05] rounded-lg overflow-hidden mb-2">
                             <img src="${roast.screenshotUrl}" alt="${roast.hostname}" class="w-full h-full object-cover object-top" loading="lazy">
@@ -8417,9 +8538,14 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                         </div>
                     </a>
                 `).join('');
+                if (next) grid.insertAdjacentHTML('beforeend', html);
+                else grid.innerHTML = html;
+                _galleryPage += 1;
+                document.getElementById('gallery-load-more')?.classList.remove('hidden');
             } catch (err) {
                 document.getElementById('gallery-loading').textContent = 'Failed to load gallery';
             }
+            _galleryLoading = false;
         }
 
         // Country code to flag emoji
