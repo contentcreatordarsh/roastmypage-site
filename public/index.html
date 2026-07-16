@@ -5202,8 +5202,23 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             const resultsEl = document.getElementById('batch-results');
             btn.disabled = true;
             btn.textContent = `Roasting ${urls.length} page${urls.length > 1 ? 's' : ''}...`;
-            resultsEl.classList.add('hidden');
-            resultsEl.innerHTML = '';
+            // Show an immediate progress state — batch runs the pages sequentially and can
+            // take up to ~30s per page, so without this the UI looks frozen/broken.
+            const etaSeconds = urls.length * 30;
+            resultsEl.classList.remove('hidden');
+            resultsEl.innerHTML = `
+                <div class="flex items-center gap-3 text-[13px] text-[#a1a1a6] mb-1">
+                    <div class="w-4 h-4 border-2 border-white/20 border-t-orange-500 rounded-full animate-spin"></div>
+                    <span>Roasting ${urls.length} page${urls.length > 1 ? 's' : ''}… up to ~${etaSeconds}s. Keep this tab open.</span>
+                </div>
+                ${urls.map(u => {
+                    let host = u; try { host = new URL(u).hostname.replace('www.', ''); } catch {}
+                    return `<div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.04]">
+                        <span class="text-sm text-[#6e6e73] truncate flex-1 mr-3">${sanitizeHtml(host)}</span>
+                        <span class="text-xs text-[#6e6e73]">in queue…</span>
+                    </div>`;
+                }).join('')}
+            `;
 
             try {
                 const response = await fetch('/api/batch-roast', {
@@ -5215,6 +5230,8 @@ Your landing page is like a first date where you talk about yourself for 45 minu
 
                 if (!response.ok) {
                     if (response.status === 429) {
+                        resultsEl.classList.add('hidden');
+                        resultsEl.innerHTML = '';
                         showRateLimitWarning(data.error, data.retryAfter || 60);
                         return;
                     }
@@ -5245,6 +5262,8 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 `;
                 showToast(`Batch complete: ${summary.successful ?? 0} roasts ready`, 'success');
             } catch (error) {
+                resultsEl.classList.add('hidden');
+                resultsEl.innerHTML = '';
                 showToast(error.message || 'Batch roast failed', 'error');
             } finally {
                 btn.disabled = false;
