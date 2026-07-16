@@ -220,6 +220,7 @@ export default {
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
+        const fullPage = body.fullPage === true;
         const url1 = sanitizeUrl(body.url1);
         const url2 = sanitizeUrl(body.url2);
         if (!url1 || !url2 || !isValidUrl(url1) || !isValidUrl(url2)) {
@@ -238,8 +239,8 @@ export default {
           );
         }
         const [hash1, hash2] = await Promise.all([
-          hashUrl(url1, device),
-          hashUrl(url2, device)
+          hashUrl(url1, device + (fullPage ? "-full" : "")),
+          hashUrl(url2, device + (fullPage ? "-full" : ""))
         ]);
         const [cached1, cached2] = await Promise.all([
           getCachedRoast(env22, hash1, url1),
@@ -251,8 +252,8 @@ export default {
         if (sessionsNeeded > 0) await trackBrowserUsage(env22, sessionsNeeded);
         const compareResult = await withTimeout((async () => {
           const [page1, page2] = await Promise.all([
-            needCapture1 ? capturePageWithMetrics(env22, url1, { device }) : null,
-            needCapture2 ? capturePageWithMetrics(env22, url2, { device }) : null
+            needCapture1 ? capturePageWithMetrics(env22, url1, { device, fullPage }) : null,
+            needCapture2 ? capturePageWithMetrics(env22, url2, { device, fullPage }) : null
           ]);
           let analysis1, analysis2, id1, id2;
           if (cached1) {
@@ -477,7 +478,9 @@ export default {
             scoreDiff: Math.abs(score1 - score2),
             insights,
             stealThis,
-            abTestPrediction
+            abTestPrediction,
+            device,
+            fullPage
           };
         })(), CONFIG.COMPARE_TOTAL_TIMEOUT_MS, "Compare operation");
         return Response.json(compareResult, { headers: corsHeaders });
@@ -554,8 +557,8 @@ export default {
             const formattedRoast = formatRoast(analysis, targetUrl);
             ctx.waitUntil(
               env22.DB.prepare(`
-                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, industry)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(
                 roastId,
                 targetUrl,
@@ -570,6 +573,9 @@ export default {
                 formattedRoast,
                 JSON.stringify(analysis.quickWins),
                 clientCountry,
+                JSON.stringify(pageData.seo),
+                JSON.stringify(pageData.performance),
+                JSON.stringify(heatmap),
                 analysis.industry || "other"
               ).run()
             );
@@ -784,10 +790,13 @@ data: ${JSON.stringify(data)}
       return Response.json(roasts.results, { headers: corsHeaders });
     }
     if (url.pathname === "/api/gallery" && request.method === "GET") {
+      const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
+      const perPage = 24;
+      const offset = (page - 1) * perPage;
       const roasts = await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
-        FROM roasts ORDER BY created_at DESC LIMIT 12
-      `).all();
+        FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
+      `).bind(perPage, offset).all();
       const results = roasts.results.map((roast) => ({
         ...roast,
         screenshotUrl: `/api/screenshot/${roast.id}`,
@@ -2823,7 +2832,9 @@ data: ${JSON.stringify(data)}
         }
         if (roasts.results) {
           for (const roast of roasts.results) {
-            const lastmod = roast.created_at ? (/* @__PURE__ */ new Date(roast.created_at + "Z")).toISOString().split("T")[0] : now;
+            const created = roast.created_at || now;
+            const hasZ = /Z$/.test(created);
+            const lastmod = (/* @__PURE__ */ new Date(hasZ ? created : (created + "Z"))).toISOString().split("T")[0];
             xml += `
   <url>
     <loc>${BASE_URL_SM}/roast/${roast.id}</loc>

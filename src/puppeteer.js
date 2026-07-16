@@ -72,8 +72,8 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           const id = input.getAttribute("id");
           const hasLabel = id ? !!document.querySelector(`label[for="${id}"]`) : false;
           const hasAriaLabel = !!input.getAttribute("aria-label") || !!input.getAttribute("aria-labelledby");
-          const hasPlaceholder = !!input.getAttribute("placeholder");
-          if (!hasLabel && !hasAriaLabel && !hasPlaceholder) unlabeled++;
+          // Do NOT treat placeholder as a label; placeholders are not accessible names.
+          if (!hasLabel && !hasAriaLabel) unlabeled++;
         });
         a11y.checks.push({ name: "Form labels", pass: unlabeled === 0, detail: unlabeled === 0 ? "All inputs labeled" : `${unlabeled} inputs without labels` });
         if (unlabeled > 0) {
