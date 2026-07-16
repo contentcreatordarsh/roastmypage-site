@@ -5,7 +5,8 @@ import {
   normalizeUrl,
   isUrlSafeForFetching,
   isValidRoastId,
-  sanitizeUrl
+  sanitizeUrl,
+  hashUrl
 } from "../src/utils.js";
 
 test("isValidUrl accepts http and https", () => {
@@ -38,4 +39,13 @@ test("isValidRoastId accepts 8-char hex ids", () => {
   assert.equal(isValidRoastId("a1b2c3d4"), true);
   assert.equal(isValidRoastId("short"), false);
   assert.equal(isValidRoastId("zzzzzzzz"), false);
+});
+
+test("hashUrl includes device/full marker", async () => {
+  const h1 = await hashUrl("https://example.com", "desktop");
+  const h2 = await hashUrl("https://example.com", "desktop-full");
+  const h3 = await hashUrl("https://example.com", "mobile");
+  assert.notEqual(h1, h2);
+  assert.notEqual(h1, h3);
+  assert.notEqual(h2, h3);
 });
