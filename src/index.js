@@ -24,6 +24,8 @@ import {
 
 import { capturePageWithMetrics } from './puppeteer.js';
 
+import { getComparisonMetrics, hasMetricPair } from './compare.js';
+
 import {
     parseMarkdownResponse, ensureLlamaLicenseAgreed, analyzeWithVisionAndHeatmap, 
     formatRoast, generateBreakdownFromScore, ensureScoreBreakdowns, 
@@ -280,6 +282,8 @@ export default {
           }
           const pageData1 = page1 || { seo: cached1?.seo, performance: cached1?.performance, screenshot: null };
           const pageData2 = page2 || { seo: cached2?.seo, performance: cached2?.performance, screenshot: null };
+          const metrics1 = getComparisonMetrics(pageData1);
+          const metrics2 = getComparisonMetrics(pageData2);
           const score1 = analysis1.analysis.overallScore;
           const score2 = analysis2.analysis.overallScore;
           const winner = score1 > score2 ? "page1" : score2 > score1 ? "page2" : "tie";
@@ -324,29 +328,29 @@ export default {
           if (page2Strengths.length > 0) {
             insights.push(`\u{1F4AA} ${url2Host} excels in: ${page2Strengths.join(", ")}`);
           }
-          const seo1 = pageData1.seo.score;
-          const seo2 = pageData2.seo.score;
-          if (Math.abs(seo1 - seo2) >= 5) {
+          const seo1 = metrics1.seoScore;
+          const seo2 = metrics2.seoScore;
+          if (hasMetricPair(metrics1, metrics2, "seoScore") && Math.abs(seo1 - seo2) >= 5) {
             const betterSeo = seo1 > seo2 ? url1Host : url2Host;
             const worseSeo = seo1 > seo2 ? url2Host : url1Host;
             insights.push(`\u{1F50D} ${betterSeo} has stronger SEO (${Math.max(seo1, seo2)}/100 vs ${Math.min(seo1, seo2)}/100)`);
           }
-          if (pageData1.seo.metaDescription?.status === "missing" && pageData2.seo.metaDescription?.status !== "missing") {
+          if (metrics1.hasSeo && metrics2.hasSeo && metrics1.metaDescriptionStatus === "missing" && metrics2.metaDescriptionStatus !== "missing") {
             insights.push(`\u{1F4DD} ${url1Host} is missing meta description - ${url2Host} has this covered`);
-          } else if (pageData2.seo.metaDescription?.status === "missing" && pageData1.seo.metaDescription?.status !== "missing") {
+          } else if (metrics1.hasSeo && metrics2.hasSeo && metrics2.metaDescriptionStatus === "missing" && metrics1.metaDescriptionStatus !== "missing") {
             insights.push(`\u{1F4DD} ${url2Host} is missing meta description - ${url1Host} has this covered`);
           }
-          const noAlt1 = pageData1.seo.imgWithoutAlt || 0;
-          const noAlt2 = pageData2.seo.imgWithoutAlt || 0;
-          if (noAlt1 > noAlt2 + 5) {
+          const noAlt1 = metrics1.imgWithoutAlt;
+          const noAlt2 = metrics2.imgWithoutAlt;
+          if (hasMetricPair(metrics1, metrics2, "imgWithoutAlt") && noAlt1 > noAlt2 + 5) {
             insights.push(`\u{1F5BC}\uFE0F ${url1Host} has ${noAlt1} images without alt text vs ${url2Host}'s ${noAlt2} - accessibility issue`);
-          } else if (noAlt2 > noAlt1 + 5) {
+          } else if (hasMetricPair(metrics1, metrics2, "imgWithoutAlt") && noAlt2 > noAlt1 + 5) {
             insights.push(`\u{1F5BC}\uFE0F ${url2Host} has ${noAlt2} images without alt text vs ${url1Host}'s ${noAlt1} - accessibility issue`);
           }
-          const load1 = pageData1.performance.loadTime;
-          const load2 = pageData2.performance.loadTime;
-          const loadDiff = Math.abs(load1 - load2);
-          if (loadDiff >= 500) {
+          const load1 = metrics1.loadTime;
+          const load2 = metrics2.loadTime;
+          const loadDiff = hasMetricPair(metrics1, metrics2, "loadTime") ? Math.abs(load1 - load2) : null;
+          if (loadDiff !== null && loadDiff >= 500) {
             const faster = load1 < load2 ? url1Host : url2Host;
             const slower = load1 < load2 ? url2Host : url1Host;
             const fasterTime = Math.min(load1, load2) / 1e3;
@@ -356,15 +360,15 @@ export default {
               insights.push(`\u{1F40C} ${slower}'s ${slowerTime.toFixed(1)}s load time may hurt conversions - aim for under 3s`);
             }
           }
-          const res1 = pageData1.performance.resourceCount || 0;
-          const res2 = pageData2.performance.resourceCount || 0;
-          if (Math.abs(res1 - res2) >= 20) {
+          const res1 = metrics1.resourceCount;
+          const res2 = metrics2.resourceCount;
+          if (hasMetricPair(metrics1, metrics2, "resourceCount") && Math.abs(res1 - res2) >= 20) {
             const lighter = res1 < res2 ? url1Host : url2Host;
             insights.push(`\u{1F4E6} ${lighter} is lighter with ${Math.min(res1, res2)} resources vs ${Math.max(res1, res2)}`);
           }
-          const ttfb1 = pageData1.performance.ttfb || 0;
-          const ttfb2 = pageData2.performance.ttfb || 0;
-          if (Math.abs(ttfb1 - ttfb2) >= 200) {
+          const ttfb1 = metrics1.ttfb;
+          const ttfb2 = metrics2.ttfb;
+          if (hasMetricPair(metrics1, metrics2, "ttfb") && Math.abs(ttfb1 - ttfb2) >= 200) {
             const fasterServer = ttfb1 < ttfb2 ? url1Host : url2Host;
             insights.push(`\u{1F5A5}\uFE0F ${fasterServer} has faster server response (TTFB: ${Math.min(ttfb1, ttfb2)}ms vs ${Math.max(ttfb1, ttfb2)}ms)`);
           }
@@ -434,12 +438,16 @@ export default {
             weightedScore1 += (analysis1.analysis.scores[cat] || 5) * w;
             weightedScore2 += (analysis2.analysis.scores[cat] || 5) * w;
           }
-          weightedScore1 += pageData1.seo.score / 10 * 0.05;
-          weightedScore2 += pageData2.seo.score / 10 * 0.05;
-          const speedScore1 = Math.max(0, 10 - pageData1.performance.loadTime / 1e3);
-          const speedScore2 = Math.max(0, 10 - pageData2.performance.loadTime / 1e3);
-          weightedScore1 += speedScore1 * 0.05;
-          weightedScore2 += speedScore2 * 0.05;
+          if (hasMetricPair(metrics1, metrics2, "seoScore")) {
+            weightedScore1 += seo1 / 10 * 0.05;
+            weightedScore2 += seo2 / 10 * 0.05;
+          }
+          if (hasMetricPair(metrics1, metrics2, "loadTime")) {
+            const speedScore1 = Math.max(0, 10 - load1 / 1e3);
+            const speedScore2 = Math.max(0, 10 - load2 / 1e3);
+            weightedScore1 += speedScore1 * 0.05;
+            weightedScore2 += speedScore2 * 0.05;
+          }
           const total = weightedScore1 + weightedScore2;
           const prob1 = total > 0 ? weightedScore1 / total * 100 : 50;
           const prob2 = total > 0 ? weightedScore2 / total * 100 : 50;
