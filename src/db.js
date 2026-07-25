@@ -114,6 +114,10 @@ async function getCachedRoast(env22, urlHash, url) {
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
   `).bind(urlHash, cacheExpiry.toISOString()).first();
   if (!cached) return null;
+  // Self-heal: a legacy cached roast missing SEO/performance data renders blank "-"
+  // cards (and can break Compare). Treat it as a cache miss so it's re-captured with
+  // complete data instead of serving an incomplete result.
+  if (!cached.seo_data || !cached.performance_data) return null;
   let quickWins = [];
   try {
     quickWins = cached.quick_wins ? JSON.parse(cached.quick_wins) : [];
