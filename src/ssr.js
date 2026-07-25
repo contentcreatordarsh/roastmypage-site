@@ -2,7 +2,7 @@ import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
 import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
 
 function generateNotFoundPage(baseUrl) {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#000;color:#e5e7eb;font-family:system-ui,sans-serif}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#FF6B35] hover:bg-[#E8552D] text-white font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#0A0908;color:#F5F0E8;font-family:'DM Sans',system-ui,sans-serif}h1{font-family:'Syne',system-ui,sans-serif;letter-spacing:-0.02em}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#E85D04] hover:bg-[#FF6B1A] text-[#0A0908] font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
 }
 var PRODUCTION_ORIGINS = [
   "https://roastmypage.site",
@@ -80,25 +80,41 @@ export function renderRoastPage(params) {
 <!-- Canonical -->
 <link rel="canonical" href="${pageUrl}">
 
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"><\/script>
 <style>
-  body { background: #000; color: #e5e7eb; font-family: system-ui, -apple-system, sans-serif; }
-  .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; }
-  .score-ring { width: 160px; height: 160px; border-radius: 50%; border: 8px solid ${scoreColor}; display: flex; align-items: center; justify-content: center; flex-direction: column; background: rgba(255,255,255,0.03); }
-  .cat-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.06); overflow: hidden; }
-  .cat-fill { height: 100%; border-radius: 4px; transition: width 0.7s ease; }
-  .tab-btn { padding: 8px 16px; border-radius: 8px; font-size: 14px; color: #9ca3af; cursor: pointer; transition: all 0.2s; background: rgba(255,255,255,0.03); border: 1px solid transparent; }
-  .tab-btn:hover { color: #e5e7eb; background: rgba(255,255,255,0.06); }
-  .tab-btn.active { color: #fff; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }
+  :root { --ink: #0A0908; --cream: #F5F0E8; --ember: #E85D04; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--ink); color: var(--cream); font-family: 'DM Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body::before { content:''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(232,93,4,0.12) 0%, transparent 55%),
+      radial-gradient(ellipse 50% 35% at 100% 30%, rgba(232,93,4,0.05) 0%, transparent 50%),
+      linear-gradient(180deg, #0A0908 0%, #12100E 55%, #0A0908 100%); }
+  body > * { position: relative; z-index: 1; }
+  h1, h2, h3, .font-display { font-family: 'Syne', system-ui, sans-serif; letter-spacing: -0.02em; }
+  ::selection { background: rgba(232,93,4,0.32); color: #FFF7EF; }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px rgba(232,93,4,0.75); border-radius: 10px; }
+  .card { background: rgba(245,240,232,0.035); border: 1px solid rgba(245,240,232,0.08); border-radius: 16px; }
+  .score-ring { width: 160px; height: 160px; border-radius: 50%; border: 8px solid ${scoreColor}; display: flex; align-items: center; justify-content: center; flex-direction: column; background: rgba(245,240,232,0.03); }
+  .cat-bar { height: 8px; border-radius: 4px; background: rgba(245,240,232,0.06); overflow: hidden; }
+  .cat-fill { height: 100%; border-radius: 4px; transition: width 0.7s cubic-bezier(0.22,1,0.36,1); }
+  .tab-btn { padding: 8px 16px; border-radius: 8px; font-size: 14px; color: rgba(245,240,232,0.5); cursor: pointer; transition: all 0.2s; background: rgba(245,240,232,0.03); border: 1px solid transparent; }
+  .tab-btn:hover { color: var(--cream); background: rgba(245,240,232,0.06); }
+  .tab-btn.active { color: var(--ink); background: var(--ember); border-color: transparent; font-weight: 600; }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
   .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .expandable { cursor: pointer; transition: all 0.2s; }
-  .expandable:hover { background: rgba(255,255,255,0.05); }
-  .expandable .expand-icon { transition: transform 0.2s; font-size: 10px; color: #6b7280; }
+  .expandable:hover { background: rgba(245,240,232,0.05); }
+  .expandable .expand-icon { transition: transform 0.2s; font-size: 10px; color: rgba(245,240,232,0.4); }
   .expandable.open .expand-icon { transform: rotate(90deg); }
   .expand-detail { max-height: 0; overflow: hidden; transition: max-height 0.3s ease, opacity 0.2s ease; opacity: 0; }
   .expandable.open .expand-detail { max-height: 500px; opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
 </style>
 </head>
 <body class="min-h-screen">
@@ -649,12 +665,25 @@ export function renderGalleryPage(params) {
 ${page > 1 ? `<link rel="prev" href="${BASE_URL}/gallery${page > 2 ? `?page=${page - 1}` : ""}">` : ""}
 ${page < totalPages ? `<link rel="next" href="${BASE_URL}/gallery?page=${page + 1}">` : ""}
 
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"><\/script>
 <style>
-  body { background: #000; color: #e5e7eb; font-family: system-ui, -apple-system, sans-serif; }
-  .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; }
-  .gallery-card { transition: all 0.3s ease; }
-  .gallery-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.12); box-shadow: 0 20px 40px -12px rgba(0,0,0,0.5); }
+  :root { --ink:#0A0908; --cream:#F5F0E8; --ember:#E85D04; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--ink); color: var(--cream); font-family:'DM Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  body::before { content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background: radial-gradient(ellipse 80% 45% at 50% -10%, rgba(232,93,4,0.10) 0%, transparent 55%), linear-gradient(180deg,#0A0908 0%,#12100E 60%,#0A0908 100%); }
+  body > * { position: relative; z-index: 1; }
+  h1, h2, h3 { font-family:'Syne',system-ui,sans-serif; letter-spacing:-0.02em; }
+  ::selection { background: rgba(232,93,4,0.32); color:#FFF7EF; }
+  a:focus-visible, button:focus-visible { outline:none; box-shadow:0 0 0 2px var(--ink),0 0 0 4px rgba(232,93,4,0.75); border-radius:10px; }
+  .card { background: rgba(245,240,232,0.035); border:1px solid rgba(245,240,232,0.08); border-radius:16px; }
+  .gallery-card { transition: all 0.3s cubic-bezier(0.22,1,0.36,1); }
+  .gallery-card:hover { transform: translateY(-4px); border-color: rgba(232,93,4,0.35); box-shadow: 0 20px 44px -14px rgba(232,93,4,0.28); }
+  @media (prefers-reduced-motion: reduce){ *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;} }
 </style>
 </head>
 <body class="min-h-screen">

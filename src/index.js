@@ -1,13 +1,15 @@
 import { 
     CONFIG, VIEWPORTS, POPULAR_DOMAINS, RUBRIC_CRITERIA, 
-    INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS 
+    INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS,
+    API_V1_LIMITS
 } from './config.js';
 
 import {
     generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, 
     hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, 
     fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, 
-    sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getAllowedOrigins, getSecurityHeaders
+    sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, secondsUntilMidnightUTC,
+    getAllowedOrigins, getSecurityHeaders
 } from './utils.js';
 
 import {
@@ -17,10 +19,12 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    incrementApiV1Counters, apiV1RateLimitHeaders
+    consumeApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
+
+import { getComparisonMetrics, hasMetricPair } from './compare.js';
 
 import {
     parseMarkdownResponse, ensureLlamaLicenseAgreed, analyzeWithVisionAndHeatmap, 
@@ -75,7 +79,7 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
@@ -217,7 +221,7 @@ export default {
           );
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const fullPage = body.fullPage === true;
@@ -278,6 +282,8 @@ export default {
           }
           const pageData1 = page1 || { seo: cached1?.seo, performance: cached1?.performance, screenshot: null };
           const pageData2 = page2 || { seo: cached2?.seo, performance: cached2?.performance, screenshot: null };
+          const metrics1 = getComparisonMetrics(pageData1);
+          const metrics2 = getComparisonMetrics(pageData2);
           const score1 = analysis1.analysis.overallScore;
           const score2 = analysis2.analysis.overallScore;
           const winner = score1 > score2 ? "page1" : score2 > score1 ? "page2" : "tie";
@@ -322,29 +328,29 @@ export default {
           if (page2Strengths.length > 0) {
             insights.push(`\u{1F4AA} ${url2Host} excels in: ${page2Strengths.join(", ")}`);
           }
-          const seo1 = pageData1.seo.score;
-          const seo2 = pageData2.seo.score;
-          if (Math.abs(seo1 - seo2) >= 5) {
+          const seo1 = metrics1.seoScore;
+          const seo2 = metrics2.seoScore;
+          if (hasMetricPair(metrics1, metrics2, "seoScore") && Math.abs(seo1 - seo2) >= 5) {
             const betterSeo = seo1 > seo2 ? url1Host : url2Host;
             const worseSeo = seo1 > seo2 ? url2Host : url1Host;
             insights.push(`\u{1F50D} ${betterSeo} has stronger SEO (${Math.max(seo1, seo2)}/100 vs ${Math.min(seo1, seo2)}/100)`);
           }
-          if (pageData1.seo.metaDescription?.status === "missing" && pageData2.seo.metaDescription?.status !== "missing") {
+          if (metrics1.hasSeo && metrics2.hasSeo && metrics1.metaDescriptionStatus === "missing" && metrics2.metaDescriptionStatus !== "missing") {
             insights.push(`\u{1F4DD} ${url1Host} is missing meta description - ${url2Host} has this covered`);
-          } else if (pageData2.seo.metaDescription?.status === "missing" && pageData1.seo.metaDescription?.status !== "missing") {
+          } else if (metrics1.hasSeo && metrics2.hasSeo && metrics2.metaDescriptionStatus === "missing" && metrics1.metaDescriptionStatus !== "missing") {
             insights.push(`\u{1F4DD} ${url2Host} is missing meta description - ${url1Host} has this covered`);
           }
-          const noAlt1 = pageData1.seo.imgWithoutAlt || 0;
-          const noAlt2 = pageData2.seo.imgWithoutAlt || 0;
-          if (noAlt1 > noAlt2 + 5) {
+          const noAlt1 = metrics1.imgWithoutAlt;
+          const noAlt2 = metrics2.imgWithoutAlt;
+          if (hasMetricPair(metrics1, metrics2, "imgWithoutAlt") && noAlt1 > noAlt2 + 5) {
             insights.push(`\u{1F5BC}\uFE0F ${url1Host} has ${noAlt1} images without alt text vs ${url2Host}'s ${noAlt2} - accessibility issue`);
-          } else if (noAlt2 > noAlt1 + 5) {
+          } else if (hasMetricPair(metrics1, metrics2, "imgWithoutAlt") && noAlt2 > noAlt1 + 5) {
             insights.push(`\u{1F5BC}\uFE0F ${url2Host} has ${noAlt2} images without alt text vs ${url1Host}'s ${noAlt1} - accessibility issue`);
           }
-          const load1 = pageData1.performance.loadTime;
-          const load2 = pageData2.performance.loadTime;
-          const loadDiff = Math.abs(load1 - load2);
-          if (loadDiff >= 500) {
+          const load1 = metrics1.loadTime;
+          const load2 = metrics2.loadTime;
+          const loadDiff = hasMetricPair(metrics1, metrics2, "loadTime") ? Math.abs(load1 - load2) : null;
+          if (loadDiff !== null && loadDiff >= 500) {
             const faster = load1 < load2 ? url1Host : url2Host;
             const slower = load1 < load2 ? url2Host : url1Host;
             const fasterTime = Math.min(load1, load2) / 1e3;
@@ -354,15 +360,15 @@ export default {
               insights.push(`\u{1F40C} ${slower}'s ${slowerTime.toFixed(1)}s load time may hurt conversions - aim for under 3s`);
             }
           }
-          const res1 = pageData1.performance.resourceCount || 0;
-          const res2 = pageData2.performance.resourceCount || 0;
-          if (Math.abs(res1 - res2) >= 20) {
+          const res1 = metrics1.resourceCount;
+          const res2 = metrics2.resourceCount;
+          if (hasMetricPair(metrics1, metrics2, "resourceCount") && Math.abs(res1 - res2) >= 20) {
             const lighter = res1 < res2 ? url1Host : url2Host;
             insights.push(`\u{1F4E6} ${lighter} is lighter with ${Math.min(res1, res2)} resources vs ${Math.max(res1, res2)}`);
           }
-          const ttfb1 = pageData1.performance.ttfb || 0;
-          const ttfb2 = pageData2.performance.ttfb || 0;
-          if (Math.abs(ttfb1 - ttfb2) >= 200) {
+          const ttfb1 = metrics1.ttfb;
+          const ttfb2 = metrics2.ttfb;
+          if (hasMetricPair(metrics1, metrics2, "ttfb") && Math.abs(ttfb1 - ttfb2) >= 200) {
             const fasterServer = ttfb1 < ttfb2 ? url1Host : url2Host;
             insights.push(`\u{1F5A5}\uFE0F ${fasterServer} has faster server response (TTFB: ${Math.min(ttfb1, ttfb2)}ms vs ${Math.max(ttfb1, ttfb2)}ms)`);
           }
@@ -432,12 +438,16 @@ export default {
             weightedScore1 += (analysis1.analysis.scores[cat] || 5) * w;
             weightedScore2 += (analysis2.analysis.scores[cat] || 5) * w;
           }
-          weightedScore1 += pageData1.seo.score / 10 * 0.05;
-          weightedScore2 += pageData2.seo.score / 10 * 0.05;
-          const speedScore1 = Math.max(0, 10 - pageData1.performance.loadTime / 1e3);
-          const speedScore2 = Math.max(0, 10 - pageData2.performance.loadTime / 1e3);
-          weightedScore1 += speedScore1 * 0.05;
-          weightedScore2 += speedScore2 * 0.05;
+          if (hasMetricPair(metrics1, metrics2, "seoScore")) {
+            weightedScore1 += seo1 / 10 * 0.05;
+            weightedScore2 += seo2 / 10 * 0.05;
+          }
+          if (hasMetricPair(metrics1, metrics2, "loadTime")) {
+            const speedScore1 = Math.max(0, 10 - load1 / 1e3);
+            const speedScore2 = Math.max(0, 10 - load2 / 1e3);
+            weightedScore1 += speedScore1 * 0.05;
+            weightedScore2 += speedScore2 * 0.05;
+          }
           const total = weightedScore1 + weightedScore2;
           const prob1 = total > 0 ? weightedScore1 / total * 100 : 50;
           const prob2 = total > 0 ? weightedScore2 / total * 100 : 50;
@@ -513,7 +523,7 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const { urls, device = "desktop" } = body;
         if (!urls || !Array.isArray(urls) || urls.length === 0) {
@@ -623,7 +633,7 @@ export default {
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
@@ -893,7 +903,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: "Invalid vote" }, { status: 400, headers: corsHeaders });
         }
         const fbIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT);
+        const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const fbLimit = await checkOperationRateLimit(env22, fbIpHash, "feedback");
         if (!fbLimit.allowed) {
           return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
@@ -905,19 +915,6 @@ data: ${JSON.stringify(data)}
         const roastId = isValidRoastIdLoose(body.roastId) ? body.roastId : null;
         const feedbackUrl = body.url ? String(body.url).substring(0, 500) : null;
         const country = request.cf?.country || null;
-        await env22.DB.prepare(`CREATE TABLE IF NOT EXISTS feedback (
-          id TEXT PRIMARY KEY,
-          vote TEXT NOT NULL,
-          context TEXT,
-          reasons TEXT,
-          message TEXT,
-          email TEXT,
-          roast_id TEXT,
-          url TEXT,
-          ip_hash TEXT,
-          country TEXT,
-          created_at TEXT DEFAULT (datetime('now'))
-        )`).run();
         const id = generateId();
         await env22.DB.prepare(
           `INSERT INTO feedback (id, vote, context, reasons, message, email, roast_id, url, ip_hash, country) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -938,7 +935,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: "Please provide a valid email address" }, { status: 400, headers: corsHeaders });
         }
         const subIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT);
+        const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const subLimit = await checkOperationRateLimit(env22, subIpHash, "subscribe");
         if (!subLimit.allowed) {
           return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
@@ -2246,7 +2243,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         let targetDomain;
         let brandName;
@@ -2335,7 +2332,7 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         if (!body.url) {
           return Response.json({ error: "URL required" }, { status: 400, headers: corsHeaders });
@@ -2478,83 +2475,6 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Failed to fetch results" }, { status: 500, headers: corsHeaders });
       }
     }
-    const API_V1_LIMITS = {
-      PER_IP_DAILY: 5,
-      GLOBAL_DAILY: 50
-    };
-    function getApiDayKey() {
-      const now = /* @__PURE__ */ new Date();
-      return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
-    }
-    function secondsUntilMidnightUTC() {
-      const now = /* @__PURE__ */ new Date();
-      const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-      return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
-    }
-    async function checkApiV1RateLimits(env3, ipHash) {
-      const dayKey = getApiDayKey();
-      const ipKey = `apiv1:ip:${ipHash}:${dayKey}`;
-      const globalKey = `apiv1:global:${dayKey}`;
-      try {
-        const [ipCountStr, globalCountStr] = await Promise.all([
-          env3.CONFIG.get(ipKey),
-          env3.CONFIG.get(globalKey)
-        ]);
-        const ipCount = parseInt(ipCountStr || "0");
-        const globalCount = parseInt(globalCountStr || "0");
-        if (globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
-          return {
-            allowed: false,
-            ipCount,
-            globalCount,
-            error: "The API has reached its daily capacity of 50 roasts. Please try again tomorrow.",
-            errorType: "global_limit"
-          };
-        }
-        if (ipCount >= API_V1_LIMITS.PER_IP_DAILY) {
-          return {
-            allowed: false,
-            ipCount,
-            globalCount,
-            error: `You've reached the daily limit of ${API_V1_LIMITS.PER_IP_DAILY} roasts. Please try again tomorrow.`,
-            errorType: "ip_limit"
-          };
-        }
-        return { allowed: true, ipCount, globalCount };
-      } catch (error32) {
-        console.error("API v1 rate limit check failed:", error32);
-        return { allowed: false, ipCount: 0, globalCount: 0, error: "Rate limiting unavailable. Please try again later.", errorType: "global_limit" };
-      }
-    }
-    async function incrementApiV1Counters(env3, ipHash) {
-      const dayKey = getApiDayKey();
-      const ipKey = `apiv1:ip:${ipHash}:${dayKey}`;
-      const globalKey = `apiv1:global:${dayKey}`;
-      const ttl = secondsUntilMidnightUTC() + 3600;
-      try {
-        const [ipCountStr, globalCountStr] = await Promise.all([
-          env3.CONFIG.get(ipKey),
-          env3.CONFIG.get(globalKey)
-        ]);
-        await Promise.all([
-          env3.CONFIG.put(ipKey, String(parseInt(ipCountStr || "0") + 1), { expirationTtl: ttl }),
-          env3.CONFIG.put(globalKey, String(parseInt(globalCountStr || "0") + 1), { expirationTtl: ttl })
-        ]);
-      } catch (error32) {
-        console.error("API v1 counter increment failed:", error32);
-      }
-    }
-    function apiV1RateLimitHeaders(ipCount, globalCount) {
-      const resetAt = /* @__PURE__ */ new Date();
-      resetAt.setUTCHours(24, 0, 0, 0);
-      return {
-        "X-RateLimit-Limit": String(API_V1_LIMITS.PER_IP_DAILY),
-        "X-RateLimit-Remaining": String(Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount)),
-        "X-RateLimit-Reset": String(Math.floor(resetAt.getTime() / 1e3)),
-        "X-RateLimit-Global-Limit": String(API_V1_LIMITS.GLOBAL_DAILY),
-        "X-RateLimit-Global-Remaining": String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount))
-      };
-    }
     const apiV1CorsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -2567,14 +2487,10 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/v1/usage" && request.method === "GET") {
       const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-      const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
-      const dayKey = getApiDayKey();
-      const [ipCountStr, globalCountStr] = await Promise.all([
-        env22.CONFIG.get(`apiv1:ip:${ipHash}:${dayKey}`),
-        env22.CONFIG.get(`apiv1:global:${dayKey}`)
-      ]);
-      const ipCount = parseInt(ipCountStr || "0");
-      const globalCount = parseInt(globalCountStr || "0");
+      const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+      const usage = await checkApiV1RateLimits(env22, ipHash);
+      const ipCount = usage.ipCount;
+      const globalCount = usage.globalCount;
       const resetAt = /* @__PURE__ */ new Date();
       resetAt.setUTCHours(24, 0, 0, 0);
       return Response.json({
@@ -2596,7 +2512,7 @@ data: ${JSON.stringify(data)}
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT);
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const rateLimits = await checkApiV1RateLimits(env22, ipHash);
         if (!rateLimits.allowed) {
           const statusCode = rateLimits.errorType === "global_limit" ? 503 : 429;
@@ -2658,12 +2574,29 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
+        const quota = await consumeApiV1Quota(env22, ipHash);
+        if (!quota.allowed) {
+          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+          return Response.json({
+            success: false,
+            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
+            message: quota.error,
+            limits: {
+              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
+              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
+            }
+          }, {
+            status: statusCode,
+            headers: {
+              ...apiV1CorsHeaders,
+              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              "Retry-After": String(secondsUntilMidnightUTC())
+            }
+          });
+        }
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          await incrementApiV1Counters(env22, ipHash);
-          const updatedIp2 = rateLimits.ipCount + 1;
-          const updatedGlobal2 = rateLimits.globalCount + 1;
           return Response.json({
             success: true,
             cached: true,
@@ -2689,7 +2622,7 @@ data: ${JSON.stringify(data)}
           }, {
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(updatedIp2, updatedGlobal2),
+              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
               "X-Cache": "HIT"
             }
           });
@@ -2738,9 +2671,6 @@ data: ${JSON.stringify(data)}
             industry
           ).run()
         );
-        await incrementApiV1Counters(env22, ipHash);
-        const updatedIp = rateLimits.ipCount + 1;
-        const updatedGlobal = rateLimits.globalCount + 1;
         return Response.json({
           success: true,
           cached: false,
@@ -2769,7 +2699,7 @@ data: ${JSON.stringify(data)}
         }, {
           headers: {
             ...apiV1CorsHeaders,
-            ...apiV1RateLimitHeaders(updatedIp, updatedGlobal),
+            ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
             "X-Cache": "MISS"
           }
         });

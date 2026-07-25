@@ -1,5 +1,5 @@
 import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './config.js';
-import { hashIp, hashUrl, generateId, getApiDayKey, secondsUntilMidnightUTC } from './utils.js';
+import { getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
 
 async function checkGlobalRateLimit(env22) {
@@ -19,7 +19,7 @@ async function checkGlobalRateLimit(env22) {
     return { allowed: true };
   } catch (error32) {
     console.error("Global rate limit check failed:", error32);
-    return { allowed: true };
+    return { allowed: false, reason: "Rate limiting is temporarily unavailable. Please try again shortly." };
   }
 }
 async function trackBrowserUsage(env22, sessions2 = 1) {
@@ -157,69 +157,118 @@ async function getCachedRoast(env22, urlHash, url) {
   };
 }
 
-    async function checkApiV1RateLimits(env3, ipHash) {
-      const dayKey = getApiDayKey();
-      const ipKey = `apiv1:ip:${ipHash}:${dayKey}`;
-      const globalKey = `apiv1:global:${dayKey}`;
-      try {
-        const [ipCountStr, globalCountStr] = await Promise.all([
-          env3.CONFIG.get(ipKey),
-          env3.CONFIG.get(globalKey)
-        ]);
-        const ipCount = parseInt(ipCountStr || "0");
-        const globalCount = parseInt(globalCountStr || "0");
-        if (globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
-          return {
-            allowed: false,
-            ipCount,
-            globalCount,
-            error: "The API has reached its daily capacity of 50 roasts. Please try again tomorrow.",
-            errorType: "global_limit"
-          };
-        }
-        if (ipCount >= API_V1_LIMITS.PER_IP_DAILY) {
-          return {
-            allowed: false,
-            ipCount,
-            globalCount,
-            error: `You've reached the daily limit of ${API_V1_LIMITS.PER_IP_DAILY} roasts. Please try again tomorrow.`,
-            errorType: "ip_limit"
-          };
-        }
-        return { allowed: true, ipCount, globalCount };
-      } catch (error32) {
-        console.error("API v1 rate limit check failed:", error32);
-        return { allowed: false, ipCount: 0, globalCount: 0, error: "Rate limiting unavailable. Please try again later.", errorType: "global_limit" };
-      }
-    }
-    async function incrementApiV1Counters(env3, ipHash) {
-      const dayKey = getApiDayKey();
-      const ipKey = `apiv1:ip:${ipHash}:${dayKey}`;
-      const globalKey = `apiv1:global:${dayKey}`;
-      const ttl = secondsUntilMidnightUTC() + 3600;
-      try {
-        const [ipCountStr, globalCountStr] = await Promise.all([
-          env3.CONFIG.get(ipKey),
-          env3.CONFIG.get(globalKey)
-        ]);
-        await Promise.all([
-          env3.CONFIG.put(ipKey, String(parseInt(ipCountStr || "0") + 1), { expirationTtl: ttl }),
-          env3.CONFIG.put(globalKey, String(parseInt(globalCountStr || "0") + 1), { expirationTtl: ttl })
-        ]);
-      } catch (error32) {
-        console.error("API v1 counter increment failed:", error32);
-      }
-    }
-    function apiV1RateLimitHeaders(ipCount, globalCount) {
-      const resetAt = /* @__PURE__ */ new Date();
-      resetAt.setUTCHours(24, 0, 0, 0);
-      return {
-        "X-RateLimit-Limit": String(API_V1_LIMITS.PER_IP_DAILY),
-        "X-RateLimit-Remaining": String(Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount)),
-        "X-RateLimit-Reset": String(Math.floor(resetAt.getTime() / 1e3)),
-        "X-RateLimit-Global-Limit": String(API_V1_LIMITS.GLOBAL_DAILY),
-        "X-RateLimit-Global-Remaining": String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount))
-      };
-    }
+async function getApiV1Counts(env, ipHash) {
+  const dayKey = getApiDayKey();
+  const [ipRow, globalRow] = await Promise.all([
+    env.DB.prepare(
+      "SELECT request_count FROM api_v1_counters WHERE day_key = ? AND ip_hash = ?"
+    ).bind(dayKey, ipHash).first(),
+    env.DB.prepare(
+      "SELECT COALESCE(SUM(request_count), 0) AS request_count FROM api_v1_counters WHERE day_key = ?"
+    ).bind(dayKey).first()
+  ]);
+  return {
+    ipCount: Number(ipRow?.request_count || 0),
+    globalCount: Number(globalRow?.request_count || 0)
+  };
+}
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, incrementApiV1Counters, apiV1RateLimitHeaders };
+function deniedApiV1Result(ipCount, globalCount) {
+  if (globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
+    return {
+      allowed: false,
+      ipCount,
+      globalCount,
+      error: `The API has reached its daily capacity of ${API_V1_LIMITS.GLOBAL_DAILY} roasts. Please try again tomorrow.`,
+      errorType: "global_limit"
+    };
+  }
+  if (ipCount >= API_V1_LIMITS.PER_IP_DAILY) {
+    return {
+      allowed: false,
+      ipCount,
+      globalCount,
+      error: `You've reached the daily limit of ${API_V1_LIMITS.PER_IP_DAILY} roasts. Please try again tomorrow.`,
+      errorType: "ip_limit"
+    };
+  }
+  return { allowed: true, ipCount, globalCount };
+}
+
+async function checkApiV1RateLimits(env, ipHash) {
+  try {
+    const { ipCount, globalCount } = await getApiV1Counts(env, ipHash);
+    return deniedApiV1Result(ipCount, globalCount);
+  } catch (error) {
+    console.error("API v1 rate limit check failed:", error);
+    return {
+      allowed: false,
+      ipCount: 0,
+      globalCount: 0,
+      error: "Rate limiting unavailable. Please try again later.",
+      errorType: "global_limit"
+    };
+  }
+}
+
+async function consumeApiV1Quota(env, ipHash) {
+  const dayKey = getApiDayKey();
+  try {
+    // A single SQLite write serializes the per-IP increment and both limit checks.
+    // This avoids the KV read-modify-write race and the check/increment TOCTOU gap.
+    const reserved = await env.DB.prepare(`
+      INSERT INTO api_v1_counters (day_key, ip_hash, request_count, updated_at)
+      SELECT ?, ?, 1, datetime('now')
+      WHERE (
+        SELECT COALESCE(SUM(request_count), 0)
+        FROM api_v1_counters
+        WHERE day_key = ?
+      ) < ?
+      ON CONFLICT(day_key, ip_hash) DO UPDATE SET
+        request_count = api_v1_counters.request_count + 1,
+        updated_at = datetime('now')
+      WHERE api_v1_counters.request_count < ?
+        AND (
+          SELECT COALESCE(SUM(request_count), 0)
+          FROM api_v1_counters
+          WHERE day_key = ?
+        ) < ?
+      RETURNING request_count
+    `).bind(
+      dayKey,
+      ipHash,
+      dayKey,
+      API_V1_LIMITS.GLOBAL_DAILY,
+      API_V1_LIMITS.PER_IP_DAILY,
+      dayKey,
+      API_V1_LIMITS.GLOBAL_DAILY
+    ).first();
+
+    const { ipCount, globalCount } = await getApiV1Counts(env, ipHash);
+    if (!reserved) return deniedApiV1Result(ipCount, globalCount);
+    return { allowed: true, ipCount, globalCount };
+  } catch (error) {
+    console.error("API v1 quota reservation failed:", error);
+    return {
+      allowed: false,
+      ipCount: 0,
+      globalCount: 0,
+      error: "Rate limiting unavailable. Please try again later.",
+      errorType: "global_limit"
+    };
+  }
+}
+
+function apiV1RateLimitHeaders(ipCount, globalCount) {
+  const resetAt = /* @__PURE__ */ new Date();
+  resetAt.setUTCHours(24, 0, 0, 0);
+  return {
+    "X-RateLimit-Limit": String(API_V1_LIMITS.PER_IP_DAILY),
+    "X-RateLimit-Remaining": String(Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount)),
+    "X-RateLimit-Reset": String(Math.floor(resetAt.getTime() / 1e3)),
+    "X-RateLimit-Global-Limit": String(API_V1_LIMITS.GLOBAL_DAILY),
+    "X-RateLimit-Global-Remaining": String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount))
+  };
+}
+
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, apiV1RateLimitHeaders };
