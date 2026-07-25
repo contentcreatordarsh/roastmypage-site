@@ -71,6 +71,11 @@ const CONFIG = {
   // Reduced from 2500 — compact prompt needs less output
   AI_TIMEOUT_MS: 45e3,
   // 45s — give vision model a real chance (one shot, no fallback)
+  AI_MAX_ATTEMPTS: 3,
+  // #78 — total tries for the vision model when it returns a transient/busy error
+  AI_RETRY_BASE_MS: 500,
+  // #78 — exponential backoff base (500ms, 1000ms) between AI retries; kept small
+  // so retries stay well inside ROAST_TOTAL_TIMEOUT_MS. Timeouts are NOT retried.
   RADAR_TIMEOUT_MS: 5e3,
   // 5s timeout for Radar API calls
   ROAST_TOTAL_TIMEOUT_MS: 65e3,

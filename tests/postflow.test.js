@@ -1,0 +1,68 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { CONFIG } from "../src/config.js";
+import { checkOperationRateLimit, getCachedRoast } from "../src/db.js";
+
+// #22 — integration-style coverage for the POST roast/compare/batch path. These exercise
+// the real db.js logic against a minimal D1 stub (no network, no live worker), so the
+// per-IP throttle and the cache self-heal can't silently regress.
+//
+// Minimal D1 statement/DB stub: prepare().bind().run() / .first().
+// firstVal may be a value or a () => value factory (evaluated per .first() call).
+function makeStmt(firstVal) {
+  const stmt = {
+    bind: () => stmt,
+    run: async () => ({ success: true, meta: {} }),
+    first: async () => (typeof firstVal === "function" ? firstVal() : firstVal),
+    all: async () => ({ results: [] })
+  };
+  return stmt;
+}
+
+function mockDb(firstVal) {
+  return { prepare: () => makeStmt(firstVal) };
+}
+
+// --- checkOperationRateLimit: the per-IP D1 limiter guarding the roast/compare/batch POSTs ---
+
+test("checkOperationRateLimit allows a request under the per-operation limit", async () => {
+  const env = { DB: mockDb({ request_count: 1, window_start: new Date().toISOString() }) };
+  const result = await checkOperationRateLimit(env, "ip-hash", "roast");
+  assert.equal(result.allowed, true);
+  assert.equal(result.remaining, CONFIG.RATE_LIMIT_MAX_REQUESTS - 1);
+});
+
+test("checkOperationRateLimit blocks once the count exceeds the limit", async () => {
+  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_MAX_REQUESTS + 1, window_start: new Date().toISOString() }) };
+  const result = await checkOperationRateLimit(env, "ip-hash", "roast");
+  assert.equal(result.allowed, false);
+  assert.equal(result.remaining, 0);
+});
+
+test("checkOperationRateLimit applies the tighter batch limit for the batch operation", async () => {
+  // batch max (3) is stricter than roast max (30): a count just past the batch cap must be
+  // blocked even though the same count is fine for a plain roast — proves the op→limit map.
+  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_BATCH_MAX + 1, window_start: new Date().toISOString() }) };
+  const blocked = await checkOperationRateLimit(env, "ip-hash", "batch");
+  assert.equal(blocked.allowed, false);
+});
+
+// --- getCachedRoast: self-heal (#89) — never serve an incomplete cached roast ---
+
+test("getCachedRoast treats a row missing SEO data as a cache miss", async () => {
+  const env = { DB: mockDb({ id: "abc", url: "https://example.com", url_hash: "h", overall_score: 7, seo_data: null, performance_data: '{"loadTime":1000}' }) };
+  const result = await getCachedRoast(env, "h", "https://example.com");
+  assert.equal(result, null);
+});
+
+test("getCachedRoast treats a row missing performance data as a cache miss", async () => {
+  const env = { DB: mockDb({ id: "abc", url: "https://example.com", url_hash: "h", overall_score: 7, seo_data: '{"score":80}', performance_data: null }) };
+  const result = await getCachedRoast(env, "h", "https://example.com");
+  assert.equal(result, null);
+});
+
+test("getCachedRoast returns null on a genuine cache miss", async () => {
+  const env = { DB: mockDb(null) };
+  const result = await getCachedRoast(env, "h", "https://example.com");
+  assert.equal(result, null);
+});

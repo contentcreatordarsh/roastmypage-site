@@ -333,6 +333,18 @@ Respond with your analysis.`;
     throw new Error("Could not extract analysis from AI response");
   } catch (error32) {
     const errMsg = error32 instanceof Error ? error32.message : String(error32);
+    // #78 — The vision model is occasionally capacity-limited (CF AI "3040", 429/503,
+    // "overloaded"). Rather than immediately degrading to a generic fallback, retry a
+    // couple of times with exponential backoff; most blips clear within a second or two.
+    // Timeouts are deliberately NOT matched here — a retried 45s call would blow the
+    // outer ROAST_TOTAL_TIMEOUT_MS budget — so those fall straight through to fallback.
+    const isTransient = /capacity|overloaded|too many requests|rate.?limit|\b(429|500|502|503|504|3040)\b/i.test(errMsg) && !/timed? ?out|timeout/i.test(errMsg);
+    if (isTransient && attempt < CONFIG.AI_MAX_ATTEMPTS) {
+      const backoffMs = CONFIG.AI_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+      console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): ${errMsg} — retrying in ${backoffMs}ms`);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1);
+    }
     console.error(`AI analysis failed (attempt ${attempt}): ${errMsg}`, error32);
     return {
       analysis: { ...createFallbackAnalysis("", url), aiUnavailable: true },
