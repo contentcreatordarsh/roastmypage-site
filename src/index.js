@@ -803,8 +803,15 @@ data: ${JSON.stringify(data)}
       const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
       const perPage = 24;
       const offset = (page - 1) * perPage;
-      const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+      // #57 — optional industry filter for the homepage gallery. Validate against the
+      // known key set so the value can only ever be a fixed column filter (never user text).
+      const industryParam = url.searchParams.get("industry");
+      const industryFilter = industryParam && INDUSTRY_KEYS.includes(industryParam) ? industryParam : null;
+      const roasts = industryFilter ? await env22.DB.prepare(`
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
+        FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+      `).bind(industryFilter, perPage, offset).all() : await env22.DB.prepare(`
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
         FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(perPage, offset).all();
       const results = roasts.results.map((roast) => ({

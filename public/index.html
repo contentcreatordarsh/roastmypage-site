@@ -1136,6 +1136,8 @@
                 <p class="text-cream-300/45 text-[14px] mb-3">What others just put through the fire</p>
                 <a href="/gallery" class="text-[13px] text-accent-orange hover:text-[#FF6B1A] transition-colors">Browse full gallery →</a>
             </div>
+            <!-- #57 — industry filter chips (populated by renderGalleryFilters) -->
+            <div id="gallery-filters" class="flex flex-wrap justify-center gap-2 mb-8"></div>
             <div id="gallery-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 <!-- Gallery items loaded dynamically -->
             </div>
@@ -8472,19 +8474,64 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         // Gallery
         let _galleryPage = 1;
         let _galleryLoading = false;
+        let _galleryIndustry = ''; // #57 — active industry filter ('' = all)
+        const GALLERY_INDUSTRIES = [
+            { key: '', label: 'All', emoji: '✨' },
+            { key: 'saas', label: 'SaaS', emoji: '💻' },
+            { key: 'ecommerce', label: 'E-commerce', emoji: '🛒' },
+            { key: 'agency', label: 'Agency', emoji: '🎯' },
+            { key: 'fintech', label: 'Fintech', emoji: '💳' },
+            { key: 'health', label: 'Health', emoji: '🩺' },
+            { key: 'education', label: 'Education', emoji: '🎓' },
+            { key: 'media', label: 'Media', emoji: '📰' },
+            { key: 'startup', label: 'Startup', emoji: '🚀' },
+            { key: 'devtools', label: 'Dev Tools', emoji: '🛠️' },
+            { key: 'marketplace', label: 'Marketplace', emoji: '🏪' }
+        ];
+        function renderGalleryFilters() {
+            const box = document.getElementById('gallery-filters');
+            if (!box) return;
+            box.innerHTML = GALLERY_INDUSTRIES.map(i => {
+                const active = i.key === _galleryIndustry;
+                const cls = active
+                    ? 'bg-accent-orange text-white border-accent-orange'
+                    : 'border-white/[0.1] text-cream-300/60 hover:text-cream-50 hover:border-white/[0.25]';
+                return `<button type="button" data-industry="${i.key}" aria-pressed="${active}" onclick="setGalleryIndustry('${i.key}')" class="px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors ${cls}">${i.emoji} ${i.label}</button>`;
+            }).join('');
+        }
+        function setGalleryIndustry(key) {
+            if (key === _galleryIndustry || _galleryLoading) return;
+            _galleryIndustry = key;
+            _galleryPage = 1;
+            const grid = document.getElementById('gallery-grid');
+            if (grid) grid.innerHTML = '';
+            document.getElementById('gallery-empty')?.classList.add('hidden');
+            document.getElementById('gallery-load-more')?.classList.add('hidden');
+            const loading = document.getElementById('gallery-loading');
+            if (loading) { loading.textContent = 'Loading roasts…'; loading.classList.remove('hidden'); }
+            renderGalleryFilters();
+            loadGallery();
+        }
         async function loadGallery(next = false) {
             if (_galleryLoading) return;
             _galleryLoading = true;
             try {
-                const res = await fetch(`/api/gallery?page=${_galleryPage}`);
+                const qs = `page=${_galleryPage}` + (_galleryIndustry ? `&industry=${encodeURIComponent(_galleryIndustry)}` : '');
+                const res = await fetch(`/api/gallery?${qs}`);
                 const roasts = await res.json();
-                
+
                 document.getElementById('gallery-loading').classList.add('hidden');
-                
+
                 if (!roasts || roasts.length === 0) {
-                    if (_galleryPage === 1) document.getElementById('gallery-empty').classList.remove('hidden');
+                    if (_galleryPage === 1) {
+                        const emptyEl = document.getElementById('gallery-empty');
+                        emptyEl.textContent = _galleryIndustry ? 'No roasts in this category yet.' : 'No roasts yet. Be the first.';
+                        emptyEl.classList.remove('hidden');
+                    }
+                    _galleryLoading = false; // #57 — was missing; empty result froze the gallery
                     return;
                 }
+                document.getElementById('gallery-empty')?.classList.add('hidden');
 
                 const grid = document.getElementById('gallery-grid');
                 const html = roasts.map(roast => `
@@ -8898,6 +8945,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             }
             
             loadFeaturedRoasts();
+            renderGalleryFilters();
             loadGallery();
             loadFooterStats();
             loadAnalytics();
