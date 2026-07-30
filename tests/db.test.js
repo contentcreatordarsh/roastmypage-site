@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit } from "../src/db.js";
+import { checkGlobalRateLimit, getCachedRoast } from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -36,4 +36,49 @@ test("checkGlobalRateLimit increments an available hourly bucket", async () => {
   assert.equal(writes.length, 1);
   assert.equal(writes[0][1], "1");
   assert.deepEqual(writes[0][2], { expirationTtl: 7200 });
+});
+
+test("getCachedRoast can return legacy audit data for non-persisting callers", async () => {
+  const legacyRoast = {
+    id: "legacy-1",
+    url: "https://example.com/",
+    url_hash: "hash",
+    overall_score: 7,
+    hero_score: 7,
+    cta_score: 7,
+    trust_score: 7,
+    copy_score: 7,
+    design_score: 7,
+    roast_response: "Legacy roast",
+    quick_wins: "[]",
+    seo_data: null,
+    performance_data: null,
+    heatmap_data: null,
+    industry: "other"
+  };
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return {
+              first: async () => sql.includes("SELECT id, url") ? legacyRoast : { count: 1 }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  assert.equal(await getCachedRoast(env, "hash", legacyRoast.url), null);
+
+  const cached = await getCachedRoast(
+    env,
+    "hash",
+    legacyRoast.url,
+    { requireAuditData: false }
+  );
+  assert.equal(cached.id, "legacy-1");
+  assert.equal(cached.seo, null);
+  assert.equal(cached.performance, null);
 });
