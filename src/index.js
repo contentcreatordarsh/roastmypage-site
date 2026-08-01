@@ -3428,6 +3428,8 @@ data: ${JSON.stringify(data)}
              OR lower(url) LIKE ?
              OR lower(url) LIKE ?
              OR lower(url) LIKE ?
+             OR lower(url) LIKE ?
+             OR lower(url) LIKE ?
           LIMIT 100
         `).bind(
           `https://${hostname}/%`,
