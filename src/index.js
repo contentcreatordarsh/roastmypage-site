@@ -19,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, apiV1RateLimitHeaders, purgeExpiredRoasts
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -37,12 +37,18 @@ import { renderSvgToPng } from './render.js';
 import {
     generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, 
     scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, 
-    getImposterReason, generateThreatRecommendations
+    getImposterReason, generateThreatRecommendations, scanVisualBrandSimilarity
 } from './threats.js';
 
 import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
+
+import {
+    handleExtraRoutes, verifyTurnstile, authenticateApiKey, fireWebhook
+} from './routes/extras.js';
+
+import { sendEmail } from './mail.js';
 
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
@@ -67,6 +73,11 @@ export default {
         return Response.json({ error: "Forbidden: origin not allowed" }, { status: 403, headers: corsHeaders });
       }
     }
+    // #39/#84 — modular product routes (admin, keys, annotations, export, watchlist…)
+    {
+      const extra = await handleExtraRoutes(request, env22, ctx, { corsHeaders, origin });
+      if (extra) return extra;
+    }
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
       try {
@@ -85,12 +96,20 @@ export default {
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
+        const forceFresh = body.force === true || body.fresh === true;
         const targetUrl = sanitizeUrl(rawUrl);
         if (!targetUrl || !isValidUrl(targetUrl)) {
           return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
         }
         if (!isUrlSafeForFetching(targetUrl)) {
           return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+        }
+        // #27 — Cloudflare Turnstile when TURNSTILE_SECRET_KEY is configured
+        {
+          const captcha = await verifyTurnstile(env22, body.turnstileToken || body.cfTurnstileResponse, clientIp);
+          if (!captcha.ok) {
+            return Response.json({ error: captcha.error || "Captcha required" }, { status: 403, headers: corsHeaders });
+          }
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
         if (!rateLimit.allowed) {
@@ -100,11 +119,17 @@ export default {
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        if (!forceFresh) {
+          const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedResult) {
+            return Response.json({
+              ...cachedResult,
+              device: cachedResult.device || device,
+              fullPage: cachedResult.fullPage ?? fullPage
+            }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
         }
-        const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
+        const { result: roastResult, deduplicated, pending } = await deduplicatedRoast(urlHash, () => withTimeout(
           (async () => {
             await trackBrowserUsage(env22, 1);
             const roastId = generateId();
@@ -118,7 +143,11 @@ export default {
             const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
             const [_, analysisResult] = await Promise.all([
               env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage)
+              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, {
+                language: pageData.seo?.language,
+                hasVideo: pageData.seo?.hasVideo,
+                videoCount: pageData.seo?.videoCount
+              })
             ]);
             console.log(`[${Date.now() - startTime}ms] AI analysis complete`);
             const { analysis, heatmap } = analysisResult;
@@ -131,8 +160,8 @@ export default {
             const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, analysis.overallScore, industry, "overall") : null;
             ctx.waitUntil(
               env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
                 roastId,
                 targetUrl,
@@ -150,7 +179,9 @@ export default {
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(enhancedHeatmap),
-                industry
+                industry,
+                device,
+                fullPage ? 1 : 0
               ).run()
             );
             return {
@@ -183,7 +214,21 @@ export default {
           })(),
           CONFIG.ROAST_TOTAL_TIMEOUT_MS,
           "Roast operation"
-        ));
+        ), env22);
+        if (pending || !roastResult) {
+          const cachedAfter = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedAfter) {
+            return Response.json({
+              ...cachedAfter,
+              device: cachedAfter.device || device,
+              fullPage: cachedAfter.fullPage ?? fullPage
+            }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
+          return Response.json({
+            error: "This URL is already being analyzed. Please retry in a few seconds.",
+            retryAfter: 5
+          }, { status: 409, headers: { ...corsHeaders, "Retry-After": "5" } });
+        }
         console.log(`[${Date.now() - startTime}ms] Total time${deduplicated ? " (deduplicated)" : ""}`);
         return Response.json(roastResult, { headers: { ...corsHeaders, "X-Cache": deduplicated ? "DEDUP" : "MISS" } });
       } catch (error32) {
@@ -561,14 +606,18 @@ export default {
             const screenshotKey = `screenshots/${roastId}.jpg`;
             const [_, analysisResult] = await Promise.all([
               env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false)
+              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, {
+                language: pageData.seo?.language,
+                hasVideo: pageData.seo?.hasVideo,
+                videoCount: pageData.seo?.videoCount
+              })
             ]);
             const { analysis, heatmap } = analysisResult;
             const formattedRoast = formatRoast(analysis, targetUrl);
             ctx.waitUntil(
               env22.DB.prepare(`
-                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(
                 roastId,
                 targetUrl,
@@ -586,7 +635,9 @@ export default {
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(heatmap),
-                analysis.industry || "other"
+                analysis.industry || "other",
+                device,
+                0
               ).run()
             );
             results.push({
@@ -638,6 +689,7 @@ export default {
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
+        const forceFresh = body.force === true || body.fresh === true;
         const targetUrl = sanitizeUrl(body.url);
         if (!targetUrl || !isValidUrl(targetUrl)) {
           return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
@@ -653,9 +705,16 @@ export default {
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        if (!forceFresh) {
+          const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedResult) {
+            return Response.json({
+              ...cachedResult,
+              device: cachedResult.device || device,
+              fullPage: cachedResult.fullPage ?? fullPage,
+              cached: true
+            }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
         }
         if (inFlightRequests.has(urlHash)) {
           return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
@@ -689,7 +748,11 @@ data: ${JSON.stringify(data)}
                 await sendEvent("progress", { step: "upload", message: "Saving screenshot...", progress: 40 });
                 await env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } });
                 await sendEvent("progress", { step: "analyze", message: "AI analyzing your page...", progress: 50 });
-                const { analysis, heatmap } = await analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage);
+                const { analysis, heatmap } = await analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, {
+                  language: pageData.seo?.language,
+                  hasVideo: pageData.seo?.hasVideo,
+                  videoCount: pageData.seo?.videoCount
+                });
                 await sendEvent("progress", { step: "heatmap", message: "Generating attention heatmap...", progress: 75 });
                 const enhancedHeatmap = {
                   ...heatmap,
@@ -699,8 +762,8 @@ data: ${JSON.stringify(data)}
                 await sendEvent("progress", { step: "finalize", message: "Generating report...", progress: 90 });
                 const formattedRoast = formatRoast(analysis, targetUrl, brandName);
                 await env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
                   roastId,
                   targetUrl,
@@ -718,7 +781,9 @@ data: ${JSON.stringify(data)}
                   JSON.stringify(pageData.seo),
                   JSON.stringify(pageData.performance),
                   JSON.stringify(enhancedHeatmap),
-                  analysis.industry || "other"
+                  analysis.industry || "other",
+                  device,
+                  fullPage ? 1 : 0
                 ).run();
                 const result = {
                   id: roastId,
@@ -791,7 +856,12 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
       }
       const roastIndustry = roast.industry || "other";
-      return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
+      return Response.json({
+        ...roast,
+        device: roast.device || "desktop",
+        fullPage: roast.full_page === 1 || roast.full_page === true,
+        benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other
+      }, { headers: corsHeaders });
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
@@ -2295,12 +2365,15 @@ data: ${JSON.stringify(data)}
           scanSocialMediaImposters(brandName, targetDomain)
         ]);
         const registeredLookalikes = typosquats.filter((d) => d.registered);
+        // #52 — brand/title similarity on registered lookalikes
+        const visualMatches = await scanVisualBrandSimilarity(brandName, registeredLookalikes);
         const suspiciousCount = registeredLookalikes.filter((d) => d.risk === "high" || d.risk === "medium").length;
         const imposterCount = socialImposters.filter((i) => i.risk === "high" || i.risk === "medium").length;
         let threatScore = 100;
         threatScore -= registeredLookalikes.length * 2;
         threatScore -= suspiciousCount * 5;
         threatScore -= imposterCount * 8;
+        threatScore -= visualMatches.length * 6;
         threatScore -= (100 - securityGrade.score) * 0.2;
         threatScore = Math.max(0, Math.min(100, Math.round(threatScore)));
         let riskLevel = "low";
@@ -2324,7 +2397,11 @@ data: ${JSON.stringify(data)}
             impostersFound: socialImposters.filter((i) => i.risk !== "low").length,
             accounts: socialImposters
           },
-          recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters),
+          visualSimilarity: {
+            matches: visualMatches,
+            method: "title_og_brand_overlap"
+          },
+          recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters, visualMatches),
           scannedAt: (/* @__PURE__ */ new Date()).toISOString()
         }, { headers: corsHeaders });
       } catch (error32) {
@@ -2520,30 +2597,42 @@ data: ${JSON.stringify(data)}
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
-        const rateLimits = await checkApiV1RateLimits(env22, ipHash);
-        if (!rateLimits.allowed) {
-          const statusCode = rateLimits.errorType === "global_limit" ? 503 : 429;
+        // #24/#85 — optional API key unlocks higher daily limits
+        const apiKey = await authenticateApiKey(env22, request);
+        if (apiKey?.limited) {
           return Response.json({
             success: false,
-            error: rateLimits.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
-            message: rateLimits.error,
-            limits: {
-              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: rateLimits.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - rateLimits.ipCount) },
-              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: rateLimits.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - rateLimits.globalCount) }
-            },
-            resetsAt: (() => {
-              const d = /* @__PURE__ */ new Date();
-              d.setUTCHours(24, 0, 0, 0);
-              return d.toISOString();
-            })()
-          }, {
-            status: statusCode,
-            headers: {
-              ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(rateLimits.ipCount, rateLimits.globalCount),
-              "Retry-After": String(secondsUntilMidnightUTC())
-            }
-          });
+            error: "rate_limit_exceeded",
+            message: `API key daily limit of ${apiKey.daily_limit} reached.`
+          }, { status: 429, headers: apiV1CorsHeaders });
+        }
+        let quota = { allowed: true, ipCount: 0, globalCount: 0 };
+        if (!apiKey) {
+          const rateLimits = await checkApiV1RateLimits(env22, ipHash);
+          if (!rateLimits.allowed) {
+            const statusCode = rateLimits.errorType === "global_limit" ? 503 : 429;
+            return Response.json({
+              success: false,
+              error: rateLimits.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
+              message: rateLimits.error,
+              limits: {
+                perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: rateLimits.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - rateLimits.ipCount) },
+                global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: rateLimits.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - rateLimits.globalCount) }
+              },
+              resetsAt: (() => {
+                const d = /* @__PURE__ */ new Date();
+                d.setUTCHours(24, 0, 0, 0);
+                return d.toISOString();
+              })()
+            }, {
+              status: statusCode,
+              headers: {
+                ...apiV1CorsHeaders,
+                ...apiV1RateLimitHeaders(rateLimits.ipCount, rateLimits.globalCount),
+                "Retry-After": String(secondsUntilMidnightUTC())
+              }
+            });
+          }
         }
         const globalLimit = await checkGlobalRateLimit(env22);
         if (!globalLimit.allowed) {
@@ -2559,6 +2648,7 @@ data: ${JSON.stringify(data)}
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
+        const callbackUrl = typeof body.callbackUrl === "string" ? body.callbackUrl : null;
         if (!rawUrl || typeof rawUrl !== "string") {
           return Response.json({
             success: false,
@@ -2581,25 +2671,29 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
-        const quota = await consumeApiV1Quota(env22, ipHash);
-        if (!quota.allowed) {
-          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
-          return Response.json({
-            success: false,
-            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
-            message: quota.error,
-            limits: {
-              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
-              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
-            }
-          }, {
-            status: statusCode,
-            headers: {
-              ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
-              "Retry-After": String(secondsUntilMidnightUTC())
-            }
-          });
+        if (!apiKey) {
+          quota = await consumeApiV1Quota(env22, ipHash);
+          if (!quota.allowed) {
+            const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+            return Response.json({
+              success: false,
+              error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
+              message: quota.error,
+              limits: {
+                perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
+                global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
+              }
+            }, {
+              status: statusCode,
+              headers: {
+                ...apiV1CorsHeaders,
+                ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+                "Retry-After": String(secondsUntilMidnightUTC())
+              }
+            });
+          }
+        } else {
+          quota = { allowed: true, ipCount: apiKey.requests_today || 0, globalCount: 0 };
         }
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
@@ -2648,7 +2742,11 @@ data: ${JSON.stringify(data)}
         const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
         const [_, analysisResult] = await Promise.all([
           env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-          analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false)
+          analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, {
+            language: pageData.seo?.language,
+            hasVideo: pageData.seo?.hasVideo,
+            videoCount: pageData.seo?.videoCount
+          })
         ]);
         const { analysis, heatmap } = analysisResult;
         const formattedRoast = formatRoast(analysis, targetUrl);
@@ -2656,8 +2754,8 @@ data: ${JSON.stringify(data)}
         const enhancedHeatmap = { ...heatmap, foldLine: pageData.foldLinePercent || heatmap.foldLine };
         ctx.waitUntil(
           env22.DB.prepare(`
-            INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             roastId,
             targetUrl,
@@ -2675,10 +2773,12 @@ data: ${JSON.stringify(data)}
             JSON.stringify(pageData.seo),
             JSON.stringify(pageData.performance),
             JSON.stringify(enhancedHeatmap),
-            industry
+            industry,
+            device,
+            0
           ).run()
         );
-        return Response.json({
+        const payload = {
           success: true,
           cached: false,
           url: targetUrl,
@@ -2703,7 +2803,13 @@ data: ${JSON.stringify(data)}
           shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${roastId}`,
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           processingTime: Date.now() - startTime
-        }, {
+        };
+        // #31 — fire callback/webhook when provided
+        const hook = callbackUrl || apiKey?.webhook_url;
+        if (hook) {
+          ctx.waitUntil(fireWebhook(hook, { type: "roast.completed", data: payload }));
+        }
+        return Response.json(payload, {
           headers: {
             ...apiV1CorsHeaders,
             ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
@@ -2805,7 +2911,8 @@ data: ${JSON.stringify(data)}
       const roastId = url.pathname.split("/").pop();
       const roast = await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score,
-               roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, created_at
+               roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry,
+               device, full_page, created_at
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
       if (!roast) {
@@ -3367,10 +3474,101 @@ data: ${JSON.stringify(data)}
         return env22.ASSETS.fetch(new Request(indexUrl.toString(), request));
       }
     }
+    // #26 — privacy opt-out: purge all stored roasts + screenshots for a URL/domain
     if (env22.ASSETS) {
       return env22.ASSETS.fetch(request);
     }
     return new Response("Not Found", { status: 404 });
+  },
+
+  // #40/#48/#49/#79 — daily retention + schedules + watchlist digests
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        const result = await purgeExpiredRoasts(env, CONFIG.RETENTION_DAYS);
+        console.log(`[retention] purged ${result.deletedRoasts} roasts / ${result.deletedScreenshots} screenshots older than ${result.cutoff}`);
+      } catch (err) {
+        console.error("[retention] cleanup failed", err);
+      }
+      try {
+        const due = await env.DB.prepare(
+          "SELECT id, url, email FROM scheduled_roasts WHERE active = 1 AND (next_run_at IS NULL OR next_run_at <= datetime('now')) LIMIT 20"
+        ).all();
+        for (const row of due.results || []) {
+          if (row.email) {
+            await sendEmail(env, {
+              to: row.email,
+              subject: "Scheduled re-roast reminder",
+              html: `<p>Time to re-roast <a href="${row.url}">${row.url}</a>.</p>`,
+              text: `Time to re-roast ${row.url}`
+            });
+          }
+          const next = new Date(Date.now() + 7 * 864e5).toISOString();
+          await env.DB.prepare(
+            "UPDATE scheduled_roasts SET last_run_at = datetime('now'), next_run_at = ? WHERE id = ?"
+          ).bind(next, row.id).run();
+        }
+      } catch (err) {
+        console.error("[schedule] failed", err);
+      }
+      try {
+        // #49 — watchlist score-change alerts
+        const watched = await env.DB.prepare(
+          "SELECT id, url, url_hash, email, webhook_url, last_score FROM watchlist WHERE notify_on_change = 1 LIMIT 40"
+        ).all();
+        for (const row of watched.results || []) {
+          const latest = await env.DB.prepare(
+            "SELECT id, overall_score FROM roasts WHERE url_hash = ? OR lower(url) = lower(?) ORDER BY created_at DESC LIMIT 1"
+          ).bind(row.url_hash || "", row.url).first();
+          if (!latest) continue;
+          const prev = row.last_score;
+          const next = latest.overall_score;
+          if (prev != null && Number(prev) === Number(next)) continue;
+          const delta = prev == null ? null : Number(next) - Number(prev);
+          const shareUrl = `${env.BASE_URL || PRODUCTION_ORIGINS[0]}/roast/${latest.id}`;
+          if (row.webhook_url) {
+            await fireWebhook(row.webhook_url, {
+              type: "watchlist.score_change",
+              data: { url: row.url, scores: { overall: next }, previousScore: prev, delta, shareUrl }
+            });
+          }
+          if (row.email && delta != null) {
+            await sendEmail(env, {
+              to: row.email,
+              subject: `Watchlist alert: ${row.url} is now ${next}/10`,
+              html: `<p>${row.url} moved from <strong>${prev}</strong> to <strong>${next}</strong> (${delta >= 0 ? "+" : ""}${delta.toFixed(1)}).</p><p><a href="${shareUrl}">View roast</a></p>`,
+              text: `${row.url}: ${prev} → ${next}. ${shareUrl}`
+            });
+          }
+          await env.DB.prepare(
+            "UPDATE watchlist SET last_score = ?, last_roast_id = ? WHERE id = ?"
+          ).bind(next, latest.id, row.id).run();
+        }
+      } catch (err) {
+        console.error("[watchlist] failed", err);
+      }
+      try {
+        // #79 weekly digest to subscribers (best-effort when email configured)
+        if (env.RESEND_API_KEY) {
+          const stats = await env.DB.prepare(
+            "SELECT COUNT(*) as c, AVG(overall_score) as avg FROM roasts WHERE created_at > datetime('now','-7 day')"
+          ).first();
+          const subs = await env.DB.prepare(
+            "SELECT email FROM email_subscribers ORDER BY created_at DESC LIMIT 50"
+          ).all();
+          for (const s of subs.results || []) {
+            await sendEmail(env, {
+              to: s.email,
+              subject: "Weekly roast digest",
+              html: `<p>This week: <strong>${stats?.c || 0}</strong> roasts, avg score <strong>${Number(stats?.avg || 0).toFixed(1)}</strong>.</p>`,
+              text: `This week: ${stats?.c || 0} roasts, avg ${Number(stats?.avg || 0).toFixed(1)}`
+            });
+          }
+        }
+      } catch (err) {
+        console.error("[digest] failed", err);
+      }
+    })());
   }
 
 };

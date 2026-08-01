@@ -139,6 +139,7 @@ export function renderRoastPage(params) {
   <div class="text-center mb-8">
     <div class="inline-flex items-center gap-2 text-xs text-[#6e6e73] bg-white/[0.03] border border-white/[0.06] rounded-full px-4 py-1.5 mb-4">
       <span>Roasted on ${dateStr}</span>
+      ${roast.device ? `<span>${escapeHtml(String(roast.device).toUpperCase())}${roast.full_page ? " · FULL" : ""}</span>` : ""}
       ${roast.country && roast.country !== "XX" ? `<span>from ${roast.country}</span>` : ""}
     </div>
     <h1 class="text-2xl md:text-3xl font-bold mb-2">${escapeHtml(hostname)}</h1>
