@@ -118,7 +118,7 @@ export default {
             const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
             const [_, analysisResult] = await Promise.all([
               env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage)
+              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, { video: pageData.video })
             ]);
             console.log(`[${Date.now() - startTime}ms] AI analysis complete`);
             const { analysis, heatmap } = analysisResult;
@@ -172,6 +172,7 @@ export default {
               fullPage,
               seo: pageData.seo,
               performance: pageData.performance,
+              video: pageData.video || pageData.seo?.video || null,
               heatmap: enhancedHeatmap,
               pageDimensions: pageData.pageDimensions,
               industry,
@@ -561,7 +562,7 @@ export default {
             const screenshotKey = `screenshots/${roastId}.jpg`;
             const [_, analysisResult] = await Promise.all([
               env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false)
+              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, { video: pageData.video })
             ]);
             const { analysis, heatmap } = analysisResult;
             const formattedRoast = formatRoast(analysis, targetUrl);
@@ -689,13 +690,14 @@ data: ${JSON.stringify(data)}
                 await sendEvent("progress", { step: "upload", message: "Saving screenshot...", progress: 40 });
                 await env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } });
                 await sendEvent("progress", { step: "analyze", message: "AI analyzing your page...", progress: 50 });
-                const { analysis, heatmap } = await analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage);
+                const { analysis, heatmap } = await analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, { video: pageData.video });
                 await sendEvent("progress", { step: "heatmap", message: "Generating attention heatmap...", progress: 75 });
                 const enhancedHeatmap = {
                   ...heatmap,
                   foldLine: pageData.foldLinePercent || heatmap.foldLine
                 };
                 await sendEvent("heatmap", enhancedHeatmap);
+                if (pageData.video?.present) await sendEvent("video", pageData.video);
                 await sendEvent("progress", { step: "finalize", message: "Generating report...", progress: 90 });
                 const formattedRoast = formatRoast(analysis, targetUrl, brandName);
                 await env22.DB.prepare(`
@@ -739,6 +741,7 @@ data: ${JSON.stringify(data)}
                   fullPage,
                   seo: pageData.seo,
                   performance: pageData.performance,
+                  video: pageData.video || pageData.seo?.video || null,
                   heatmap: enhancedHeatmap,
                   pageDimensions: pageData.pageDimensions,
                   industry: analysis.industry || "other",
@@ -2648,7 +2651,7 @@ data: ${JSON.stringify(data)}
         const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
         const [_, analysisResult] = await Promise.all([
           env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-          analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false)
+          analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, { video: pageData.video })
         ]);
         const { analysis, heatmap } = analysisResult;
         const formattedRoast = formatRoast(analysis, targetUrl);
@@ -2698,6 +2701,7 @@ data: ${JSON.stringify(data)}
           benchmarks: analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
           seo: pageData.seo || null,
           performance: pageData.performance || null,
+          video: pageData.video || pageData.seo?.video || null,
           heatmap: enhancedHeatmap,
           screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${roastId}`,
           shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${roastId}`,
