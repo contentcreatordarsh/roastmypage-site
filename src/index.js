@@ -19,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -2519,6 +2519,7 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
+      let quotaReservationIpHash = null;
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
@@ -2604,10 +2605,11 @@ data: ${JSON.stringify(data)}
             }
           });
         }
+        quotaReservationIpHash = ipHash;
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          return Response.json({
+          const response = Response.json({
             success: true,
             cached: true,
             url: targetUrl,
@@ -2636,6 +2638,8 @@ data: ${JSON.stringify(data)}
               "X-Cache": "HIT"
             }
           });
+          quotaReservationIpHash = null;
+          return response;
         }
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
@@ -2681,7 +2685,7 @@ data: ${JSON.stringify(data)}
             industry
           ).run()
         );
-        return Response.json({
+        const response = Response.json({
           success: true,
           cached: false,
           url: targetUrl,
@@ -2713,6 +2717,8 @@ data: ${JSON.stringify(data)}
             "X-Cache": "MISS"
           }
         });
+        quotaReservationIpHash = null;
+        return response;
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         let message = "Something went wrong. Please try again.";
@@ -2735,6 +2741,10 @@ data: ${JSON.stringify(data)}
           status: statusCode,
           headers: apiV1CorsHeaders
         });
+      } finally {
+        if (quotaReservationIpHash) {
+          await releaseApiV1Quota(env22, quotaReservationIpHash);
+        }
       }
     }
     if (url.pathname === "/sitemap.xml" && request.method === "GET") {
