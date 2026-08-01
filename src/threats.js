@@ -193,16 +193,43 @@ async function checkSecurityHeaders(targetUrl) {
   else grade = "F";
   return { score, grade, headers, issues };
 }
+async function profileLooksReal(response, handle) {
+  // #17 — HEAD 200 on Twitter/IG is unreliable (login walls, soft 200s).
+  // Require a non-redirecting success and a final URL that still contains the handle.
+  if (!response) return false;
+  if (response.status === 404 || response.status === 410) return false;
+  if (response.status >= 300 && response.status < 400) return false;
+  if (!(response.ok || response.status === 200)) return false;
+  try {
+    const finalUrl = (response.url || "").toLowerCase();
+    if (!finalUrl) return true;
+    if (finalUrl.includes("/login") || finalUrl.includes("/i/flow") || finalUrl.includes("accounts/login")) {
+      return false;
+    }
+    return finalUrl.includes(String(handle).toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 async function scanSocialMediaImposters(brandName, domain22) {
   const imposters = [];
   const suspiciousHandles = generateSuspiciousHandles(brandName);
-  for (const handle of suspiciousHandles.slice(0, 15)) {
+  const brandClean = String(brandName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (const handle of suspiciousHandles.slice(0, 12)) {
+    // Skip near-identical official-looking handles without scam suffixes — too many FPs
+    const h = handle.toLowerCase();
+    const scammy = /(support|helpdesk|help|care|refund|verify|secure|official\d)/i.test(h);
+    if (!scammy && (h === brandClean || h === `real${brandClean}` || h === `the${brandClean}`)) {
+      continue;
+    }
     try {
-      const response = await fetch(`https://twitter.com/${handle}`, {
-        method: "HEAD",
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.0)" }
+      const response = await fetch(`https://x.com/${handle}`, {
+        method: "GET",
+        redirect: "follow",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.1)" }
       });
-      if (response.ok || response.status === 200) {
+      if (await profileLooksReal(response, handle)) {
         const risk = determineHandleRisk(handle, brandName);
         if (risk !== "low") {
           imposters.push({
@@ -211,20 +238,24 @@ async function scanSocialMediaImposters(brandName, domain22) {
             displayName: handle,
             risk,
             reason: getImposterReason(handle, brandName),
-            url: `https://twitter.com/${handle}`
+            url: `https://x.com/${handle}`,
+            confidence: scammy ? "high" : "medium"
           });
         }
       }
     } catch {
     }
   }
-  for (const handle of suspiciousHandles.slice(0, 10)) {
+  for (const handle of suspiciousHandles.slice(0, 8)) {
+    const h = handle.toLowerCase();
+    if (!/(support|help|official|verify|secure)/i.test(h)) continue;
     try {
       const response = await fetch(`https://www.instagram.com/${handle}/`, {
-        method: "HEAD",
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.0)" }
+        method: "GET",
+        redirect: "follow",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.1)" }
       });
-      if (response.ok) {
+      if (await profileLooksReal(response, handle)) {
         const risk = determineHandleRisk(handle, brandName);
         if (risk !== "low") {
           imposters.push({
@@ -233,7 +264,8 @@ async function scanSocialMediaImposters(brandName, domain22) {
             displayName: handle,
             risk,
             reason: getImposterReason(handle, brandName),
-            url: `https://instagram.com/${handle}`
+            url: `https://instagram.com/${handle}`,
+            confidence: "medium"
           });
         }
       }

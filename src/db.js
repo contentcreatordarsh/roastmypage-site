@@ -33,12 +33,36 @@ async function trackBrowserUsage(env22, sessions2 = 1) {
   }
 }
 var inFlightRequests = /* @__PURE__ */ new Map();
-async function deduplicatedRoast(urlHash, roastFn) {
+/**
+ * #41 Cross-isolate dedup: use KV lock so concurrent Workers don't double-roast.
+ * Falls back to in-memory Map when KV is unavailable.
+ */
+async function deduplicatedRoast(urlHash, roastFn, env = null) {
   const existing = inFlightRequests.get(urlHash);
   if (existing) {
-    console.log(`Deduplicating request for ${urlHash}`);
+    console.log(`Deduplicating request for ${urlHash} (memory)`);
     return { result: await existing, deduplicated: true };
   }
+
+  const lockKey = `inflight:${urlHash}`;
+  let kvLockHeld = false;
+  if (env?.CONFIG) {
+    try {
+      const locked = await env.CONFIG.get(lockKey);
+      if (locked) {
+        // Another isolate is roasting — wait briefly and treat as deduped miss
+        // so the client can retry / hit cache when ready.
+        console.log(`Deduplicating request for ${urlHash} (kv)`);
+        await new Promise((r) => setTimeout(r, 1500));
+        return { result: null, deduplicated: true, pending: true };
+      }
+      await env.CONFIG.put(lockKey, String(Date.now()), { expirationTtl: 90 });
+      kvLockHeld = true;
+    } catch (err) {
+      console.error("KV inflight lock failed", err);
+    }
+  }
+
   const promise = roastFn();
   inFlightRequests.set(urlHash, promise);
   try {
@@ -46,6 +70,9 @@ async function deduplicatedRoast(urlHash, roastFn) {
     return { result, deduplicated: false };
   } finally {
     inFlightRequests.delete(urlHash);
+    if (kvLockHeld && env?.CONFIG) {
+      try { await env.CONFIG.delete(lockKey); } catch { /* ignore */ }
+    }
   }
 }
 async function checkOperationRateLimit(env22, ipHash, operation) {

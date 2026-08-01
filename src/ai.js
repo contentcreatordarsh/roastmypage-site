@@ -178,9 +178,18 @@ async function ensureLlamaLicenseAgreed(env22) {
     console.log("Llama license agreement check failed (may already be agreed):", e);
   }
 }
-async function analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage = false, attempt = 1) {
+async function analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage = false, attempt = 1, options = {}) {
   try {
     await ensureLlamaLicenseAgreed(env22);
+    const lang = options.language ? String(options.language).slice(0, 16) : null;
+    const hasVideo = !!options.hasVideo;
+    const videoCount = Number(options.videoCount || 0) || 0;
+    const langNote = lang
+      ? `\nDetected page language: ${lang}. Write the roast, verdict, and quick wins in that language when it is not English.`
+      : "";
+    const videoNote = hasVideo
+      ? `\nThis page appears to include ${videoCount || "one or more"} video element(s). Comment on video placement, autoplay risk, and whether the hero uses video effectively.`
+      : "";
     const prompt = `Analyze this landing page screenshot as a conversion optimization expert. Rate each category 1-10 and CALIBRATE carefully using the full range:
 
 - 9-10: Exceptional, best-in-class execution (rare).
@@ -196,16 +205,20 @@ Industry options: saas, ecommerce, agency, fintech, health, education, media, st
 
 For each category give: score, main problem, suggested fix.
 Also provide: overall score, 3 quick wins, verdict sentence, industry classification.
+${langNote}${videoNote}
 
 Respond with your analysis.`;
     let response;
     const imageDataUri = `data:image/jpeg;base64,${screenshotBase64}`;
+    const systemLang = lang && !/^en/i.test(lang)
+      ? ` Prefer responding in language code "${lang}".`
+      : "";
     response = await withTimeout(
       env22.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", {
         messages: [
           {
             role: "system",
-            content: "You are a landing page conversion rate optimization expert. Analyze the screenshot and provide specific, actionable feedback."
+            content: "You are a landing page conversion rate optimization expert. Analyze the screenshot and provide specific, actionable feedback." + systemLang
           },
           {
             role: "user",
@@ -343,7 +356,7 @@ Respond with your analysis.`;
       const backoffMs = CONFIG.AI_RETRY_BASE_MS * Math.pow(2, attempt - 1);
       console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): ${errMsg} — retrying in ${backoffMs}ms`);
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
-      return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1);
+      return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1, options);
     }
     console.error(`AI analysis failed (attempt ${attempt}): ${errMsg}`, error32);
     return {

@@ -56,12 +56,15 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           issues: [],
           checks: []
         };
-        const hasLang = !!document.documentElement.getAttribute("lang");
-        a11y.checks.push({ name: "Language attribute", pass: hasLang, detail: hasLang ? "html[lang] is set" : "Missing lang on <html>" });
+        const langAttr = (document.documentElement.getAttribute("lang") || "").trim();
+        const hasLang = !!langAttr;
+        a11y.checks.push({ name: "Language attribute", pass: hasLang, detail: hasLang ? `html[lang]=${langAttr}` : "Missing lang on <html>" });
         if (!hasLang) {
           a11y.score -= 10;
           a11y.issues.push("Missing lang attribute on <html>");
         }
+        // #63 — detect embedded marketing video
+        const videoCount = document.querySelectorAll("video, iframe[src*='youtube'], iframe[src*='vimeo'], iframe[src*='wistia']").length;
         a11y.checks.push({ name: "Image alt text", pass: imgsWithoutAlt === 0, detail: imgsWithoutAlt === 0 ? "All images have alt text" : `${imgsWithoutAlt} images missing alt` });
         if (imgsWithoutAlt > 0) {
           a11y.score -= Math.min(imgsWithoutAlt * 3, 15);
@@ -124,7 +127,12 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           h1Count: h1Elements.length,
           h2Count,
           imgWithoutAlt: imgsWithoutAlt,
-          accessibility: a11y
+          accessibility: a11y,
+          // #62 multi-language signal for roast prompts / UI
+          language: langAttr || null,
+          // #63 video landing page signal
+          hasVideo: videoCount > 0,
+          videoCount
         };
       });
       let perfData = {
@@ -141,6 +149,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         },
         totalTransferSize: 0,
         fcp: null,
+        lcp: null,
         ttfb: 0
       };
       try {
@@ -148,6 +157,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           const perf = window.performance.getEntriesByType("navigation")[0];
           const resources = window.performance.getEntriesByType("resource") || [];
           const paint = window.performance.getEntriesByType("paint") || [];
+          const lcpEntries = window.performance.getEntriesByType("largest-contentful-paint") || [];
           const resourceBreakdown = {
             scripts: { count: 0, size: 0 },
             stylesheets: { count: 0, size: 0 },
@@ -176,6 +186,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           });
           const fcpEntry = paint.find((p) => p.name === "first-contentful-paint");
           const fcp = fcpEntry ? fcpEntry.startTime : null;
+          const lcp = lcpEntries.length ? lcpEntries[lcpEntries.length - 1].startTime : null;
           const totalTransferSize = resources.reduce((sum, r) => sum + (r.transferSize || 0), 0);
           return {
             domContentLoaded: perf?.domContentLoadedEventEnd || 0,
@@ -185,6 +196,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             resourceBreakdown,
             totalTransferSize,
             fcp,
+            lcp,
             ttfb: perf?.responseStart || 0
           };
         });
@@ -289,6 +301,17 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           perfScore -= 5;
         }
       }
+      // #53 — Core Web Vitals signals from browser performance timeline (not full Lighthouse)
+      if (perfData.lcp) {
+        if (perfData.lcp > 4e3) {
+          perfIssues.push("Poor Largest Contentful Paint (> 4s)");
+          perfScore -= 15;
+          perfRecommendations.push("Optimize hero media and defer non-critical scripts to improve LCP");
+        } else if (perfData.lcp > 2500) {
+          perfIssues.push("LCP needs improvement (> 2.5s)");
+          perfScore -= 5;
+        }
+      }
       if (perfData.ttfb > 800) {
         perfIssues.push("Slow server response (TTFB > 800ms)");
         perfScore -= 10;
@@ -337,6 +360,9 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         imgWithoutAlt: seoData.imgWithoutAlt,
         issues: seoIssues,
         accessibility: seoData.accessibility,
+        language: seoData.language || null,
+        hasVideo: !!seoData.hasVideo,
+        videoCount: seoData.videoCount || 0,
         radar: {
           ranking: radarInsights.ranking,
           geoDistribution: radarInsights.geoDistribution,
@@ -353,7 +379,13 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         totalTransferSize: perfData.totalTransferSize,
         resourceBreakdown: perfData.resourceBreakdown,
         fcp: perfData.fcp,
+        lcp: perfData.lcp,
         ttfb: perfData.ttfb,
+        coreWebVitals: {
+          fcp: perfData.fcp,
+          lcp: perfData.lcp,
+          ttfb: perfData.ttfb
+        },
         issues: perfIssues,
         recommendations: perfRecommendations
       };

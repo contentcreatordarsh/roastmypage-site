@@ -36,8 +36,9 @@ id = "a278379c19e0426298741337ed23a315"
 [vars]
 ENVIRONMENT = "development"
 BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
-CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
-CF_ZONE_TAG = "1147710735"
+# #28 — CF_ACCOUNT_TAG / CF_ZONE_TAG moved out of committed config.
+# Set via: wrangler secret put CF_ACCOUNT_TAG / CF_ZONE_TAG
+# (optional for Radar + URL Scanner features)
 
 # #40 — purge expired roasts/screenshots daily at 04:00 UTC
 [triggers]
@@ -79,8 +80,7 @@ id = "a0e0cee4c5e54235a12ee8dcc262f41a"
 [env.production.vars]
 ENVIRONMENT = "production"
 BASE_URL = "https://roastmypage.site"
-CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
-CF_ZONE_TAG = "1147710735"
+# #28 — set CF_ACCOUNT_TAG / CF_ZONE_TAG as secrets in production
 
 [env.production.triggers]
 crons = ["0 4 * * *"]
