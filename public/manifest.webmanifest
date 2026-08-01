@@ -1,0 +1,19 @@
+{
+  "name": "Roast My Landing Page",
+  "short_name": "RoastMyPage",
+  "description": "Free AI landing page analyzer — conversion scores, SEO, heatmaps, and benchmarks.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0A0908",
+  "theme_color": "#0A0908",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

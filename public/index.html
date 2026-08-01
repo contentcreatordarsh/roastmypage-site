@@ -11,6 +11,15 @@
     <link rel="canonical" href="https://roastmypage.site/">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E">
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0A0908">
+    <meta name="mobile-web-app-capable" content="yes">
+    <script>
+      try {
+        var _t = localStorage.getItem('theme');
+        if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
+      } catch (e) {}
+    </script>
     
     <!-- Open Graph / Social Share -->
     <meta property="og:type" content="website">
@@ -96,13 +105,62 @@
             box-sizing: border-box;
         }
         
+        :root {
+            --rmlp-bg: #0A0908;
+            --rmlp-text: #F5F0E8;
+            --rmlp-muted: rgba(212, 200, 184, 0.65);
+            --rmlp-surface: rgba(245, 240, 232, 0.035);
+            --rmlp-border: rgba(245, 240, 232, 0.08);
+        }
+        [data-theme="light"] {
+            --rmlp-bg: #F4EFE8;
+            --rmlp-text: #1C1917;
+            --rmlp-muted: rgba(28, 25, 23, 0.62);
+            --rmlp-surface: rgba(28, 25, 23, 0.04);
+            --rmlp-border: rgba(28, 25, 23, 0.1);
+            --rmlp-theme-color: #F4EFE8;
+        }
         body { 
-            background: #0A0908; 
-            color: #F5F0E8; 
+            background: var(--rmlp-bg); 
+            color: var(--rmlp-text); 
             overflow-x: hidden;
             font-family: 'DM Sans', system-ui, sans-serif;
             font-feature-settings: 'ss01' 1;
             text-rendering: optimizeLegibility;
+        }
+        [data-theme="light"] body::before {
+            background:
+                radial-gradient(ellipse 80% 50% at 50% -10%, rgba(232, 93, 4, 0.1) 0%, transparent 55%),
+                radial-gradient(ellipse 60% 40% at 100% 40%, rgba(232, 93, 4, 0.04) 0%, transparent 50%),
+                linear-gradient(180deg, #F4EFE8 0%, #EDE6DB 50%, #F4EFE8 100%);
+        }
+        [data-theme="light"] .card {
+            background: rgba(255, 255, 255, 0.72);
+            border-color: rgba(28, 25, 23, 0.1);
+        }
+        [data-theme="light"] .site-nav {
+            background: rgba(244, 239, 232, 0.85);
+            border-bottom-color: rgba(28, 25, 23, 0.08);
+        }
+        #gdpr-banner {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 60;
+            padding: 14px 16px;
+            background: rgba(20, 17, 15, 0.96);
+            border-top: 1px solid rgba(245, 240, 232, 0.1);
+            backdrop-filter: blur(12px);
+        }
+        [data-theme="light"] #gdpr-banner {
+            background: rgba(255, 252, 247, 0.96);
+            border-top-color: rgba(28, 25, 23, 0.1);
+        }
+        #resume-progress-banner {
+            position: sticky;
+            top: 56px;
+            z-index: 40;
         }
         
         /* Warm atmospheric field — ember + ink, no purple mesh */
@@ -903,9 +961,25 @@
                     API
                 </button>
                 <button onclick="showHistoryModal()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5">History</button>
+                <button id="theme-toggle-btn" onclick="toggleTheme()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5" title="Toggle light/dark mode" aria-label="Toggle theme">
+                    <span id="theme-toggle-label">Light</span>
+                </button>
             </div>
         </div>
     </nav>
+
+    <!-- Resume unfinished roast -->
+    <div id="resume-progress-banner" class="hidden px-4 py-3 bg-accent-orange/15 border-b border-accent-orange/25">
+        <div class="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <p class="text-[13px] text-cream-100">
+                Resume unfinished roast for <span id="resume-progress-url" class="font-medium text-accent-orange"></span>?
+            </p>
+            <div class="flex items-center gap-2">
+                <button onclick="resumeRoastProgress()" class="btn-primary px-3 py-1.5 text-[12px]">Resume</button>
+                <button onclick="dismissRoastProgress()" class="text-[12px] text-cream-300/60 hover:text-cream-100 px-2 py-1.5">Dismiss</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Hero — brand-first single composition -->
     <section id="roast" class="relative min-h-[100svh] flex flex-col justify-center pt-20 pb-16 px-5 sm:px-6 overflow-hidden">
@@ -1456,6 +1530,7 @@
                     <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
                     Threats
                 </button>
+                <button onclick="showResultTab('tech')" id="rtab-tech" class="px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6]">Tech Stack</button>
                 <button onclick="showResultTab('details')" id="rtab-details" class="px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6]">Full Report</button>
             </div>
 
@@ -1559,6 +1634,11 @@
                                     <div id="hero-breakdown" class="mb-4 space-y-2"></div>
                                     <div id="hero-roast" class="text-[13px] text-[#a1a1a6] mb-2"></div>
                                     <div id="hero-fix" class="text-[13px] text-green-400/80"></div>
+                                    <div class="annotation-actions flex items-center gap-2 mt-3" data-category="hero">
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('hero','fixed')" class="ann-btn-fixed text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-green-500/40 hover:text-green-400 transition-colors">Fixed</button>
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('hero','wont_fix')" class="ann-btn-wont text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-red-500/40 hover:text-red-400 transition-colors">Won't fix</button>
+                                        <span class="ann-status text-[11px] text-[#6e6e73]"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1591,6 +1671,11 @@
                                     <div id="cta-breakdown" class="mb-4 space-y-2"></div>
                                     <div id="cta-roast" class="text-[13px] text-[#a1a1a6] mb-2"></div>
                                     <div id="cta-fix" class="text-[13px] text-green-400/80"></div>
+                                    <div class="annotation-actions flex items-center gap-2 mt-3" data-category="cta">
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('cta','fixed')" class="ann-btn-fixed text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-green-500/40 hover:text-green-400 transition-colors">Fixed</button>
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('cta','wont_fix')" class="ann-btn-wont text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-red-500/40 hover:text-red-400 transition-colors">Won't fix</button>
+                                        <span class="ann-status text-[11px] text-[#6e6e73]"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1623,6 +1708,11 @@
                                     <div id="trust-breakdown" class="mb-4 space-y-2"></div>
                                     <div id="trust-roast" class="text-[13px] text-[#a1a1a6] mb-2"></div>
                                     <div id="trust-fix" class="text-[13px] text-green-400/80"></div>
+                                    <div class="annotation-actions flex items-center gap-2 mt-3" data-category="trust">
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('trust','fixed')" class="ann-btn-fixed text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-green-500/40 hover:text-green-400 transition-colors">Fixed</button>
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('trust','wont_fix')" class="ann-btn-wont text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-red-500/40 hover:text-red-400 transition-colors">Won't fix</button>
+                                        <span class="ann-status text-[11px] text-[#6e6e73]"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1655,6 +1745,11 @@
                                     <div id="copy-breakdown" class="mb-4 space-y-2"></div>
                                     <div id="copy-roast" class="text-[13px] text-[#a1a1a6] mb-2"></div>
                                     <div id="copy-fix" class="text-[13px] text-green-400/80"></div>
+                                    <div class="annotation-actions flex items-center gap-2 mt-3" data-category="copy">
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('copy','fixed')" class="ann-btn-fixed text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-green-500/40 hover:text-green-400 transition-colors">Fixed</button>
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('copy','wont_fix')" class="ann-btn-wont text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-red-500/40 hover:text-red-400 transition-colors">Won't fix</button>
+                                        <span class="ann-status text-[11px] text-[#6e6e73]"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1687,6 +1782,11 @@
                                     <div id="design-breakdown" class="mb-4 space-y-2"></div>
                                     <div id="design-roast" class="text-[13px] text-[#a1a1a6] mb-2"></div>
                                     <div id="design-fix" class="text-[13px] text-green-400/80"></div>
+                                    <div class="annotation-actions flex items-center gap-2 mt-3" data-category="design">
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('design','fixed')" class="ann-btn-fixed text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-green-500/40 hover:text-green-400 transition-colors">Fixed</button>
+                                        <button type="button" onclick="event.stopPropagation(); setAnnotation('design','wont_fix')" class="ann-btn-wont text-[11px] px-2.5 py-1 rounded-lg border border-white/[0.08] text-[#a1a1a6] hover:border-red-500/40 hover:text-red-400 transition-colors">Won't fix</button>
+                                        <span class="ann-status text-[11px] text-[#6e6e73]"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1706,6 +1806,34 @@
                         </div>
                     </div>
                     <ol id="quick-wins" class="space-y-3"></ol>
+                </div>
+
+                <!-- A/B Recommendations -->
+                <div id="ab-recommendations" class="card p-6 mt-6 hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 bg-white/[0.05] rounded-xl flex items-center justify-center">
+                            <span class="text-lg">🧪</span>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold">A/B Test Ideas</h3>
+                            <p class="text-xs text-[#6e6e73]">Concrete tests based on your scores vs industry benchmarks</p>
+                        </div>
+                    </div>
+                    <ol id="ab-recommendations-list" class="space-y-3"></ol>
+                </div>
+
+                <!-- CMS Tips -->
+                <div id="cms-tips" class="card p-6 mt-6 hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 bg-white/[0.05] rounded-xl flex items-center justify-center">
+                            <span class="text-lg">🧩</span>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold">CMS Tips</h3>
+                            <p class="text-xs text-[#6e6e73]">Platform-specific fixes for <span id="cms-tips-platform">your stack</span></p>
+                        </div>
+                    </div>
+                    <ul id="cms-tips-list" class="space-y-3"></ul>
                 </div>
 
                 <!-- Feedback Bar -->
@@ -1759,6 +1887,7 @@
                         </div>
                     </div>
                     <div id="ba-score-change" class="mt-4 text-center"></div>
+                    <div id="ba-category-diff" class="mt-4 hidden"></div>
                 </div>
             </div>
 
@@ -2389,6 +2518,49 @@
 
                         <span class="px-3 py-1 bg-white/[0.05] rounded-full">🔒 Security Analysis</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Tech Stack Tab -->
+            <div id="result-tech" class="result-tab hidden">
+                <div class="card p-6 mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h3 class="text-xl font-semibold mb-1">Tech Stack Scanner</h3>
+                            <p class="text-sm text-[#a1a1a6]">Detect frameworks, CMS, analytics, and hosting via Cloudflare URL Scanner</p>
+                        </div>
+                        <button onclick="runTechScan()" id="tech-scan-btn" class="btn-primary px-6 py-3 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 whitespace-nowrap">
+                            Scan tech stack
+                        </button>
+                    </div>
+                </div>
+                <div id="tech-loading" class="hidden">
+                    <div class="card p-12 text-center">
+                        <div class="w-12 h-12 mx-auto mb-4 border-4 border-white/10 border-t-accent-orange rounded-full animate-spin"></div>
+                        <h3 class="text-lg font-semibold mb-2">Scanning tech stack...</h3>
+                        <p id="tech-scan-status" class="text-sm text-[#6e6e73]">Submitting URL to scanner...</p>
+                    </div>
+                </div>
+                <div id="tech-results" class="hidden">
+                    <div class="card p-6 mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-[15px] font-semibold">Detected Technologies</h4>
+                            <span id="tech-total-count" class="text-xs text-[#6e6e73]"></span>
+                        </div>
+                        <div id="tech-list" class="space-y-2"></div>
+                    </div>
+                    <div id="tech-hosting" class="card p-6 hidden">
+                        <h4 class="text-[15px] font-semibold mb-3">Hosting</h4>
+                        <div id="tech-hosting-details" class="grid sm:grid-cols-2 gap-3 text-sm text-[#a1a1a6]"></div>
+                    </div>
+                </div>
+                <div id="tech-empty" class="card p-12 text-center">
+                    <h3 class="text-lg font-semibold mb-2">What's under the hood?</h3>
+                    <p class="text-[#6e6e73] max-w-md mx-auto">Scan the current roast URL to list CMS, frameworks, and third-party scripts.</p>
+                </div>
+                <div id="tech-unavailable" class="hidden card p-8 text-center">
+                    <h3 class="text-lg font-semibold mb-2">Tech scan unavailable</h3>
+                    <p id="tech-unavailable-msg" class="text-sm text-[#6e6e73]">URL Scanner is not configured on this environment.</p>
                 </div>
             </div>
 
@@ -4023,6 +4195,8 @@
                         <li><span class="text-[13px] text-[#6e6e73]">Open Analysis</span></li>
                         <li><a href="/roast/self-roast-01" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Our Own Roast</a></li>
                         <li><button onclick="requestOptOut()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Remove my roast</button></li>
+                        <li><button onclick="exportMyData()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Export my data</button></li>
+                        <li><button onclick="showPrivacyNote()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Privacy</button></li>
                     </ul>
                     <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3 mt-5">Contact</h4>
                     <ul class="space-y-2">
@@ -4054,10 +4228,21 @@
 
             <!-- Copyright -->
             <div class="text-center text-[11px] text-[#424245]">
-<span>&copy; 2026 Roast My Landing Page · Built on the edge</span>
+<span>&copy; 2026 Roast My Landing Page · Built on the edge · <button onclick="showPrivacyNote()" class="hover:text-[#6e6e73] transition-colors">Privacy</button></span>
             </div>
         </div>
     </footer>
+
+    <!-- GDPR consent bar -->
+    <div id="gdpr-banner" class="hidden">
+        <div class="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p class="text-[13px] text-[#d1d1d6] leading-relaxed">
+                We use local storage and analytics-style usage stats to run roast history, preferences, and improve the product.
+                See <button onclick="showPrivacyNote()" class="underline text-accent-orange hover:text-orange-300">Privacy</button>.
+            </p>
+            <button id="gdpr-accept-btn" onclick="acceptGdprConsent()" class="btn-primary px-4 py-2 text-[13px] whitespace-nowrap">Accept</button>
+        </div>
+    </div>
 
     <!-- Pricing Page (shown on /pricing) -->
     <div id="pricing-page" class="hidden fixed inset-0 z-40 bg-black overflow-y-auto">
@@ -4153,6 +4338,11 @@
         let currentTab = 'single';
         let fullPageMode = false;
         const HISTORY_KEY = 'roast_history';
+        const ROAST_PROGRESS_KEY = 'roast_progress';
+        const THEME_KEY = 'theme';
+        const GDPR_KEY = 'gdpr_consent';
+        let annotationState = {};
+        let lastTechScan = null;
         
         // Queue state
         let queueCountdown = 0;
@@ -4160,6 +4350,113 @@
         let pendingUrl = null;
         let retryCount = 0;
         const MAX_AUTO_RETRIES = 3;
+
+        // ===== Theme (#33) =====
+        function applyTheme(theme) {
+            const next = theme === 'light' ? 'light' : 'dark';
+            document.documentElement.dataset.theme = next;
+            try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+            const label = document.getElementById('theme-toggle-label');
+            if (label) label.textContent = next === 'light' ? 'Dark' : 'Light';
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', next === 'light' ? '#F4EFE8' : '#0A0908');
+        }
+        function toggleTheme() {
+            const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+            applyTheme(current === 'light' ? 'dark' : 'light');
+        }
+        applyTheme((() => { try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; } })());
+
+        // ===== GDPR (#65) =====
+        function initGdprBanner() {
+            const banner = document.getElementById('gdpr-banner');
+            if (!banner) return;
+            try {
+                if (localStorage.getItem(GDPR_KEY) === '1') {
+                    banner.classList.add('hidden');
+                    return;
+                }
+            } catch (e) {}
+            banner.classList.remove('hidden');
+        }
+        function acceptGdprConsent() {
+            try { localStorage.setItem(GDPR_KEY, '1'); } catch (e) {}
+            document.getElementById('gdpr-banner')?.classList.add('hidden');
+        }
+        function showPrivacyNote() {
+            showToast('We store roast results you request, screenshots, and local preferences. Export or remove your data anytime from the footer.', 'info');
+        }
+        async function exportMyData() {
+            const preset = currentRoast?.url || document.getElementById('url-input')?.value || '';
+            const raw = prompt('Enter the URL to export stored roast data for:', preset);
+            if (!raw) return;
+            let url = raw.trim();
+            if (!url.startsWith('http')) url = 'https://' + url;
+            try { new URL(url); } catch { return showToast('Invalid URL', 'error'); }
+            try {
+                const res = await fetch(`/api/export?url=${encodeURIComponent(url)}`);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || `Export failed (${res.status})`);
+                }
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'roast-export.json';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showToast('Export downloaded', 'success');
+            } catch (err) {
+                showToast(err.message || 'Export failed', 'error');
+            }
+        }
+
+        // ===== Progress persistence (#30) =====
+        function saveRoastProgress(url, status) {
+            try {
+                localStorage.setItem(ROAST_PROGRESS_KEY, JSON.stringify({ url, ts: Date.now(), status: status || 'in_progress' }));
+            } catch (e) {}
+        }
+        function clearRoastProgress() {
+            try { localStorage.removeItem(ROAST_PROGRESS_KEY); } catch (e) {}
+            document.getElementById('resume-progress-banner')?.classList.add('hidden');
+        }
+        function checkResumeProgress() {
+            const banner = document.getElementById('resume-progress-banner');
+            const urlEl = document.getElementById('resume-progress-url');
+            if (!banner || !urlEl) return;
+            try {
+                const raw = localStorage.getItem(ROAST_PROGRESS_KEY);
+                if (!raw) return;
+                const prog = JSON.parse(raw);
+                if (!prog?.url || !prog?.ts) return;
+                if (Date.now() - prog.ts > 10 * 60 * 1000) {
+                    localStorage.removeItem(ROAST_PROGRESS_KEY);
+                    return;
+                }
+                if (prog.status === 'complete') {
+                    localStorage.removeItem(ROAST_PROGRESS_KEY);
+                    return;
+                }
+                urlEl.textContent = prog.url;
+                banner.classList.remove('hidden');
+            } catch (e) {}
+        }
+        function resumeRoastProgress() {
+            try {
+                const prog = JSON.parse(localStorage.getItem(ROAST_PROGRESS_KEY) || '{}');
+                if (!prog.url) return;
+                const input = document.getElementById('url-input');
+                if (input) input.value = prog.url;
+                showTab('single');
+                document.getElementById('roast')?.scrollIntoView({ behavior: 'smooth' });
+                roastPage();
+            } catch (e) {}
+        }
+        function dismissRoastProgress() {
+            clearRoastProgress();
+        }
 
         // Full page toggle
         function setFullPage(enabled) {
@@ -4304,6 +4601,128 @@
                 el.classList.toggle('tab-active', el.id === `rtab-${tab}`);
                 el.classList.toggle('text-[#a1a1a6]', el.id !== `rtab-${tab}`);
             });
+        }
+
+        // ===== TECH STACK SCAN (#44) =====
+        async function runTechScan() {
+            if (!currentRoast || !currentRoast.url) {
+                showToast('No URL to scan', 'error');
+                return;
+            }
+            const btn = document.getElementById('tech-scan-btn');
+            const loading = document.getElementById('tech-loading');
+            const results = document.getElementById('tech-results');
+            const empty = document.getElementById('tech-empty');
+            const unavailable = document.getElementById('tech-unavailable');
+            const statusEl = document.getElementById('tech-scan-status');
+
+            btn.disabled = true;
+            btn.textContent = 'Scanning...';
+            loading?.classList.remove('hidden');
+            results?.classList.add('hidden');
+            empty?.classList.add('hidden');
+            unavailable?.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/tech-scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: currentRoast.url })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.status === 503) {
+                    loading?.classList.add('hidden');
+                    unavailable?.classList.remove('hidden');
+                    const msg = document.getElementById('tech-unavailable-msg');
+                    if (msg) msg.textContent = data.error || 'URL Scanner is not configured on this environment.';
+                    return;
+                }
+                if (!res.ok) throw new Error(data.error || 'Tech scan failed');
+
+                if (data.cached && data.technologies) {
+                    renderTechScanResults(data);
+                    return;
+                }
+
+                const scanId = data.scanId;
+                if (!scanId) throw new Error(data.error || 'No scan ID returned');
+                if (statusEl) statusEl.textContent = data.message || 'Waiting for results...';
+
+                let attempts = 0;
+                while (attempts < 18) {
+                    await new Promise(r => setTimeout(r, 2500));
+                    attempts++;
+                    if (statusEl) statusEl.textContent = `Polling results (${attempts})...`;
+                    const poll = await fetch(`/api/tech-scan/${scanId}`);
+                    const pollData = await poll.json().catch(() => ({}));
+                    if (poll.status === 503) {
+                        loading?.classList.add('hidden');
+                        unavailable?.classList.remove('hidden');
+                        const msg = document.getElementById('tech-unavailable-msg');
+                        if (msg) msg.textContent = pollData.error || 'URL Scanner is not configured on this environment.';
+                        return;
+                    }
+                    if (pollData.success && pollData.technologies) {
+                        renderTechScanResults(pollData);
+                        return;
+                    }
+                    if (pollData.status === 'processing' || !poll.ok) continue;
+                    if (pollData.error) throw new Error(pollData.error);
+                }
+                throw new Error('Scan timed out — try again in a moment');
+            } catch (err) {
+                loading?.classList.add('hidden');
+                empty?.classList.remove('hidden');
+                showToast(err.message || 'Tech scan failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Scan tech stack';
+            }
+        }
+
+        function renderTechScanResults(data) {
+            lastTechScan = data;
+            const loading = document.getElementById('tech-loading');
+            const results = document.getElementById('tech-results');
+            const empty = document.getElementById('tech-empty');
+            const list = document.getElementById('tech-list');
+            const total = document.getElementById('tech-total-count');
+            loading?.classList.add('hidden');
+            empty?.classList.add('hidden');
+            results?.classList.remove('hidden');
+
+            const techs = data.technologies?.all || [];
+            if (total) total.textContent = `${data.technologies?.total ?? techs.length} detected`;
+            if (list) {
+                if (!techs.length) {
+                    list.innerHTML = '<p class="text-sm text-[#6e6e73]">No technologies detected.</p>';
+                } else {
+                    list.innerHTML = techs.map(t => `
+                        <div class="flex items-center justify-between p-3 bg-white/[0.03] rounded-xl border border-white/[0.04]">
+                            <div>
+                                <div class="text-sm font-medium text-[#d1d1d6]">${sanitizeHtml(t.name || 'Unknown')}</div>
+                                <div class="text-[11px] text-[#6e6e73]">${sanitizeHtml(t.category || 'Other')}</div>
+                            </div>
+                            <div class="text-[11px] text-[#6e6e73]">${t.confidence != null ? t.confidence + '%' : ''}</div>
+                        </div>
+                    `).join('');
+                }
+            }
+
+            const hostingCard = document.getElementById('tech-hosting');
+            const hostingDetails = document.getElementById('tech-hosting-details');
+            if (hostingCard && hostingDetails && data.hosting) {
+                hostingCard.classList.remove('hidden');
+                const h = data.hosting;
+                hostingDetails.innerHTML = `
+                    <div><span class="text-[#6e6e73]">Server</span><div class="text-[#d1d1d6]">${sanitizeHtml(h.server || '-')}</div></div>
+                    <div><span class="text-[#6e6e73]">ASN</span><div class="text-[#d1d1d6]">${sanitizeHtml(h.asn || '-')}</div></div>
+                    <div><span class="text-[#6e6e73]">IP</span><div class="text-[#d1d1d6]">${sanitizeHtml(h.ip || '-')}</div></div>
+                    <div><span class="text-[#6e6e73]">Country</span><div class="text-[#d1d1d6]">${sanitizeHtml(h.country || '-')}</div></div>
+                `;
+            }
+
+            if (currentRoast) renderCmsTips(currentRoast);
         }
 
         // ===== THREAT SCAN FUNCTIONS =====
@@ -5084,6 +5503,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             showLoadingModal();
             document.getElementById('roast-btn').disabled = true;
             document.getElementById('btn-text').textContent = 'Analyzing...';
+            saveRoastProgress(url, 'starting');
 
             try {
                 const response = await fetch('/api/roast-stream', {
@@ -5111,6 +5531,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     if (analysisAborted) return;
                     currentRoast = data;
                     saveToHistory(data);
+                    clearRoastProgress();
                     hideLoadingModal();
                     displayResults(data, data.cached);
                     // Reset queue state on success
@@ -5120,6 +5541,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let buffer = '';
+                    let lastProgressSave = 0;
 
                     while (true) {
                         const { done, value } = await reader.read();
@@ -5136,11 +5558,19 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                             if (eventMatch && dataMatch) {
                                 const event = eventMatch[1];
                                 const data = JSON.parse(dataMatch[1]);
-                                if (event === 'progress') updateProgress(data.step, data.message, data.progress);
+                                if (event === 'progress') {
+                                    updateProgress(data.step, data.message, data.progress);
+                                    const now = Date.now();
+                                    if (now - lastProgressSave > 1500) {
+                                        saveRoastProgress(url, data.message || data.step || 'in_progress');
+                                        lastProgressSave = now;
+                                    }
+                                }
                                 else if (event === 'complete') {
                                     if (analysisAborted) return;
                                     currentRoast = data;
                                     saveToHistory(data);
+                                    clearRoastProgress();
                                     hideLoadingModal();
                                     displayResults(data, false);
                                     // Reset queue state on success
@@ -6293,6 +6723,19 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     <span class="text-[#d1d1d6] text-sm leading-relaxed">${sanitizeHtml(w)}</span>
                 </li>
             `).join('');
+
+            renderAbRecommendations(data);
+            renderCmsTips(data);
+            syncAnnotationUI(data.id);
+
+            // Reset tech tab for the new URL
+            if (!lastTechScan || lastTechScan.url !== data.url) {
+                lastTechScan = null;
+                document.getElementById('tech-results')?.classList.add('hidden');
+                document.getElementById('tech-loading')?.classList.add('hidden');
+                document.getElementById('tech-unavailable')?.classList.add('hidden');
+                document.getElementById('tech-empty')?.classList.remove('hidden');
+            }
             
             // ============================================
             // Full Report Tab - Beautiful Widget Layout
@@ -6551,19 +6994,67 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             renderScoreHistory(data);
         }
         
+        function renderCategoryDiff(categoryChanges, previousScores, currentScores) {
+            const diffEl = document.getElementById('ba-category-diff');
+            if (!diffEl) return;
+            const cats = [
+                { key: 'hero', label: 'Hero' },
+                { key: 'cta', label: 'CTA' },
+                { key: 'trust', label: 'Trust' },
+                { key: 'copy', label: 'Copy' },
+                { key: 'design', label: 'Design' }
+            ];
+            let changes = categoryChanges && typeof categoryChanges === 'object' ? { ...categoryChanges } : null;
+            if (!changes && previousScores && currentScores) {
+                changes = {};
+                cats.forEach(({ key }) => {
+                    if (previousScores[key] != null && currentScores[key] != null) {
+                        changes[key] = Number(currentScores[key]) - Number(previousScores[key]);
+                    }
+                });
+            }
+            if (!changes || !cats.some(({ key }) => changes[key] != null)) {
+                diffEl.classList.add('hidden');
+                diffEl.innerHTML = '';
+                return;
+            }
+            diffEl.classList.remove('hidden');
+            diffEl.innerHTML = `
+                <p class="text-[12px] text-[#6e6e73] text-center mb-3">Category score changes</p>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    ${cats.map(({ key, label }) => {
+                        const delta = Number(changes[key]);
+                        if (Number.isNaN(delta)) {
+                            return `<div class="p-2 rounded-xl bg-white/[0.03] border border-white/[0.04] text-center">
+                                <div class="text-[11px] text-[#6e6e73]">${label}</div>
+                                <div class="text-sm text-[#a1a1a6]">—</div>
+                            </div>`;
+                        }
+                        const color = delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-[#a1a1a6]';
+                        const sign = delta > 0 ? '+' : '';
+                        return `<div class="p-2 rounded-xl bg-white/[0.03] border border-white/[0.04] text-center">
+                            <div class="text-[11px] text-[#6e6e73]">${label}</div>
+                            <div class="text-sm font-semibold ${color}">${sign}${delta.toFixed(1)}</div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            `;
+        }
+
         function checkBeforeAfter(data) {
             const section = document.getElementById('before-after-section');
             if (!section) return;
             section.classList.add('hidden');
+            document.getElementById('ba-category-diff')?.classList.add('hidden');
             if (!data || data.isExample) return;
 
-            const showComparison = (previous) => {
+            const showComparison = (previous, categoryChanges) => {
                 if (!previous?.screenshotUrl && !previous?.id) return;
                 const screenshotUrl = previous.screenshotUrl || `/api/screenshot/${previous.id}`;
                 section.classList.remove('hidden');
                 document.getElementById('ba-before-img').src = screenshotUrl;
                 document.getElementById('ba-after-img').src = data.screenshotUrl;
-                document.getElementById('ba-before-score').textContent = previous.overallScore?.toFixed(1) ?? previous.score?.toFixed(1) ?? '-';
+                document.getElementById('ba-before-score').textContent = previous.overallScore?.toFixed?.(1) ?? previous.score?.toFixed?.(1) ?? previous.overallScore ?? previous.score ?? '-';
                 document.getElementById('ba-after-score').textContent = data.overallScore?.toFixed(1) || '-';
 
                 const previousScore = previous.overallScore ?? previous.score ?? 0;
@@ -6578,6 +7069,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                         changeEl.innerHTML = `<span class="text-[#a1a1a6] font-semibold">No change</span><span class="text-[#6e6e73] text-sm ml-2">since last roast</span>`;
                     }
                 }
+                renderCategoryDiff(categoryChanges, previous.scores, data.scores);
             };
 
             const loadFromLocalHistory = () => {
@@ -6600,11 +7092,15 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                         if (improvement?.totalRoasts > 1 && improvement.latestRoast?.id === data.id) {
                             const previous = improvement.history[improvement.history.length - 2];
                             if (previous) {
+                                const prevScores = improvement.firstRoast?.id === previous.id
+                                    ? improvement.firstRoast.scores
+                                    : (previous.scores || null);
                                 showComparison({
                                     id: previous.id,
                                     score: previous.score,
-                                    screenshotUrl: `/api/screenshot/${previous.id}`
-                                });
+                                    screenshotUrl: `/api/screenshot/${previous.id}`,
+                                    scores: prevScores
+                                }, improvement.categoryChanges || null);
                                 return;
                             }
                         }
@@ -9501,6 +9997,176 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             document.body.classList.toggle('overflow-hidden', isPricing);
         }
 
+        // ===== A/B recommendations (#54) =====
+        function renderAbRecommendations(data) {
+            const section = document.getElementById('ab-recommendations');
+            const list = document.getElementById('ab-recommendations-list');
+            if (!section || !list) return;
+            section.classList.add('hidden');
+            list.innerHTML = '';
+            if (!data?.scores) return;
+
+            const bench = data.benchmarks?.scores || {};
+            const industry = data.benchmarks?.label || 'industry';
+            const ideas = [];
+            const push = (html) => { if (ideas.length < 3) ideas.push(html); };
+
+            const score = (k) => Number(data.scores[k]);
+            const avg = (k) => bench[k] != null ? Number(bench[k]) : null;
+
+            if (avg('cta') != null && score('cta') < avg('cta')) {
+                push(`Test CTA copy: swap your primary button to a benefit-led verb phrase (e.g. "Start free trial" vs "Get started") and measure click-through for 1 week.`);
+            }
+            if (avg('hero') != null && score('hero') < avg('hero')) {
+                push(`Headline A/B: pit your current hero against a clearer outcome-focused variant that names the audience + result in under 12 words.`);
+            }
+            if (avg('trust') != null && score('trust') < avg('trust')) {
+                push(`Social proof test: add a logo strip or 1 quantified testimonial near the first CTA and compare conversion vs baseline.`);
+            }
+            if (avg('copy') != null && score('copy') < avg('copy')) {
+                push(`Benefit bullets test: replace feature-heavy copy with 3 outcome bullets above the fold; track scroll depth and CTA clicks.`);
+            }
+            if (avg('design') != null && score('design') < avg('design')) {
+                push(`Visual hierarchy test: increase primary CTA contrast and reduce competing links in the hero; measure CTA click rate.`);
+            }
+            // Fallbacks when already above average or no bench
+            if (!ideas.length) {
+                const weakest = ['cta', 'hero', 'trust', 'copy', 'design']
+                    .filter(k => data.scores[k] != null)
+                    .sort((a, b) => score(a) - score(b))[0];
+                const map = {
+                    cta: 'Run a CTA color + placement test: move the primary button above the fold and try a higher-contrast color.',
+                    hero: 'Test a shorter hero headline against a longer value-prop subhead — measure bounce and CTA clicks.',
+                    trust: 'A/B a trust badge row vs a short customer quote under the CTA.',
+                    copy: 'Test first-person ("I want…") vs second-person ("You get…") body copy on the hero.',
+                    design: 'Compare a single-column hero vs a split layout for mobile conversion.'
+                };
+                if (weakest) push(map[weakest]);
+                push(`Industry check (${sanitizeHtml(industry)}): pick your lowest-scoring category and run a 50/50 test for at least 200 sessions.`);
+                push(`Microcopy test: change form/button helper text to reduce friction (e.g. "No credit card") and measure completion.`);
+            }
+
+            list.innerHTML = ideas.slice(0, 3).map((t, i) => `
+                <li class="flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl border border-white/[0.04]">
+                    <span class="flex-shrink-0 w-7 h-7 bg-white/[0.06] rounded-lg flex items-center justify-center text-sm font-bold text-[#d1d1d6]">${i + 1}</span>
+                    <span class="text-[#d1d1d6] text-sm leading-relaxed">${sanitizeHtml(t)}</span>
+                </li>
+            `).join('');
+            section.classList.remove('hidden');
+        }
+
+        // ===== CMS tips (#64) =====
+        function detectCmsFromData(data) {
+            const hay = [
+                data?.url || '',
+                ...(lastTechScan?.technologies?.all || []).map(t => `${t.name || ''} ${t.category || ''}`)
+            ].join(' ').toLowerCase();
+            const platforms = [
+                { key: 'webflow', re: /webflow/ },
+                { key: 'framer', re: /framer/ },
+                { key: 'wordpress', re: /wordpress|wp-content|\.wordpress\./ },
+                { key: 'shopify', re: /shopify|myshopify/ },
+                { key: 'wix', re: /wix\.com|wixsite/ },
+                { key: 'squarespace', re: /squarespace/ }
+            ];
+            return platforms.find(p => p.re.test(hay))?.key || null;
+        }
+
+        function renderCmsTips(data) {
+            const section = document.getElementById('cms-tips');
+            const list = document.getElementById('cms-tips-list');
+            const platformEl = document.getElementById('cms-tips-platform');
+            if (!section || !list) return;
+            section.classList.add('hidden');
+            list.innerHTML = '';
+            const cms = detectCmsFromData(data || currentRoast || {});
+            if (!cms) return;
+
+            const tipsByCms = {
+                webflow: [
+                    'Use Webflow Interactions sparingly above the fold — heavy scroll animations hurt LCP and first impression scores.',
+                    'Set a dedicated CMS Collection field for H1/meta description so SEO fixes ship without Designer republishes.',
+                    'Pin one primary Button component style site-wide so CTA contrast stays consistent across breakpoints.'
+                ],
+                framer: [
+                    'Prefer Framer’s native components over nested Variants for the hero CTA — fewer layers improve mobile paint time.',
+                    'Export critical fonts via Framer’s font settings and limit variable axes to cut FOIT on first load.',
+                    'Add a sticky mobile CTA overlay only after 25% scroll so it doesn’t compete with the hero headline.'
+                ],
+                wordpress: [
+                    'Cache the landing template (LiteSpeed/WP Rocket) and exclude only the form endpoint so scores stay high after A/B edits.',
+                    'Replace page-builder hero sliders with a static image + CSS — biggest quick win for performance and focus.',
+                    'Use a lightweight SEO plugin field for title/meta and keep one H1 in the template, not in widgets.'
+                ],
+                shopify: [
+                    'Move review apps below the first CTA fold; many inject render-blocking scripts that tank trust vs speed.',
+                    'Use a focused landing product template (no mega-nav) and keep the Buy button sticky on mobile.',
+                    'Compress theme hero images with Shopify CDN `width` params — avoid uploading 3000px+ marketing assets.'
+                ],
+                wix: [
+                    'Turn off decorative parallax/video backgrounds on mobile in the Wix Editor — they crush performance scores.',
+                    'Use one site-wide strip for social proof logos instead of repeating apps that load extra widgets.',
+                    'Set SEO title/description in Wix SEO settings per page and preview the Google snippet before publishing.'
+                ],
+                squarespace: [
+                    'Switch the landing page to a blank/landing collection template without the global mega footer clutter.',
+                    'Replace auto-playing background video with a poster image + play control for mobile conversion.',
+                    'Use Squarespace’s built-in summary blocks for testimonials near the CTA instead of third-party embeds.'
+                ]
+            };
+            const tips = tipsByCms[cms] || [];
+            if (!tips.length) return;
+            if (platformEl) platformEl.textContent = cms.charAt(0).toUpperCase() + cms.slice(1);
+            list.innerHTML = tips.slice(0, 3).map(t => `
+                <li class="p-3 bg-white/[0.03] rounded-xl border border-white/[0.04] text-sm text-[#d1d1d6] leading-relaxed">${sanitizeHtml(t)}</li>
+            `).join('');
+            section.classList.remove('hidden');
+        }
+
+        // ===== Annotations (#56) =====
+        function syncAnnotationUI(roastId) {
+            document.querySelectorAll('.annotation-actions').forEach(el => {
+                const cat = el.dataset.category;
+                const status = annotationState[`${roastId}:${cat}`];
+                const statusEl = el.querySelector('.ann-status');
+                const fixedBtn = el.querySelector('.ann-btn-fixed');
+                const wontBtn = el.querySelector('.ann-btn-wont');
+                fixedBtn?.classList.remove('border-green-500/40', 'text-green-400', 'bg-green-500/10');
+                wontBtn?.classList.remove('border-red-500/40', 'text-red-400', 'bg-red-500/10');
+                if (!status) {
+                    if (statusEl) statusEl.textContent = '';
+                    return;
+                }
+                if (statusEl) statusEl.textContent = status === 'fixed' ? 'Marked fixed' : "Marked won't fix";
+                if (status === 'fixed') fixedBtn?.classList.add('border-green-500/40', 'text-green-400', 'bg-green-500/10');
+                if (status === 'wont_fix') wontBtn?.classList.add('border-red-500/40', 'text-red-400', 'bg-red-500/10');
+            });
+        }
+
+        async function setAnnotation(category, status) {
+            const roastId = currentRoast?.id || window._currentRoastId;
+            if (!roastId) return showToast('No roast loaded', 'error');
+            const key = `${roastId}:${category}`;
+            annotationState[key] = status;
+            syncAnnotationUI(roastId);
+            try {
+                const res = await fetch('/api/annotations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roastId, category, status })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    // Keep optimistic UI; soft-warn if API missing
+                    if (res.status !== 404) showToast(err.error || 'Could not save annotation', 'error');
+                } else {
+                    showToast(status === 'fixed' ? 'Marked as fixed' : "Marked as won't fix", 'success');
+                }
+            } catch (e) {
+                showToast('Could not save annotation', 'error');
+            }
+        }
+
         // Initialize leaderboard, wall of shame, and feed on load
         window.addEventListener('load', () => {
             applyAppRoute();
@@ -9508,6 +10174,11 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             loadWallOfShame();
             loadFeed();
             if (window.location.hash === '#batch') showTab('batch');
+            initGdprBanner();
+            checkResumeProgress();
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').catch(() => {});
+            }
         });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
