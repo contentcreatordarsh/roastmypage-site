@@ -342,7 +342,74 @@ function getImposterReason(handle, brandName) {
   }
   return "Similar to your brand name - could cause confusion";
 }
-function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, socialImposters) {
+/**
+ * #52 — lightweight brand-similarity checks for registered lookalikes.
+ * Fetches a few lookalike homepages and compares title / og:site_name tokens
+ * to the brand (no ML model; Workers-safe heuristic).
+ */
+function tokenizeBrand(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 2);
+}
+
+function brandOverlapScore(brand, haystack) {
+  const brandTokens = tokenizeBrand(brand);
+  const hay = String(haystack || "").toLowerCase();
+  if (!brandTokens.length || !hay) return 0;
+  let hits = 0;
+  for (const t of brandTokens) {
+    if (hay.includes(t)) hits++;
+  }
+  const compact = brandTokens.join("");
+  if (compact.length >= 4 && hay.replace(/[^a-z0-9]/g, "").includes(compact)) hits += 1;
+  return Math.min(1, hits / Math.max(1, brandTokens.length));
+}
+
+async function scanVisualBrandSimilarity(brandName, registeredDomains) {
+  const candidates = (registeredDomains || [])
+    .filter((d) => d.registered && (d.risk === "high" || d.risk === "medium"))
+    .slice(0, 4);
+  const matches = [];
+  for (const domain of candidates) {
+    try {
+      const res = await fetch(`https://${domain.domain}/`, {
+        method: "GET",
+        redirect: "follow",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.1)" },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (!res.ok) continue;
+      const html = (await res.text()).slice(0, 40000);
+      const title = (html.match(/<title[^>]*>([^<]{1,120})/i) || [])[1] || "";
+      const ogSite = (html.match(/property=["']og:site_name["'][^>]*content=["']([^"']+)/i) || [])[1]
+        || (html.match(/content=["']([^"']+)["'][^>]*property=["']og:site_name["']/i) || [])[1]
+        || "";
+      const ogImage = (html.match(/property=["']og:image["'][^>]*content=["'](https?:[^"']+)/i) || [])[1]
+        || (html.match(/content=["'](https?:[^"']+)["'][^>]*property=["']og:image["']/i) || [])[1]
+        || null;
+      const score = Math.max(brandOverlapScore(brandName, title), brandOverlapScore(brandName, ogSite));
+      if (score >= 0.5) {
+        matches.push({
+          domain: domain.domain,
+          similarity: Number(score.toFixed(2)),
+          title: title.trim().slice(0, 80),
+          siteName: String(ogSite).trim().slice(0, 80),
+          ogImage,
+          risk: score >= 0.8 ? "high" : "medium",
+          reason: "Lookalike site title/branding closely matches your brand name"
+        });
+      }
+    } catch {
+      // ignore fetch failures
+    }
+  }
+  return matches.sort((a, b) => b.similarity - a.similarity);
+}
+
+function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, socialImposters, visualMatches = []) {
   const recommendations = [];
   const highRiskDomains = domainChecks.filter((d) => d.registered && d.risk === "high");
   const mediumRiskDomains = domainChecks.filter((d) => d.registered && d.risk === "medium");
@@ -363,6 +430,9 @@ function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, s
       recommendations.push(`Report impostor accounts to the respective platforms. ${totalImposters} account(s) using variations of your brand name.`);
     }
   }
+  if (visualMatches && visualMatches.length > 0) {
+    recommendations.push(`Brand lookalike content detected on ${visualMatches.length} registered domain(s). Review titles/OG branding for impersonation.`);
+  }
   if (securityGrade.score < 70) {
     recommendations.push(`Security grade is ${securityGrade.grade}. Implement missing security headers to improve protection.`);
   }
@@ -377,4 +447,4 @@ function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, s
   return recommendations.slice(0, 8);
 }
 
-export { generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, getImposterReason, generateThreatRecommendations };
+export { generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, getImposterReason, generateThreatRecommendations, scanVisualBrandSimilarity, brandOverlapScore };

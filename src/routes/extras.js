@@ -6,6 +6,7 @@ import { generateId, isValidUrl, sanitizeUrl, hashIp, hashUrl, getSecurityHeader
 import { createApiKey, authenticateApiKey, fireWebhook } from '../apiKeys.js';
 import { isAdminAuthorized, renderAdminPage } from '../admin.js';
 import { sendEmail, roastSummaryHtml } from '../mail.js';
+import { checkOperationRateLimit } from '../db.js';
 import { PRODUCTION_ORIGINS } from '../config.js';
 
 export async function verifyTurnstile(env, token, ip) {
@@ -197,6 +198,83 @@ export async function handleExtraRoutes(request, env, ctx, { corsHeaders, origin
     if (!body.url) return Response.json({ error: "url required" }, { status: 400, headers: corsHeaders });
     ctx.waitUntil(fireWebhook(body.url, { type: "test", at: new Date().toISOString() }));
     return Response.json({ success: true }, { headers: corsHeaders });
+  }
+
+  // #26 Opt-out / deletion request
+  if (path === "/api/opt-out" && request.method === "POST") {
+    try {
+      const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+      const ipHash = await hashIp(clientIp, env.IP_HASH_SALT, env.ENVIRONMENT);
+      const body = await request.json();
+      const targetUrl = sanitizeUrl(body.url || body.domain || "");
+      if (!targetUrl || !isValidUrl(targetUrl)) {
+        return Response.json({ error: "Please provide a valid URL to remove" }, { status: 400, headers: corsHeaders });
+      }
+      const rateLimit = await checkOperationRateLimit(env, ipHash, "optout");
+      if (!rateLimit.allowed) {
+        return Response.json(
+          { error: `Too many opt-out requests. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.` },
+          { status: 429, headers: corsHeaders }
+        );
+      }
+      let hostname = "";
+      try {
+        hostname = new URL(targetUrl).hostname.replace(/^www\./, "").toLowerCase();
+      } catch {
+        return Response.json({ error: "Invalid URL" }, { status: 400, headers: corsHeaders });
+      }
+      if (!hostname || hostname.length < 3) {
+        return Response.json({ error: "Invalid hostname" }, { status: 400, headers: corsHeaders });
+      }
+      const matches = await env.DB.prepare(`
+        SELECT id, screenshot_key, url FROM roasts
+        WHERE lower(url) LIKE ?
+           OR lower(url) LIKE ?
+           OR lower(url) LIKE ?
+           OR lower(url) LIKE ?
+           OR lower(url) LIKE ?
+           OR lower(url) LIKE ?
+        LIMIT 100
+      `).bind(
+        `https://${hostname}/%`,
+        `https://${hostname}`,
+        `http://${hostname}/%`,
+        `http://${hostname}`,
+        `https://www.${hostname}%`,
+        `http://www.${hostname}%`
+      ).all();
+      const rows = matches.results || [];
+      let deletedScreenshots = 0;
+      for (const row of rows) {
+        if (row.screenshot_key) {
+          try {
+            await env.SCREENSHOTS.delete(row.screenshot_key);
+            deletedScreenshots++;
+          } catch { /* ignore */ }
+        }
+      }
+      if (rows.length) {
+        const placeholders = rows.map(() => "?").join(",");
+        await env.DB.prepare(`DELETE FROM roasts WHERE id IN (${placeholders})`).bind(...rows.map((r) => r.id)).run();
+      }
+      const requestId = generateId();
+      await env.DB.prepare(
+        `INSERT INTO opt_out_requests (id, url, hostname, roast_count, ip_hash) VALUES (?, ?, ?, ?, ?)`
+      ).bind(requestId, targetUrl, hostname, rows.length, ipHash).run();
+      return Response.json({
+        success: true,
+        hostname,
+        deletedRoasts: rows.length,
+        deletedScreenshots,
+        requestId,
+        message: rows.length
+          ? `Removed ${rows.length} roast${rows.length === 1 ? "" : "s"} for ${hostname}.`
+          : `No stored roasts found for ${hostname}. Your opt-out was recorded.`
+      }, { headers: corsHeaders });
+    } catch (error) {
+      console.error("Opt-out failed:", error);
+      return Response.json({ error: "Failed to process opt-out request" }, { status: 500, headers: corsHeaders });
+    }
   }
 
   // #47 Email roast report (optional Resend)

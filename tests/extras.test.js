@@ -85,6 +85,12 @@ test("handleExtraRoutes exposes public /api/config", async () => {
   assert.equal(data.features.apiKeys, true);
 });
 
+test("brandOverlapScore detects brand tokens in titles", async () => {
+  const { brandOverlapScore } = await import("../src/threats.js");
+  assert.ok(brandOverlapScore("Acme Pay", "Acme Pay Support Portal") >= 0.5);
+  assert.equal(brandOverlapScore("Acme", "Totally Unrelated Blog"), 0);
+});
+
 test("fireWebhook formats Slack payloads", async () => {
   const originalFetch = globalThis.fetch;
   let seen;

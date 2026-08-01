@@ -37,7 +37,7 @@ import { renderSvgToPng } from './render.js';
 import {
     generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, 
     scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, 
-    getImposterReason, generateThreatRecommendations
+    getImposterReason, generateThreatRecommendations, scanVisualBrandSimilarity
 } from './threats.js';
 
 import {
@@ -2365,12 +2365,15 @@ data: ${JSON.stringify(data)}
           scanSocialMediaImposters(brandName, targetDomain)
         ]);
         const registeredLookalikes = typosquats.filter((d) => d.registered);
+        // #52 — brand/title similarity on registered lookalikes
+        const visualMatches = await scanVisualBrandSimilarity(brandName, registeredLookalikes);
         const suspiciousCount = registeredLookalikes.filter((d) => d.risk === "high" || d.risk === "medium").length;
         const imposterCount = socialImposters.filter((i) => i.risk === "high" || i.risk === "medium").length;
         let threatScore = 100;
         threatScore -= registeredLookalikes.length * 2;
         threatScore -= suspiciousCount * 5;
         threatScore -= imposterCount * 8;
+        threatScore -= visualMatches.length * 6;
         threatScore -= (100 - securityGrade.score) * 0.2;
         threatScore = Math.max(0, Math.min(100, Math.round(threatScore)));
         let riskLevel = "low";
@@ -2394,7 +2397,11 @@ data: ${JSON.stringify(data)}
             impostersFound: socialImposters.filter((i) => i.risk !== "low").length,
             accounts: socialImposters
           },
-          recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters),
+          visualSimilarity: {
+            matches: visualMatches,
+            method: "title_og_brand_overlap"
+          },
+          recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters, visualMatches),
           scannedAt: (/* @__PURE__ */ new Date()).toISOString()
         }, { headers: corsHeaders });
       } catch (error32) {
@@ -3468,82 +3475,6 @@ data: ${JSON.stringify(data)}
       }
     }
     // #26 — privacy opt-out: purge all stored roasts + screenshots for a URL/domain
-    if (url.pathname === "/api/opt-out" && request.method === "POST") {
-      try {
-        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
-        const body = await request.json();
-        const targetUrl = sanitizeUrl(body.url || body.domain || "");
-        if (!targetUrl || !isValidUrl(targetUrl)) {
-          return Response.json({ error: "Please provide a valid URL to remove" }, { status: 400, headers: corsHeaders });
-        }
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "optout");
-        if (!rateLimit.allowed) {
-          return Response.json(
-            { error: `Too many opt-out requests. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.` },
-            { status: 429, headers: corsHeaders }
-          );
-        }
-        let hostname = "";
-        try {
-          hostname = new URL(targetUrl).hostname.replace(/^www\./, "").toLowerCase();
-        } catch {
-          return Response.json({ error: "Invalid URL" }, { status: 400, headers: corsHeaders });
-        }
-        if (!hostname || hostname.length < 3) {
-          return Response.json({ error: "Invalid hostname" }, { status: 400, headers: corsHeaders });
-        }
-        const matches = await env22.DB.prepare(`
-          SELECT id, screenshot_key, url FROM roasts
-          WHERE lower(url) LIKE ?
-             OR lower(url) LIKE ?
-             OR lower(url) LIKE ?
-             OR lower(url) LIKE ?
-             OR lower(url) LIKE ?
-             OR lower(url) LIKE ?
-          LIMIT 100
-        `).bind(
-          `https://${hostname}/%`,
-          `https://${hostname}`,
-          `http://${hostname}/%`,
-          `http://${hostname}`,
-          `https://www.${hostname}%`,
-          `http://www.${hostname}%`
-        ).all();
-        const rows = matches.results || [];
-        let deletedScreenshots = 0;
-        for (const row of rows) {
-          if (row.screenshot_key) {
-            try {
-              await env22.SCREENSHOTS.delete(row.screenshot_key);
-              deletedScreenshots++;
-            } catch {
-            }
-          }
-        }
-        if (rows.length) {
-          const placeholders = rows.map(() => "?").join(",");
-          await env22.DB.prepare(`DELETE FROM roasts WHERE id IN (${placeholders})`).bind(...rows.map((r) => r.id)).run();
-        }
-        const requestId = generateId();
-        await env22.DB.prepare(
-          `INSERT INTO opt_out_requests (id, url, hostname, roast_count, ip_hash) VALUES (?, ?, ?, ?, ?)`
-        ).bind(requestId, targetUrl, hostname, rows.length, ipHash).run();
-        return Response.json({
-          success: true,
-          hostname,
-          deletedRoasts: rows.length,
-          deletedScreenshots,
-          requestId,
-          message: rows.length
-            ? `Removed ${rows.length} roast${rows.length === 1 ? "" : "s"} for ${hostname}.`
-            : `No stored roasts found for ${hostname}. Your opt-out was recorded.`
-        }, { headers: corsHeaders });
-      } catch (error32) {
-        safeLogError("Opt-out failed:", error32);
-        return Response.json({ error: "Failed to process opt-out request" }, { status: 500, headers: corsHeaders });
-      }
-    }
     if (env22.ASSETS) {
       return env22.ASSETS.fetch(request);
     }
