@@ -247,8 +247,11 @@ export default {
           hashUrl(url2, device + (fullPage ? "-full" : ""))
         ]);
         const [cached1, cached2] = await Promise.all([
-          getCachedRoast(env22, hash1, url1),
-          getCachedRoast(env22, hash2, url2)
+          // Compare does not persist fresh captures, so repeatedly rejecting a
+          // legacy row would force a full Browser + AI recapture on every request.
+          // Its metric helpers safely handle missing legacy audit data.
+          getCachedRoast(env22, hash1, url1, { requireAuditData: false }),
+          getCachedRoast(env22, hash2, url2, { requireAuditData: false })
         ]);
         const needCapture1 = !cached1;
         const needCapture2 = !cached2;

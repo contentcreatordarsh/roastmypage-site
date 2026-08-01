@@ -97,7 +97,7 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
   }
   return { allowed: true, remaining: maxRequests - record.request_count, resetIn };
 }
-async function getCachedRoast(env22, urlHash, url) {
+async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } = {}) {
   let cacheTTLHours = CONFIG.CACHE_TTL_HOURS;
   if (url) {
     try {
@@ -114,10 +114,9 @@ async function getCachedRoast(env22, urlHash, url) {
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
   `).bind(urlHash, cacheExpiry.toISOString()).first();
   if (!cached) return null;
-  // Self-heal: a legacy cached roast missing SEO/performance data renders blank "-"
-  // cards (and can break Compare). Treat it as a cache miss so it's re-captured with
-  // complete data instead of serving an incomplete result.
-  if (!cached.seo_data || !cached.performance_data) return null;
+  // By default, self-heal legacy rows that would render blank audit cards.
+  // Callers that cannot persist a recapture may opt into the incomplete row.
+  if (requireAuditData && (!cached.seo_data || !cached.performance_data)) return null;
   let quickWins = [];
   try {
     quickWins = cached.quick_wins ? JSON.parse(cached.quick_wins) : [];
