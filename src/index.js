@@ -19,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, apiV1RateLimitHeaders, purgeExpiredRoasts
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -85,6 +85,7 @@ export default {
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
+        const forceFresh = body.force === true || body.fresh === true;
         const targetUrl = sanitizeUrl(rawUrl);
         if (!targetUrl || !isValidUrl(targetUrl)) {
           return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
@@ -100,9 +101,15 @@ export default {
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        if (!forceFresh) {
+          const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedResult) {
+            return Response.json({
+              ...cachedResult,
+              device: cachedResult.device || device,
+              fullPage: cachedResult.fullPage ?? fullPage
+            }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
         }
         const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
           (async () => {
@@ -131,8 +138,8 @@ export default {
             const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, analysis.overallScore, industry, "overall") : null;
             ctx.waitUntil(
               env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
                 roastId,
                 targetUrl,
@@ -150,7 +157,9 @@ export default {
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(enhancedHeatmap),
-                industry
+                industry,
+                device,
+                fullPage ? 1 : 0
               ).run()
             );
             return {
@@ -567,8 +576,8 @@ export default {
             const formattedRoast = formatRoast(analysis, targetUrl);
             ctx.waitUntil(
               env22.DB.prepare(`
-                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(
                 roastId,
                 targetUrl,
@@ -586,7 +595,9 @@ export default {
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(heatmap),
-                analysis.industry || "other"
+                analysis.industry || "other",
+                device,
+                0
               ).run()
             );
             results.push({
@@ -638,6 +649,7 @@ export default {
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
+        const forceFresh = body.force === true || body.fresh === true;
         const targetUrl = sanitizeUrl(body.url);
         if (!targetUrl || !isValidUrl(targetUrl)) {
           return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
@@ -653,9 +665,16 @@ export default {
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        if (!forceFresh) {
+          const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedResult) {
+            return Response.json({
+              ...cachedResult,
+              device: cachedResult.device || device,
+              fullPage: cachedResult.fullPage ?? fullPage,
+              cached: true
+            }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
         }
         if (inFlightRequests.has(urlHash)) {
           return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
@@ -699,8 +718,8 @@ data: ${JSON.stringify(data)}
                 await sendEvent("progress", { step: "finalize", message: "Generating report...", progress: 90 });
                 const formattedRoast = formatRoast(analysis, targetUrl, brandName);
                 await env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
                   roastId,
                   targetUrl,
@@ -718,7 +737,9 @@ data: ${JSON.stringify(data)}
                   JSON.stringify(pageData.seo),
                   JSON.stringify(pageData.performance),
                   JSON.stringify(enhancedHeatmap),
-                  analysis.industry || "other"
+                  analysis.industry || "other",
+                  device,
+                  fullPage ? 1 : 0
                 ).run();
                 const result = {
                   id: roastId,
@@ -791,7 +812,12 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
       }
       const roastIndustry = roast.industry || "other";
-      return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
+      return Response.json({
+        ...roast,
+        device: roast.device || "desktop",
+        fullPage: roast.full_page === 1 || roast.full_page === true,
+        benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other
+      }, { headers: corsHeaders });
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
@@ -2656,8 +2682,8 @@ data: ${JSON.stringify(data)}
         const enhancedHeatmap = { ...heatmap, foldLine: pageData.foldLinePercent || heatmap.foldLine };
         ctx.waitUntil(
           env22.DB.prepare(`
-            INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry, device, full_page)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             roastId,
             targetUrl,
@@ -2675,7 +2701,9 @@ data: ${JSON.stringify(data)}
             JSON.stringify(pageData.seo),
             JSON.stringify(pageData.performance),
             JSON.stringify(enhancedHeatmap),
-            industry
+            industry,
+            device,
+            0
           ).run()
         );
         return Response.json({
@@ -2805,7 +2833,8 @@ data: ${JSON.stringify(data)}
       const roastId = url.pathname.split("/").pop();
       const roast = await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score,
-               roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, created_at
+               roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry,
+               device, full_page, created_at
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
       if (!roast) {
@@ -3367,10 +3396,97 @@ data: ${JSON.stringify(data)}
         return env22.ASSETS.fetch(new Request(indexUrl.toString(), request));
       }
     }
+    // #26 — privacy opt-out: purge all stored roasts + screenshots for a URL/domain
+    if (url.pathname === "/api/opt-out" && request.method === "POST") {
+      try {
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const body = await request.json();
+        const targetUrl = sanitizeUrl(body.url || body.domain || "");
+        if (!targetUrl || !isValidUrl(targetUrl)) {
+          return Response.json({ error: "Please provide a valid URL to remove" }, { status: 400, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "optout");
+        if (!rateLimit.allowed) {
+          return Response.json(
+            { error: `Too many opt-out requests. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.` },
+            { status: 429, headers: corsHeaders }
+          );
+        }
+        let hostname = "";
+        try {
+          hostname = new URL(targetUrl).hostname.replace(/^www\./, "").toLowerCase();
+        } catch {
+          return Response.json({ error: "Invalid URL" }, { status: 400, headers: corsHeaders });
+        }
+        if (!hostname || hostname.length < 3) {
+          return Response.json({ error: "Invalid hostname" }, { status: 400, headers: corsHeaders });
+        }
+        const matches = await env22.DB.prepare(`
+          SELECT id, screenshot_key, url FROM roasts
+          WHERE lower(url) LIKE ?
+             OR lower(url) LIKE ?
+             OR lower(url) LIKE ?
+             OR lower(url) LIKE ?
+          LIMIT 100
+        `).bind(
+          `https://${hostname}/%`,
+          `https://${hostname}`,
+          `http://${hostname}/%`,
+          `http://${hostname}`,
+          `https://www.${hostname}%`,
+          `http://www.${hostname}%`
+        ).all();
+        const rows = matches.results || [];
+        let deletedScreenshots = 0;
+        for (const row of rows) {
+          if (row.screenshot_key) {
+            try {
+              await env22.SCREENSHOTS.delete(row.screenshot_key);
+              deletedScreenshots++;
+            } catch {
+            }
+          }
+        }
+        if (rows.length) {
+          const placeholders = rows.map(() => "?").join(",");
+          await env22.DB.prepare(`DELETE FROM roasts WHERE id IN (${placeholders})`).bind(...rows.map((r) => r.id)).run();
+        }
+        const requestId = generateId();
+        await env22.DB.prepare(
+          `INSERT INTO opt_out_requests (id, url, hostname, roast_count, ip_hash) VALUES (?, ?, ?, ?, ?)`
+        ).bind(requestId, targetUrl, hostname, rows.length, ipHash).run();
+        return Response.json({
+          success: true,
+          hostname,
+          deletedRoasts: rows.length,
+          deletedScreenshots,
+          requestId,
+          message: rows.length
+            ? `Removed ${rows.length} roast${rows.length === 1 ? "" : "s"} for ${hostname}.`
+            : `No stored roasts found for ${hostname}. Your opt-out was recorded.`
+        }, { headers: corsHeaders });
+      } catch (error32) {
+        safeLogError("Opt-out failed:", error32);
+        return Response.json({ error: "Failed to process opt-out request" }, { status: 500, headers: corsHeaders });
+      }
+    }
     if (env22.ASSETS) {
       return env22.ASSETS.fetch(request);
     }
     return new Response("Not Found", { status: 404 });
+  },
+
+  // #40 — daily retention cleanup for old roasts/screenshots
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        const result = await purgeExpiredRoasts(env, CONFIG.RETENTION_DAYS);
+        console.log(`[retention] purged ${result.deletedRoasts} roasts / ${result.deletedScreenshots} screenshots older than ${result.cutoff}`);
+      } catch (err) {
+        console.error("[retention] cleanup failed", err);
+      }
+    })());
   }
 
 };

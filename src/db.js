@@ -55,7 +55,8 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
     batch: CONFIG.RATE_LIMIT_BATCH_MAX,
     feedback: CONFIG.RATE_LIMIT_FEEDBACK_MAX,
     subscribe: CONFIG.RATE_LIMIT_SUBSCRIBE_MAX,
-    threat: CONFIG.RATE_LIMIT_THREAT_MAX
+    threat: CONFIG.RATE_LIMIT_THREAT_MAX,
+    optout: CONFIG.RATE_LIMIT_OPTOUT_MAX
   };
   const maxRequests = limits2[operation];
   const now = /* @__PURE__ */ new Date();
@@ -110,7 +111,7 @@ async function getCachedRoast(env22, urlHash, url) {
   }
   const cacheExpiry = new Date(Date.now() - cacheTTLHours * 60 * 60 * 1e3);
   const cached = await env22.DB.prepare(`
-    SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry
+    SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry, device, full_page
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
   `).bind(urlHash, cacheExpiry.toISOString()).first();
   if (!cached) return null;
@@ -155,10 +156,46 @@ async function getCachedRoast(env22, urlHash, url) {
     performance: performance22,
     heatmap,
     industry,
+    device: cached.device || "desktop",
+    fullPage: cached.full_page === 1 || cached.full_page === true,
     benchmarks: INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
     percentile: percentileData
     // { percentile, betterThan, totalSamples }
   };
+}
+
+async function purgeExpiredRoasts(env, retentionDays = CONFIG.RETENTION_DAYS) {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1e3).toISOString();
+  const expired = await env.DB.prepare(
+    "SELECT id, screenshot_key FROM roasts WHERE created_at < ? ORDER BY created_at ASC LIMIT 200"
+  ).bind(cutoff).all();
+  const rows = expired.results || [];
+  let deletedScreenshots = 0;
+  for (const row of rows) {
+    if (row.screenshot_key && env.SCREENSHOTS) {
+      try {
+        await env.SCREENSHOTS.delete(row.screenshot_key);
+        deletedScreenshots++;
+      } catch (err) {
+        console.error("Failed to delete screenshot", row.screenshot_key, err);
+      }
+    }
+  }
+  if (rows.length) {
+    const placeholders = rows.map(() => "?").join(",");
+    await env.DB.prepare(
+      `DELETE FROM roasts WHERE id IN (${placeholders})`
+    ).bind(...rows.map((r) => r.id)).run();
+  }
+  // Opportunistic housekeeping for unbounded support tables
+  await env.DB.prepare(
+    "DELETE FROM rate_limits WHERE last_request < ?"
+  ).bind(cutoff).run();
+  const dayCutoff = cutoff.slice(0, 10);
+  await env.DB.prepare(
+    "DELETE FROM api_v1_counters WHERE day_key < ?"
+  ).bind(dayCutoff).run();
+  return { deletedRoasts: rows.length, deletedScreenshots, cutoff };
 }
 
 async function getApiV1Counts(env, ipHash) {
@@ -275,4 +312,4 @@ function apiV1RateLimitHeaders(ipCount, globalCount) {
   };
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, apiV1RateLimitHeaders };
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, apiV1RateLimitHeaders, purgeExpiredRoasts };

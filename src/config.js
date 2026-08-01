@@ -39,7 +39,11 @@ const CONFIG = {
   // Email subscribe per hour
   RATE_LIMIT_THREAT_MAX: 10,
   // Threat scans per hour
+  RATE_LIMIT_OPTOUT_MAX: 5,
+  // Deletion / opt-out requests per hour (#26)
   RATE_LIMIT_WINDOW_MINUTES: 60,
+  // Data retention (#40) — scheduled cleanup deletes older roasts + screenshots
+  RETENTION_DAYS: 90,
   // Global limits (circuit breaker)
   GLOBAL_HOURLY_LIMIT: 2e3,
   // NEW: Max requests/hour globally

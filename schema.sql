@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS roasts (
   performance_data TEXT,
   heatmap_data TEXT,
   industry TEXT DEFAULT 'other',
+  device TEXT DEFAULT 'desktop',
+  full_page INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_roasts_url_hash ON roasts(url_hash);
@@ -71,3 +73,14 @@ CREATE TABLE IF NOT EXISTS api_v1_counters (
   PRIMARY KEY (day_key, ip_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_api_v1_counters_day ON api_v1_counters(day_key);
+
+-- Privacy opt-out audit trail (#26)
+CREATE TABLE IF NOT EXISTS opt_out_requests (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  hostname TEXT,
+  roast_count INTEGER DEFAULT 0,
+  ip_hash TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_opt_out_hostname ON opt_out_requests(hostname);
