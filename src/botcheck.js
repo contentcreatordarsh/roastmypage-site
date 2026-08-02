@@ -79,6 +79,27 @@ function botChallengeError(reasons = []) {
   return new Error(`${BOT_CHALLENGE_ERROR_PREFIX} ${BOT_CHALLENGE_MESSAGE}${detail}`);
 }
 
+/**
+ * True when a *stored* roast was produced from a challenge interstitial. Rows
+ * written before detection existed hold a fabricated score, and the 7-day cache
+ * would keep replaying it — so callers treat these as a cache miss (same
+ * self-healing idea as incomplete audit rows) and re-capture instead.
+ *
+ * Only the page title survives in seo_data, so this is deliberately narrower
+ * than detectBotChallenge().
+ *
+ * @param {string|object|null} seoData stored seo_data column (JSON string or parsed)
+ */
+function isStoredChallengeRoast(seoData) {
+  if (!seoData) return false;
+  try {
+    const parsed = typeof seoData === "string" ? JSON.parse(seoData) : seoData;
+    return CHALLENGE_TITLE_RE.test(parsed?.title?.text || "");
+  } catch {
+    return false;
+  }
+}
+
 /** True when an error (or message) came from bot-challenge detection. */
 function isBotChallengeError(error) {
   const message = typeof error === "string" ? error : error?.message || "";
@@ -89,6 +110,7 @@ export {
   detectBotChallenge,
   botChallengeError,
   isBotChallengeError,
+  isStoredChallengeRoast,
   BOT_CHALLENGE_ERROR_PREFIX,
   BOT_CHALLENGE_MESSAGE,
   CHALLENGE_TITLE_RE,

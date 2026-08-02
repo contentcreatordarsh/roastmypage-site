@@ -4,6 +4,7 @@ import {
   detectBotChallenge,
   botChallengeError,
   isBotChallengeError,
+  isStoredChallengeRoast,
   BOT_CHALLENGE_MESSAGE
 } from "../src/botcheck.js";
 
@@ -112,6 +113,26 @@ test("botChallengeError round-trips through isBotChallengeError", () => {
   assert.equal(isBotChallengeError(err), true);
   assert.ok(err.message.includes(BOT_CHALLENGE_MESSAGE));
   assert.ok(err.message.includes("#challenge-form present"));
+});
+
+test("isStoredChallengeRoast spots a cached interstitial roast", () => {
+  // The exact stored shape behind the reported bug.
+  const seoData = JSON.stringify({
+    score: 75,
+    title: { text: "Just a moment...", length: 16, status: "short" },
+    metaDescription: { text: "", length: 0, status: "missing" }
+  });
+  assert.equal(isStoredChallengeRoast(seoData), true);
+  assert.equal(isStoredChallengeRoast(JSON.parse(seoData)), true);
+});
+
+test("isStoredChallengeRoast leaves legitimate cached roasts alone", () => {
+  const legit = JSON.stringify({ title: { text: "Home", length: 4, status: "short" } });
+  assert.equal(isStoredChallengeRoast(legit), false);
+  assert.equal(isStoredChallengeRoast(null), false);
+  assert.equal(isStoredChallengeRoast(""), false);
+  assert.equal(isStoredChallengeRoast("not json"), false);
+  assert.equal(isStoredChallengeRoast("{}"), false);
 });
 
 test("isBotChallengeError ignores unrelated failures", () => {
