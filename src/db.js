@@ -97,7 +97,7 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
   }
   return { allowed: true, remaining: maxRequests - record.request_count, resetIn };
 }
-async function getCachedRoast(env22, urlHash, url) {
+async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } = {}) {
   let cacheTTLHours = CONFIG.CACHE_TTL_HOURS;
   if (url) {
     try {
@@ -114,10 +114,9 @@ async function getCachedRoast(env22, urlHash, url) {
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
   `).bind(urlHash, cacheExpiry.toISOString()).first();
   if (!cached) return null;
-  // Self-heal: a legacy cached roast missing SEO/performance data renders blank "-"
-  // cards (and can break Compare). Treat it as a cache miss so it's re-captured with
-  // complete data instead of serving an incomplete result.
-  if (!cached.seo_data || !cached.performance_data) return null;
+  // By default, self-heal legacy rows that would render blank audit cards.
+  // Callers that cannot persist a recapture may opt into the incomplete row.
+  if (requireAuditData && (!cached.seo_data || !cached.performance_data)) return null;
   let quickWins = [];
   try {
     quickWins = cached.quick_wins ? JSON.parse(cached.quick_wins) : [];
@@ -263,6 +262,24 @@ async function consumeApiV1Quota(env, ipHash) {
   }
 }
 
+async function releaseApiV1Quota(env, ipHash) {
+  const dayKey = getApiDayKey();
+  try {
+    const result = await env.DB.prepare(`
+      UPDATE api_v1_counters
+      SET request_count = request_count - 1,
+          updated_at = datetime('now')
+      WHERE day_key = ?
+        AND ip_hash = ?
+        AND request_count > 0
+    `).bind(dayKey, ipHash).run();
+    return Number(result.meta?.changes || 0) > 0;
+  } catch (error) {
+    console.error("API v1 quota release failed:", error);
+    return false;
+  }
+}
+
 function apiV1RateLimitHeaders(ipCount, globalCount) {
   const resetAt = /* @__PURE__ */ new Date();
   resetAt.setUTCHours(24, 0, 0, 0);
@@ -275,4 +292,4 @@ function apiV1RateLimitHeaders(ipCount, globalCount) {
   };
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, apiV1RateLimitHeaders };
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };

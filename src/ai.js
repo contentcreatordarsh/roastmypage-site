@@ -178,9 +178,20 @@ async function ensureLlamaLicenseAgreed(env22) {
     console.log("Llama license agreement check failed (may already be agreed):", e);
   }
 }
-async function analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage = false, attempt = 1) {
+async function analyzeWithVisionAndHeatmap(
+  env22,
+  screenshotBase64,
+  url,
+  isFullPage = false,
+  attempt = 1,
+  deadline = Date.now() + CONFIG.AI_TIMEOUT_MS
+) {
   try {
     await ensureLlamaLicenseAgreed(env22);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error("AI vision analysis timed out");
+    }
     const prompt = `Analyze this landing page screenshot as a conversion optimization expert. Rate each category 1-10 and CALIBRATE carefully using the full range:
 
 - 9-10: Exceptional, best-in-class execution (rare).
@@ -218,7 +229,7 @@ Respond with your analysis.`;
         max_tokens: CONFIG.AI_MAX_TOKENS,
         temperature: 0.3
       }),
-      CONFIG.AI_TIMEOUT_MS,
+      Math.min(CONFIG.AI_TIMEOUT_MS, remainingMs),
       "AI vision analysis"
     );
     const rawText = response.response || JSON.stringify(response);
@@ -341,9 +352,12 @@ Respond with your analysis.`;
     const isTransient = /capacity|overloaded|too many requests|rate.?limit|\b(429|500|502|503|504|3040)\b/i.test(errMsg) && !/timed? ?out|timeout/i.test(errMsg);
     if (isTransient && attempt < CONFIG.AI_MAX_ATTEMPTS) {
       const backoffMs = CONFIG.AI_RETRY_BASE_MS * Math.pow(2, attempt - 1);
-      console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): ${errMsg} — retrying in ${backoffMs}ms`);
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-      return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1);
+      if (Date.now() + backoffMs < deadline) {
+        console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): ${errMsg} — retrying in ${backoffMs}ms`);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1, deadline);
+      }
+      console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): retry budget exhausted`);
     }
     console.error(`AI analysis failed (attempt ${attempt}): ${errMsg}`, error32);
     return {
