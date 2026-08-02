@@ -81,6 +81,53 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
   assert.equal(cached.id, "legacy-1");
   assert.equal(cached.seo, null);
   assert.equal(cached.performance, null);
+  assert.equal(cached.device, "desktop");
+  assert.equal(cached.fullPage, false);
+});
+
+test("getCachedRoast returns stored device and fullPage metadata", async () => {
+  const storedRoast = {
+    id: "stored-1",
+    url: "https://example.com/",
+    url_hash: "hash",
+    overall_score: 8,
+    hero_score: 8,
+    cta_score: 8,
+    trust_score: 8,
+    copy_score: 8,
+    design_score: 8,
+    roast_response: "Stored roast",
+    quick_wins: "[]",
+    device: "mobile",
+    full_page: 1,
+    seo_data: JSON.stringify({ score: 90 }),
+    performance_data: JSON.stringify({ score: 85 }),
+    heatmap_data: null,
+    industry: "other"
+  };
+  let selectSql = "";
+  const env = {
+    DB: {
+      prepare(sql) {
+        if (sql.includes("SELECT id, url")) selectSql = sql;
+        return {
+          bind() {
+            return {
+              first: async () => sql.includes("SELECT id, url") ? storedRoast : { count: 1 }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const cached = await getCachedRoast(env, "hash", storedRoast.url);
+
+  assert.match(selectSql, /device/);
+  assert.match(selectSql, /full_page/);
+  assert.equal(cached.id, "stored-1");
+  assert.equal(cached.device, "mobile");
+  assert.equal(cached.fullPage, true);
 });
 
 test("releaseApiV1Quota atomically restores a reserved daily quota", async () => {

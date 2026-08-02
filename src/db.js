@@ -110,7 +110,7 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   }
   const cacheExpiry = new Date(Date.now() - cacheTTLHours * 60 * 60 * 1e3);
   const cached = await env22.DB.prepare(`
-    SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry
+    SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, device, full_page, seo_data, performance_data, heatmap_data, industry
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
   `).bind(urlHash, cacheExpiry.toISOString()).first();
   if (!cached) return null;
@@ -150,6 +150,8 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     quickWins,
     screenshotUrl: `/api/screenshot/${cached.id}`,
     cached: true,
+    device: cached.device || "desktop",
+    fullPage: Number(cached.full_page || 0) === 1,
     seo,
     performance: performance22,
     video: seo?.video || null,

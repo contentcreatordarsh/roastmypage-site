@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS roasts (
   roast_response TEXT,
   quick_wins TEXT,
   country TEXT,
+  device TEXT,
+  full_page INTEGER DEFAULT 0,
   seo_data TEXT,
   performance_data TEXT,
   heatmap_data TEXT,

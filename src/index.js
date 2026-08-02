@@ -102,7 +102,11 @@ export default {
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          return Response.json({
+            ...cachedResult,
+            device: cachedResult.device ?? device,
+            fullPage: cachedResult.fullPage ?? fullPage
+          }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
         const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
           (async () => {
@@ -131,8 +135,8 @@ export default {
             const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, analysis.overallScore, industry, "overall") : null;
             ctx.waitUntil(
               env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, device, full_page, seo_data, performance_data, heatmap_data, industry)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
                 roastId,
                 targetUrl,
@@ -147,6 +151,8 @@ export default {
                 formattedRoast,
                 JSON.stringify(analysis.quickWins),
                 clientCountry,
+                device,
+                fullPage ? 1 : 0,
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(enhancedHeatmap),
@@ -555,7 +561,12 @@ export default {
             const urlHash = await hashUrl(targetUrl, device);
             const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
             if (cachedResult) {
-              results.push({ ...cachedResult, device, cached: true });
+              results.push({
+                ...cachedResult,
+                device: cachedResult.device ?? device,
+                fullPage: cachedResult.fullPage ?? false,
+                cached: true
+              });
               continue;
             }
             const roastId = generateId();
@@ -571,8 +582,8 @@ export default {
             const formattedRoast = formatRoast(analysis, targetUrl);
             ctx.waitUntil(
               env22.DB.prepare(`
-                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, device, full_page, seo_data, performance_data, heatmap_data, industry)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(
                 roastId,
                 targetUrl,
@@ -587,6 +598,8 @@ export default {
                 formattedRoast,
                 JSON.stringify(analysis.quickWins),
                 clientCountry,
+                device,
+                0,
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(heatmap),
@@ -602,6 +615,7 @@ export default {
               screenshotUrl: `/api/screenshot/${roastId}`,
               cached: false,
               device,
+              fullPage: false,
               seo: { score: pageData.seo.score, issues: pageData.seo.issues },
               performance: { score: pageData.performance.score, loadTime: pageData.performance.loadTime }
             });
@@ -659,7 +673,12 @@ export default {
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          return Response.json({
+            ...cachedResult,
+            device: cachedResult.device ?? device,
+            fullPage: cachedResult.fullPage ?? fullPage,
+            cached: true
+          }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
         if (inFlightRequests.has(urlHash)) {
           return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
@@ -704,8 +723,8 @@ data: ${JSON.stringify(data)}
                 await sendEvent("progress", { step: "finalize", message: "Generating report...", progress: 90 });
                 const formattedRoast = formatRoast(analysis, targetUrl, brandName);
                 await env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, device, full_page, seo_data, performance_data, heatmap_data, industry)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(
                   roastId,
                   targetUrl,
@@ -720,6 +739,8 @@ data: ${JSON.stringify(data)}
                   formattedRoast,
                   JSON.stringify(analysis.quickWins),
                   roastCountry,
+                  device,
+                  fullPage ? 1 : 0,
                   JSON.stringify(pageData.seo),
                   JSON.stringify(pageData.performance),
                   JSON.stringify(enhancedHeatmap),
@@ -797,7 +818,12 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
       }
       const roastIndustry = roast.industry || "other";
-      return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
+      return Response.json({
+        ...roast,
+        device: roast.device || "desktop",
+        fullPage: Number(roast.full_page || 0) === 1,
+        benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other
+      }, { headers: corsHeaders });
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
@@ -2616,6 +2642,8 @@ data: ${JSON.stringify(data)}
             success: true,
             cached: true,
             url: targetUrl,
+            device: cachedResult.device ?? device,
+            fullPage: cachedResult.fullPage ?? false,
             scores: {
               overall: cachedResult.overallScore,
               hero: cachedResult.scores.hero,
@@ -2666,8 +2694,8 @@ data: ${JSON.stringify(data)}
         const enhancedHeatmap = { ...heatmap, foldLine: pageData.foldLinePercent || heatmap.foldLine };
         ctx.waitUntil(
           env22.DB.prepare(`
-            INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, device, full_page, seo_data, performance_data, heatmap_data, industry)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             roastId,
             targetUrl,
@@ -2682,6 +2710,8 @@ data: ${JSON.stringify(data)}
             formattedRoast,
             JSON.stringify(analysis.quickWins),
             clientCountry,
+            device,
+            0,
             JSON.stringify(pageData.seo),
             JSON.stringify(pageData.performance),
             JSON.stringify(enhancedHeatmap),
@@ -2692,6 +2722,8 @@ data: ${JSON.stringify(data)}
           success: true,
           cached: false,
           url: targetUrl,
+          device,
+          fullPage: false,
           scores: {
             overall: analysis.overallScore,
             hero: analysis.scores.hero,
