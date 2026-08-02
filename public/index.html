@@ -929,6 +929,23 @@
                 <button onclick="showTab('compare')" id="tab-compare">Compare</button>
                 <button onclick="showTab('batch')" id="tab-batch">Batch</button>
             </div>
+
+            <div id="roast-resume-banner" class="hidden rise-in rise-in-delay-4 max-w-xl mx-auto mb-4 text-left">
+                <div class="card p-4 border-orange-500/25 bg-orange-500/[0.06]">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                        <div class="min-w-0">
+                            <p class="text-[13px] text-cream-100 font-medium">
+                                Roast in progress for <span id="roast-resume-url" class="text-orange-300 break-all"></span>
+                            </p>
+                            <p id="roast-resume-detail" class="text-[12px] text-cream-300/50 mt-1"></p>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <button onclick="resumeRoastProgress()" class="px-3 py-2 rounded-lg bg-orange-500/20 text-orange-200 hover:bg-orange-500/30 text-[12px] font-semibold transition-colors">Resume</button>
+                            <button onclick="dismissRoastProgress()" class="px-3 py-2 rounded-lg border border-white/[0.08] text-cream-300/60 hover:text-cream-100 hover:border-white/[0.16] text-[12px] font-semibold transition-colors">Dismiss</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             
             <!-- Single Roast Form -->
             <div id="form-single" class="rise-in rise-in-delay-4 card p-5 sm:p-7 max-w-xl mx-auto mb-4 text-left">
@@ -4249,6 +4266,9 @@
         let currentTab = 'single';
         let fullPageMode = false;
         const HISTORY_KEY = 'roast_history';
+        const ROAST_PROGRESS_KEY = 'rmlp_roast_progress';
+        const ROAST_PROGRESS_MAX_AGE_MS = 10 * 60 * 1000;
+        let activeRoastProgress = null;
         
         // Queue state
         let queueCountdown = 0;
@@ -4256,6 +4276,123 @@
         let pendingUrl = null;
         let retryCount = 0;
         const MAX_AUTO_RETRIES = 3;
+
+        function getRoastProgressTimestamp(value) {
+            const timestamp = typeof value === 'number' ? value : Date.parse(value);
+            return Number.isFinite(timestamp) ? timestamp : 0;
+        }
+
+        function sanitizeRoastProgress(progress) {
+            if (!progress || progress.status !== 'in_progress' || typeof progress.url !== 'string') return null;
+            const startedAt = getRoastProgressTimestamp(progress.startedAt);
+            if (!startedAt || Date.now() - startedAt >= ROAST_PROGRESS_MAX_AGE_MS) return null;
+            const device = ['desktop', 'tablet', 'mobile'].includes(progress.device) ? progress.device : 'desktop';
+            const pct = Number(progress.progress);
+            return {
+                url: progress.url,
+                device,
+                fullPage: Boolean(progress.fullPage),
+                startedAt,
+                lastStep: typeof progress.lastStep === 'string' ? progress.lastStep : 'start',
+                message: typeof progress.message === 'string' ? progress.message : 'Preparing to capture your page',
+                progress: Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0,
+                status: 'in_progress'
+            };
+        }
+
+        function readRoastProgress() {
+            try {
+                const progress = sanitizeRoastProgress(JSON.parse(localStorage.getItem(ROAST_PROGRESS_KEY) || 'null'));
+                if (!progress) localStorage.removeItem(ROAST_PROGRESS_KEY);
+                return progress;
+            } catch {
+                try { localStorage.removeItem(ROAST_PROGRESS_KEY); } catch {}
+                return null;
+            }
+        }
+
+        function writeRoastProgress(progress) {
+            const safeProgress = sanitizeRoastProgress(progress);
+            if (!safeProgress) {
+                clearRoastProgress();
+                return;
+            }
+            activeRoastProgress = safeProgress;
+            try { localStorage.setItem(ROAST_PROGRESS_KEY, JSON.stringify(safeProgress)); } catch {}
+        }
+
+        function beginRoastProgress(url) {
+            writeRoastProgress({
+                url,
+                device: currentDevice,
+                fullPage: fullPageMode,
+                startedAt: Date.now(),
+                lastStep: 'start',
+                message: 'Preparing to capture your page',
+                progress: 0,
+                status: 'in_progress'
+            });
+            hideRoastProgressBanner();
+        }
+
+        function persistRoastProgressUpdate(lastStep, message, progress) {
+            if (!activeRoastProgress) return;
+            writeRoastProgress({
+                ...activeRoastProgress,
+                lastStep: lastStep || activeRoastProgress.lastStep,
+                message: message || activeRoastProgress.message,
+                progress: progress ?? activeRoastProgress.progress
+            });
+        }
+
+        function clearRoastProgress() {
+            activeRoastProgress = null;
+            try { localStorage.removeItem(ROAST_PROGRESS_KEY); } catch {}
+            hideRoastProgressBanner();
+        }
+
+        function hideRoastProgressBanner() {
+            document.getElementById('roast-resume-banner')?.classList.add('hidden');
+        }
+
+        function showRoastProgressBanner(progress) {
+            const banner = document.getElementById('roast-resume-banner');
+            if (!banner) return;
+            const urlEl = document.getElementById('roast-resume-url');
+            const detailEl = document.getElementById('roast-resume-detail');
+            if (urlEl) urlEl.textContent = progress.url;
+            if (detailEl) {
+                const pct = Math.round(progress.progress || 0);
+                detailEl.textContent = `${progress.message || 'Still working'}${pct ? ` (${pct}%)` : ''}`;
+            }
+            banner.classList.remove('hidden');
+        }
+
+        function initRoastProgressResume() {
+            const progress = readRoastProgress();
+            if (progress) showRoastProgressBanner(progress);
+        }
+
+        function resumeRoastProgress() {
+            const progress = readRoastProgress();
+            if (!progress) {
+                hideRoastProgressBanner();
+                showToast('That roast may have finished already. Start a new roast when ready.', 'info');
+                return;
+            }
+            showTab('single');
+            document.getElementById('url-input').value = progress.url;
+            setDevice(progress.device);
+            setFullPage(progress.fullPage);
+            hideRoastProgressBanner();
+            showToast('Restarting the roast from your saved progress...', 'info');
+            roastPage();
+        }
+
+        function dismissRoastProgress() {
+            clearRoastProgress();
+            showToast('Saved roast progress dismissed.', 'info');
+        }
 
         // Full page toggle
         function setFullPage(enabled) {
@@ -4316,6 +4453,7 @@
             hideQueueModal();
             pendingUrl = null;
             retryCount = 0;
+            clearRoastProgress();
             document.getElementById('roast-btn').disabled = false;
             document.getElementById('btn-text').textContent = 'Roast It 🔥';
         }
@@ -5079,6 +5217,7 @@
         // Cancel loading
         function cancelLoading() {
             analysisAborted = true;
+            if (activeRoastProgress) clearRoastProgress();
             hideLoadingModal();
             showToast('Analysis cancelled', 'info');
         }
@@ -5088,6 +5227,7 @@
             if (analysisAborted) return;
             
             const percent = Math.round(progress);
+            persistRoastProgressUpdate(step, message, percent);
             
             // Update percentage
             document.getElementById('loading-percent').textContent = percent + '%';
@@ -5240,6 +5380,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             try { new URL(url); } catch { return showToast('Invalid URL', 'error'); }
 
             // Show simple loading modal
+            beginRoastProgress(url);
             showLoadingModal();
             document.getElementById('roast-btn').disabled = true;
             document.getElementById('btn-text').textContent = 'Analyzing...';
@@ -5254,6 +5395,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 if (response.status === 429) {
                     const data = await response.json();
                     hideAnalysisPage();
+                    clearRoastProgress();
                     showRateLimitWarning(data.error, data.retryAfter || 60);
                     return;
                 }
@@ -5265,6 +5407,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     if (analysisAborted) return;
                     currentRoast = data;
                     saveToHistory(data);
+                    clearRoastProgress();
                     hideLoadingModal();
                     displayResults(data, data.cached);
                     // Reset queue state on success
@@ -5295,6 +5438,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                                     if (analysisAborted) return;
                                     currentRoast = data;
                                     saveToHistory(data);
+                                    clearRoastProgress();
                                     hideLoadingModal();
                                     displayResults(data, false);
                                     // Reset queue state on success
@@ -5314,8 +5458,10 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 const errorMsg = error.message.toLowerCase();
                 if (errorMsg.includes('busy') || errorMsg.includes('traffic') || errorMsg.includes('warming') || errorMsg.includes('capacity')) {
                     pendingUrl = url;
+                    persistRoastProgressUpdate('queued', 'Roaster is busy. Waiting to retry...', 0);
                     showQueueModal(30);
                 } else {
+                    clearRoastProgress();
                     showToast(error.message, 'error');
                 }
             }
@@ -9093,6 +9239,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
 
         // Check URL params and load gallery + stats + analytics
         window.addEventListener('load', () => {
+            initRoastProgressResume();
             const params = new URLSearchParams(location.search);
             const roastId = params.get('roast');
             if (roastId) loadFromHistory(roastId);
