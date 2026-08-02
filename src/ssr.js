@@ -21,7 +21,7 @@ export function renderRoastPage(params) {
         ogTitle: ogTitleProp, ogDesc: ogDescProp, ogImage: ogImageProp,
         pageUrl: pageUrlProp, createdAt: createdAtProp,
         industrySampleSize: industrySampleSizeProp, heatmap,
-        seoDetailsHtml, perfDetailsHtml
+        seoDetailsHtml, perfDetailsHtml, abTestIdeas = []
     } = params;
 
     // Use passed-in OG/meta values or compute fallbacks
@@ -264,6 +264,41 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
       </div>
     </div>
   </div>
+
+    ${abTestIdeas.length > 0 ? `<div class="card p-6 mb-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(59,130,246,0.14);">
+          <span class="text-xl">A/B</span>
+        </div>
+        <div>
+          <h2 class="text-lg font-semibold">A/B test ideas</h2>
+          <p class="text-xs text-[#6e6e73]">Prioritized by your biggest gaps vs the ${escapeHtml(industryBench.label)} benchmark</p>
+        </div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        ${abTestIdeas.map((idea, i) => `<div class="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.05]">
+          <div class="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <div class="text-[11px] uppercase tracking-[0.08em] text-[#6e6e73] mb-1">Test ${i + 1} · ${escapeHtml(idea.categoryLabel)}</div>
+              <h3 class="text-sm font-semibold text-white">${escapeHtml(idea.title)}</h3>
+            </div>
+            <span class="text-[11px] font-mono px-2 py-1 rounded-lg ${idea.gap < 0 ? "bg-red-500/10 text-red-400" : "bg-green-500/10 text-green-400"}">${escapeHtml(idea.gapLabel)}</span>
+          </div>
+          <p class="text-xs text-[#a1a1a6] leading-relaxed mb-3">${escapeHtml(idea.hypothesis)}</p>
+          <div class="space-y-2 text-xs">
+            <div class="p-2.5 rounded-lg bg-white/[0.025]">
+              <span class="text-[#6e6e73]">Control:</span>
+              <span class="text-[#d1d1d6]">${escapeHtml(idea.variants.control)}</span>
+            </div>
+            <div class="p-2.5 rounded-lg bg-blue-500/[0.06] border border-blue-500/10">
+              <span class="text-blue-300">Variant:</span>
+              <span class="text-[#d1d1d6]">${escapeHtml(idea.variants.variant)}</span>
+            </div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-white/[0.04] text-[11px] text-[#6e6e73]">Measure: <span class="text-[#a1a1a6]">${escapeHtml(idea.metric)}</span></div>
+        </div>`).join("")}
+      </div>
+    </div>` : ""}
 
   <!-- Tab Navigation -->
   <div class="flex flex-wrap gap-2 mb-6 justify-center">

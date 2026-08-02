@@ -1,6 +1,7 @@
 import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './config.js';
 import { getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
+import { generateAbTestIdeas } from './recommendations.js';
 
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();
@@ -139,13 +140,15 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   } catch {
   }
   const industry = cached.industry || "other";
+  const scores = { hero: cached.hero_score, cta: cached.cta_score, trust: cached.trust_score, copy: cached.copy_score, design: cached.design_score };
+  const benchmarks = INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other;
   const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, cached.overall_score, industry, "overall") : null;
   return {
     id: cached.id,
     url: cached.url,
     urlHash: cached.url_hash,
     overallScore: cached.overall_score,
-    scores: { hero: cached.hero_score, cta: cached.cta_score, trust: cached.trust_score, copy: cached.copy_score, design: cached.design_score },
+    scores,
     roast: cached.roast_response,
     quickWins,
     screenshotUrl: `/api/screenshot/${cached.id}`,
@@ -155,7 +158,8 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     video: seo?.video || null,
     heatmap,
     industry,
-    benchmarks: INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
+    benchmarks,
+    abTestIdeas: generateAbTestIdeas(scores, benchmarks),
     percentile: percentileData
     // { percentile, betterThan, totalSamples }
   };

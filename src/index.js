@@ -33,6 +33,7 @@ import {
 } from './ai.js';
 
 import { renderSvgToPng } from './render.js';
+import { generateAbTestIdeas } from './recommendations.js';
 
 import {
     generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, 
@@ -128,6 +129,8 @@ export default {
               foldLine: pageData.foldLinePercent || heatmap.foldLine
             };
             const industry = analysis.industry || "other";
+            const benchmarks = analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other;
+            const abTestIdeas = generateAbTestIdeas(analysis.scores, benchmarks);
             const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, analysis.overallScore, industry, "overall") : null;
             ctx.waitUntil(
               env22.DB.prepare(`
@@ -176,7 +179,8 @@ export default {
               heatmap: enhancedHeatmap,
               pageDimensions: pageData.pageDimensions,
               industry,
-              benchmarks: analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
+              benchmarks,
+              abTestIdeas,
               percentile: percentileData,
               // { percentile, betterThan, totalSamples }
               aiUnavailable: analysis.aiUnavailable || false
@@ -569,6 +573,8 @@ export default {
             ]);
             const { analysis, heatmap } = analysisResult;
             const formattedRoast = formatRoast(analysis, targetUrl);
+            const industry = analysis.industry || "other";
+            const benchmarks = analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other;
             ctx.waitUntil(
               env22.DB.prepare(`
                 INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
@@ -590,7 +596,7 @@ export default {
                 JSON.stringify(pageData.seo),
                 JSON.stringify(pageData.performance),
                 JSON.stringify(heatmap),
-                analysis.industry || "other"
+                industry
               ).run()
             );
             results.push({
@@ -599,6 +605,9 @@ export default {
               overallScore: analysis.overallScore,
               scores: analysis.scores,
               quickWins: analysis.quickWins,
+              industry,
+              benchmarks,
+              abTestIdeas: generateAbTestIdeas(analysis.scores, benchmarks),
               screenshotUrl: `/api/screenshot/${roastId}`,
               cached: false,
               device,
@@ -703,6 +712,8 @@ data: ${JSON.stringify(data)}
                 if (pageData.video?.present) await sendEvent("video", pageData.video);
                 await sendEvent("progress", { step: "finalize", message: "Generating report...", progress: 90 });
                 const formattedRoast = formatRoast(analysis, targetUrl, brandName);
+                const industry = analysis.industry || "other";
+                const benchmarks = analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other;
                 await env22.DB.prepare(`
               INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -723,7 +734,7 @@ data: ${JSON.stringify(data)}
                   JSON.stringify(pageData.seo),
                   JSON.stringify(pageData.performance),
                   JSON.stringify(enhancedHeatmap),
-                  analysis.industry || "other"
+                  industry
                 ).run();
                 const result = {
                   id: roastId,
@@ -747,8 +758,9 @@ data: ${JSON.stringify(data)}
                   video: pageData.video || pageData.seo?.video || null,
                   heatmap: enhancedHeatmap,
                   pageDimensions: pageData.pageDimensions,
-                  industry: analysis.industry || "other",
-                  benchmarks: analysis.benchmarks || INDUSTRY_BENCHMARKS.other,
+                  industry,
+                  benchmarks,
+                  abTestIdeas: generateAbTestIdeas(analysis.scores, benchmarks),
                   aiUnavailable: analysis.aiUnavailable || false
                 };
                 await sendEvent("complete", result);
@@ -797,7 +809,9 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
       }
       const roastIndustry = roast.industry || "other";
-      return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
+      const roastBenchmarks = INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other;
+      const roastScores = { hero: roast.hero_score, cta: roast.cta_score, trust: roast.trust_score, copy: roast.copy_score, design: roast.design_score };
+      return Response.json({ ...roast, benchmarks: roastBenchmarks, abTestIdeas: generateAbTestIdeas(roastScores, roastBenchmarks) }, { headers: corsHeaders });
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
@@ -2627,6 +2641,7 @@ data: ${JSON.stringify(data)}
             verdict: cachedResult.verdict || "",
             roast: cachedResult.roast || "",
             quickWins: cachedResult.quickWins || [],
+            abTestIdeas: cachedResult.abTestIdeas || [],
             industry: cachedResult.industry || "other",
             seo: cachedResult.seo || null,
             performance: cachedResult.performance || null,
@@ -2663,6 +2678,8 @@ data: ${JSON.stringify(data)}
         const { analysis, heatmap } = analysisResult;
         const formattedRoast = formatRoast(analysis, targetUrl);
         const industry = analysis.industry || "other";
+        const benchmarks = analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other;
+        const abTestIdeas = generateAbTestIdeas(analysis.scores, benchmarks);
         const enhancedHeatmap = { ...heatmap, foldLine: pageData.foldLinePercent || heatmap.foldLine };
         ctx.waitUntil(
           env22.DB.prepare(`
@@ -2704,8 +2721,9 @@ data: ${JSON.stringify(data)}
           verdict: analysis.verdict || "",
           roast: formattedRoast,
           quickWins: analysis.quickWins || [],
+          abTestIdeas,
           industry,
-          benchmarks: analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
+          benchmarks,
           seo: pageData.seo || null,
           performance: pageData.performance || null,
           video: pageData.video || pageData.seo?.video || null,
@@ -2915,6 +2933,10 @@ data: ${JSON.stringify(data)}
         { key: "copy", label: "Copywriting", score: roast.copy_score, color: "#3B82F6", gradFrom: "from-blue-500/10", gradTo: "to-cyan-600/5", borderColor: "border-blue-500/20", emoji: "\u270D\uFE0F", question: "Does your text persuade, or just fill space?", description: "The quality of your written content \u2014 clarity, persuasion, benefit focus, and scannability. Good copy speaks to the reader's pain points and desires." },
         { key: "design", label: "Visual Design", score: roast.design_score, color: "#EC4899", gradFrom: "from-pink-500/10", gradTo: "to-rose-600/5", borderColor: "border-pink-500/20", emoji: "\u{1F3A8}", question: "Does the layout guide the eye and support your message?", description: "Layout, visual hierarchy, whitespace, color, and typography. Good design directs attention to what matters and makes the page feel professional and trustworthy." }
       ];
+      const abTestIdeas = generateAbTestIdeas(
+        { hero: roast.hero_score, cta: roast.cta_score, trust: roast.trust_score, copy: roast.copy_score, design: roast.design_score },
+        industryBench
+      );
       const a11y = seo?.accessibility || null;
       const a11yScore = a11y?.score ?? null;
       let heatmapDotsHtml = "";
@@ -3317,7 +3339,7 @@ data: ${JSON.stringify(data)}
           quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
           heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
           ogTitle, ogDesc, ogImage, pageUrl, createdAt, industrySampleSize, heatmap,
-          seoDetailsHtml, perfDetailsHtml
+          seoDetailsHtml, perfDetailsHtml, abTestIdeas
         });
       return new Response(html, {
         headers: {
