@@ -33,16 +33,115 @@ async function trackBrowserUsage(env22, sessions2 = 1) {
   }
 }
 var inFlightRequests = /* @__PURE__ */ new Map();
-async function deduplicatedRoast(urlHash, roastFn) {
+const INFLIGHT_LOCK_TTL_SECONDS = 120;
+const INFLIGHT_LOCK_POLL_TIMEOUT_MS = 2500;
+const INFLIGHT_LOCK_POLL_INTERVAL_MS = 250;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function createLockToken() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function getConfigKv(env22) {
+  if (!env22?.CONFIG || typeof env22.CONFIG.get !== "function" || typeof env22.CONFIG.put !== "function") {
+    return null;
+  }
+  return env22.CONFIG;
+}
+async function acquireInflightLock(env22, urlHash, options = {}) {
+  const kv = getConfigKv(env22);
+  if (!kv) return { acquired: false, unavailable: true };
+  const lockKey = `inflight:${urlHash}`;
+  const token = createLockToken();
+  try {
+    const existing = await kv.get(lockKey);
+    if (existing) return { acquired: false, unavailable: false, lockKey };
+    await kv.put(lockKey, JSON.stringify({ token, startedAt: Date.now() }), {
+      expirationTtl: options.lockTtlSeconds || INFLIGHT_LOCK_TTL_SECONDS
+    });
+    return { acquired: true, unavailable: false, lockKey, token };
+  } catch (error32) {
+    console.warn("KV inflight lock unavailable; falling back to isolate-local dedup:", error32);
+    return { acquired: false, unavailable: true, lockKey };
+  }
+}
+function lockValueHasToken(value, token) {
+  if (!value) return false;
+  try {
+    return JSON.parse(value).token === token;
+  } catch {
+    return false;
+  }
+}
+async function releaseInflightLock(env22, lock) {
+  if (!lock?.acquired || !lock.lockKey || !lock.token) return;
+  const kv = getConfigKv(env22);
+  if (!kv || typeof kv.delete !== "function") return;
+  try {
+    const current = await kv.get(lock.lockKey);
+    if (lockValueHasToken(current, lock.token)) {
+      await kv.delete(lock.lockKey);
+    }
+  } catch (error32) {
+    console.warn("Failed to release KV inflight lock:", error32);
+  }
+}
+async function waitForInflightLock(env22, lockKey, options = {}) {
+  const kv = getConfigKv(env22);
+  if (!kv || !lockKey) return false;
+  const timeoutMs = options.lockPollTimeoutMs ?? INFLIGHT_LOCK_POLL_TIMEOUT_MS;
+  const intervalMs = options.lockPollIntervalMs ?? INFLIGHT_LOCK_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  try {
+    do {
+      await sleep(intervalMs);
+      const current = await kv.get(lockKey);
+      if (!current) return true;
+    } while (Date.now() < deadline);
+  } catch (error32) {
+    console.warn("Failed while polling KV inflight lock:", error32);
+  }
+  return false;
+}
+async function deduplicatedRoast(envOrUrlHash, urlHashOrRoastFn, roastFnOrOptions, maybeOptions) {
+  const legacySignature = typeof envOrUrlHash === "string";
+  const env22 = legacySignature ? null : envOrUrlHash;
+  const urlHash = legacySignature ? envOrUrlHash : urlHashOrRoastFn;
+  const roastFn = legacySignature ? urlHashOrRoastFn : roastFnOrOptions;
+  const options = legacySignature ? roastFnOrOptions || {} : maybeOptions || {};
   const existing = inFlightRequests.get(urlHash);
   if (existing) {
     console.log(`Deduplicating request for ${urlHash}`);
-    return { result: await existing, deduplicated: true };
+    const result = await existing;
+    if (result?.alreadyAnalyzing) {
+      return { result: null, deduplicated: true, ...result };
+    }
+    return { result, deduplicated: true };
   }
-  const promise = roastFn();
+  const promise = (async () => {
+    const lock = await acquireInflightLock(env22, urlHash, options);
+    if (!lock.acquired && !lock.unavailable) {
+      const pollTimeoutMs = options.lockPollTimeoutMs ?? INFLIGHT_LOCK_POLL_TIMEOUT_MS;
+      const lockReleased = await waitForInflightLock(env22, lock.lockKey, options);
+      return {
+        alreadyAnalyzing: true,
+        retryAfter: Math.max(1, Math.ceil(pollTimeoutMs / 1000)),
+        lockReleased
+      };
+    }
+    try {
+      return await roastFn();
+    } finally {
+      await releaseInflightLock(env22, lock);
+    }
+  })();
   inFlightRequests.set(urlHash, promise);
   try {
     const result = await promise;
+    if (result?.alreadyAnalyzing) {
+      return { result: null, deduplicated: true, ...result };
+    }
     return { result, deduplicated: false };
   } finally {
     inFlightRequests.delete(urlHash);

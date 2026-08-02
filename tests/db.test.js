@@ -1,6 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import { checkGlobalRateLimit, deduplicatedRoast, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+
+function createMockKv(initialValues = {}) {
+  const store = new Map(Object.entries(initialValues));
+  const puts = [];
+  const deletes = [];
+  return {
+    store,
+    puts,
+    deletes,
+    async get(key) {
+      return store.get(key) ?? null;
+    },
+    async put(key, value, options) {
+      puts.push([key, value, options]);
+      store.set(key, value);
+    },
+    async delete(key) {
+      deletes.push(key);
+      store.delete(key);
+    }
+  };
+}
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -36,6 +58,115 @@ test("checkGlobalRateLimit increments an available hourly bucket", async () => {
   assert.equal(writes.length, 1);
   assert.equal(writes[0][1], "1");
   assert.deepEqual(writes[0][2], { expirationTtl: 7200 });
+});
+
+test("deduplicatedRoast acquires and releases a KV inflight lock", async () => {
+  const kv = createMockKv();
+  const env = { CONFIG: kv };
+  let calls = 0;
+
+  const response = await deduplicatedRoast(
+    env,
+    "hash-kv-lock",
+    async () => {
+      calls += 1;
+      assert.equal(kv.store.has("inflight:hash-kv-lock"), true);
+      return { ok: true };
+    },
+    { lockTtlSeconds: 90 }
+  );
+
+  assert.deepEqual(response, { result: { ok: true }, deduplicated: false });
+  assert.equal(calls, 1);
+  assert.equal(kv.puts.length, 1);
+  assert.equal(kv.puts[0][0], "inflight:hash-kv-lock");
+  assert.deepEqual(kv.puts[0][2], { expirationTtl: 90 });
+  assert.equal(kv.deletes.length, 1);
+  assert.equal(kv.deletes[0], "inflight:hash-kv-lock");
+  assert.equal(kv.store.has("inflight:hash-kv-lock"), false);
+});
+
+test("deduplicatedRoast returns an already-analyzing signal when KV lock is held", async () => {
+  const kv = createMockKv({
+    "inflight:hash-held": JSON.stringify({ token: "other-isolate" })
+  });
+  const env = { CONFIG: kv };
+  let calls = 0;
+
+  const response = await deduplicatedRoast(
+    env,
+    "hash-held",
+    async () => {
+      calls += 1;
+      return { ok: true };
+    },
+    { lockPollTimeoutMs: 1, lockPollIntervalMs: 1 }
+  );
+
+  assert.equal(calls, 0);
+  assert.equal(response.result, null);
+  assert.equal(response.deduplicated, true);
+  assert.equal(response.alreadyAnalyzing, true);
+  assert.equal(response.retryAfter, 1);
+  assert.equal(response.lockReleased, false);
+  assert.equal(kv.puts.length, 0);
+  assert.equal(kv.deletes.length, 0);
+});
+
+test("deduplicatedRoast falls back to in-memory dedup when KV is unavailable", async () => {
+  const env = {
+    CONFIG: {
+      get: async () => {
+        throw new Error("KV unavailable");
+      },
+      put: async () => {
+        throw new Error("KV unavailable");
+      }
+    }
+  };
+  let calls = 0;
+
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const response = await deduplicatedRoast(env, "hash-fallback", async () => {
+      calls += 1;
+      return { ok: true };
+    });
+
+    assert.deepEqual(response, { result: { ok: true }, deduplicated: false });
+    assert.equal(calls, 1);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("deduplicatedRoast still deduplicates concurrent requests in the same isolate", async () => {
+  const kv = createMockKv();
+  const env = { CONFIG: kv };
+  let calls = 0;
+  let finishRoast;
+  const roastFinished = new Promise((resolve) => {
+    finishRoast = resolve;
+  });
+
+  const first = deduplicatedRoast(env, "hash-local", async () => {
+    calls += 1;
+    return roastFinished;
+  });
+  const second = deduplicatedRoast(env, "hash-local", async () => {
+    calls += 1;
+    return { ok: false };
+  });
+
+  finishRoast({ ok: true });
+  const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+  assert.deepEqual(firstResponse, { result: { ok: true }, deduplicated: false });
+  assert.deepEqual(secondResponse, { result: { ok: true }, deduplicated: true });
+  assert.equal(calls, 1);
+  assert.equal(kv.puts.length, 1);
+  assert.equal(kv.deletes.length, 1);
 });
 
 test("getCachedRoast can return legacy audit data for non-persisting callers", async () => {
