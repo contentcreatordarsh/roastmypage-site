@@ -403,4 +403,47 @@ async function capturePageWithMetrics(env22, url, options = {}) {
 }
 
 
-export { capturePageWithMetrics };
+// Compare has no cached result to fall back on when a capture blows up, so one transient
+// Browser Rendering blip ("Execution context was destroyed, most likely because of a
+// navigation") 500s the whole comparison. capturePageWithMetrics does retry internally,
+// but a browser session that dies mid-navigation can take each of those attempts down
+// with it — this gives compare one more capture from a completely fresh session.
+//
+// Retries are bounded by a shared `deadline` the same way ai.js bounds the AI retry: a
+// capture costs ~20-40s and the vision pass still has to run afterwards, so the retry is
+// skipped unless COMPARE_CAPTURE_RETRY_RESERVE_MS of the compare budget genuinely remains.
+// Timeouts are deliberately NOT retried, for ai.js's reason — a second 30s navigation
+// cannot fit inside COMPARE_TOTAL_TIMEOUT_MS — and neither are SSRF blocks, dead hosts
+// (net::ERR_*) or an already-exhausted browser pool, none of which a retry can fix.
+const TRANSIENT_CAPTURE_ERROR = /execution context was destroyed|target (?:closed|crashed)|session closed|protocol error|connection closed|browser has disconnected|frame (?:was )?detached/i;
+const PERMANENT_CAPTURE_ERROR = /blocked:|timed? ?out|timeout|net::err|browser service is busy|screenshot too large/i;
+
+function isTransientCaptureError(error32) {
+  const message = error32 instanceof Error ? error32.message : String(error32 ?? "");
+  if (PERMANENT_CAPTURE_ERROR.test(message)) return false;
+  return TRANSIENT_CAPTURE_ERROR.test(message);
+}
+
+// `capture` is a seam for tests; production callers always use capturePageWithMetrics.
+async function capturePageWithRetry(env22, url, options = {}, capture = capturePageWithMetrics) {
+  const { deadline = Date.now() + CONFIG.COMPARE_TOTAL_TIMEOUT_MS, ...captureOptions } = options;
+  try {
+    return await capture(env22, url, captureOptions);
+  } catch (error32) {
+    if (!isTransientCaptureError(error32)) throw error32;
+    const errorMsg = error32 instanceof Error ? error32.message : String(error32);
+    // Budget left once the backoff is paid for. The gate is the only thing keeping the
+    // extra attempt inside COMPARE_TOTAL_TIMEOUT_MS, so check it before sleeping.
+    const remainingMs = deadline - Date.now() - CONFIG.COMPARE_CAPTURE_RETRY_DELAY_MS;
+    if (remainingMs < CONFIG.COMPARE_CAPTURE_RETRY_RESERVE_MS) {
+      console.warn(`Transient capture failure with only ${remainingMs}ms of budget left — not retrying: ${errorMsg}`);
+      throw error32;
+    }
+    console.warn(`Transient capture failure, retrying once from a fresh browser session: ${errorMsg}`);
+    await sleep(CONFIG.COMPARE_CAPTURE_RETRY_DELAY_MS);
+    await trackBrowserUsage(env22, 1);
+    return capture(env22, url, captureOptions);
+  }
+}
+
+export { capturePageWithMetrics, capturePageWithRetry, isTransientCaptureError };

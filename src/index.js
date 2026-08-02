@@ -22,7 +22,7 @@ import {
     consumeApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
-import { capturePageWithMetrics } from './puppeteer.js';
+import { capturePageWithMetrics, capturePageWithRetry } from './puppeteer.js';
 
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
 
@@ -254,10 +254,13 @@ export default {
         const needCapture2 = !cached2;
         const sessionsNeeded = (needCapture1 ? 1 : 0) + (needCapture2 ? 1 : 0);
         if (sessionsNeeded > 0) await trackBrowserUsage(env22, sessionsNeeded);
+        // One shared deadline for the whole compare, so a re-captured page can never push
+        // the operation past the withTimeout budget below.
+        const compareDeadline = Date.now() + CONFIG.COMPARE_TOTAL_TIMEOUT_MS;
         const compareResult = await withTimeout((async () => {
           const [page1, page2] = await Promise.all([
-            needCapture1 ? capturePageWithMetrics(env22, url1, { device, fullPage }) : null,
-            needCapture2 ? capturePageWithMetrics(env22, url2, { device, fullPage }) : null
+            needCapture1 ? capturePageWithRetry(env22, url1, { device, fullPage, deadline: compareDeadline }) : null,
+            needCapture2 ? capturePageWithRetry(env22, url2, { device, fullPage, deadline: compareDeadline }) : null
           ]);
           let analysis1, analysis2, id1, id2;
           if (cached1) {

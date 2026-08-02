@@ -82,6 +82,13 @@ const CONFIG = {
   // 65s max — allows 15s screenshot + 45s AI + buffer
   COMPARE_TOTAL_TIMEOUT_MS: 9e4,
   // 90s max for entire compare operation
+  COMPARE_CAPTURE_RETRY_RESERVE_MS: 4e4,
+  // Compare re-captures a flaked page only while at least this much of
+  // COMPARE_TOTAL_TIMEOUT_MS is left: a capture costs ~20-40s and the vision pass still
+  // has to run after it, so a retry started any later just times the whole compare out.
+  COMPARE_CAPTURE_RETRY_DELAY_MS: 1e3,
+  // Short pause before the re-capture so the Browser Rendering pool can hand back a
+  // fresh session instead of the one that just died mid-navigation.
   // Feature flags — set to false to easily revert features
   ENABLE_COMPUTED_INDUSTRY_BENCHMARKS: true,
   // Use real-time computed benchmarks from roast data instead of static values
