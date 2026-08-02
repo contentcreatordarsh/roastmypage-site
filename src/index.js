@@ -44,6 +44,10 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    getTurnstileSiteKey, verifyTurnstileToken
+} from './turnstile.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -60,6 +64,9 @@ export default {
       return new Response(null, { headers: securityHeaders });
     }
     const corsHeaders = securityHeaders;
+    if (url.pathname === "/api/config" && request.method === "GET") {
+      return Response.json({ turnstileSiteKey: getTurnstileSiteKey(env22) }, { headers: corsHeaders });
+    }
     if (request.method === "POST" && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/v1/")) {
       const reqOrigin = request.headers.get("Origin");
       const allowedOrigins = getAllowedOrigins(env22.ENVIRONMENT);
@@ -70,6 +77,13 @@ export default {
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
       try {
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const clientCountry = request.headers.get("CF-IPCountry") || "XX";
+        const body = await request.json();
+        const turnstile = await verifyTurnstileToken(env22, body.turnstileToken || body["cf-turnstile-response"], clientIp);
+        if (!turnstile.success) {
+          return Response.json({ error: "Bot check failed. Please try again." }, { status: 403, headers: corsHeaders });
+        }
         const globalLimit = await checkGlobalRateLimit(env22);
         if (!globalLimit.allowed) {
           return Response.json(
@@ -77,10 +91,7 @@ export default {
             { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
-        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
-        const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
@@ -628,6 +639,13 @@ export default {
     }
     if (url.pathname === "/api/roast-stream" && request.method === "POST") {
       try {
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const clientCountry = request.headers.get("CF-IPCountry") || "XX";
+        const body = await request.json();
+        const turnstile = await verifyTurnstileToken(env22, body.turnstileToken || body["cf-turnstile-response"], clientIp);
+        if (!turnstile.success) {
+          return Response.json({ error: "Bot check failed. Please try again." }, { status: 403, headers: corsHeaders });
+        }
         const globalLimit = await checkGlobalRateLimit(env22);
         if (!globalLimit.allowed) {
           return Response.json(
@@ -635,10 +653,7 @@ export default {
             { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
-        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-        const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
-        const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
