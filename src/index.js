@@ -47,6 +47,13 @@ import {
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
+const EXPORT_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function normalizeExportEmail(email) {
+  if (typeof email !== "string") return null;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized || normalized.length > 254 || !EXPORT_EMAIL_REGEX.test(normalized)) return null;
+  return normalized;
+}
 
 // Module-level dedup set — prevents duplicate concurrent roast requests for the same URL.
 const inFlightRequests = new Set();
@@ -936,6 +943,48 @@ data: ${JSON.stringify(data)}
       } catch (error32) {
         console.error("Feedback error:", error32);
         return Response.json({ error: "Failed to save feedback" }, { status: 500, headers: corsHeaders });
+      }
+    }
+    if (url.pathname === "/api/export" && (request.method === "GET" || request.method === "POST")) {
+      try {
+        let rawEmail = url.searchParams.get("email");
+        if (request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          rawEmail = body.email || rawEmail;
+        }
+        const email = normalizeExportEmail(rawEmail);
+        if (!email) {
+          return Response.json({ error: "Please provide a valid email address" }, { status: 400, headers: corsHeaders });
+        }
+        const exportIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const exportIpHash = await hashIp(exportIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const exportLimit = await checkOperationRateLimit(env22, exportIpHash, "export");
+        if (!exportLimit.allowed) {
+          return Response.json({ error: "Too many export requests. Please try again later." }, { status: 429, headers: corsHeaders });
+        }
+        const [emailSubscribers, feedback] = await Promise.all([
+          env22.DB.prepare(`
+            SELECT id, email, roast_id, created_at
+            FROM email_subscribers
+            WHERE lower(email) = ?
+            ORDER BY created_at DESC
+          `).bind(email).all(),
+          env22.DB.prepare(`
+            SELECT id, vote, context, reasons, message, email, roast_id, url, country, created_at
+            FROM feedback
+            WHERE lower(email) = ?
+            ORDER BY created_at DESC
+          `).bind(email).all()
+        ]);
+        return Response.json({
+          email,
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          emailSubscribers: emailSubscribers.results || [],
+          feedback: feedback.results || []
+        }, { headers: corsHeaders });
+      } catch (error32) {
+        console.error("Export error:", error32);
+        return Response.json({ error: "Failed to export data" }, { status: 500, headers: corsHeaders });
       }
     }
     if (url.pathname === "/api/subscribe" && request.method === "POST") {
