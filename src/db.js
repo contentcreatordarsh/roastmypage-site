@@ -152,6 +152,7 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     cached: true,
     seo,
     performance: performance22,
+    video: seo?.video || null,
     heatmap,
     industry,
     benchmarks: INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
