@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import {
+  apiV1RateLimitHeaders,
+  checkGlobalRateLimit,
+  getApiV1DailyLimit,
+  getCachedRoast,
+  releaseApiV1Quota
+} from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -127,4 +133,19 @@ test("releaseApiV1Quota does not mask the original request failure", async () =>
   } finally {
     console.error = originalError;
   }
+});
+
+test("API key quota headers use tier daily limit without anonymous global headers", () => {
+  const dailyLimit = getApiV1DailyLimit("pro");
+  const headers = apiV1RateLimitHeaders(12, 99, {
+    dailyLimit,
+    includeGlobal: false,
+    tier: "pro"
+  });
+
+  assert.equal(dailyLimit, 250);
+  assert.equal(headers["X-RateLimit-Limit"], "250");
+  assert.equal(headers["X-RateLimit-Remaining"], "238");
+  assert.equal(headers["X-RateLimit-Tier"], "pro");
+  assert.equal(headers["X-RateLimit-Global-Limit"], undefined);
 });
