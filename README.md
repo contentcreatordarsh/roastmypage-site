@@ -48,3 +48,5 @@ The application's source code in `src/` is separated into focused modules:
 ## Environment Setup
 
 The worker requires bindings for `DB` (D1), `SCREENSHOTS` (R2), `CONFIG` (KV), `BROWSER`, and `AI`. Ensure your `wrangler.toml` is configured with the corresponding namespace IDs for your Cloudflare account.
+
+Set `CF_ACCOUNT_TAG`, `CF_ZONE_TAG`, and `URL_SCANNER_TOKEN` outside committed config using `wrangler secret put` (add `--env production` for production) or Cloudflare dashboard variables/secrets.
