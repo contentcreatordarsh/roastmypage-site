@@ -2908,6 +2908,40 @@
         </div>
     </div>
 
+    <!-- Roast Removal Modal -->
+    <div id="opt-out-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6" onclick="if(event.target===this)hideOptOutModal()">
+        <div class="card max-w-md w-full overflow-hidden">
+            <div class="flex justify-between items-center p-6 border-b border-white/[0.04]">
+                <div>
+                    <h3 class="text-lg font-semibold">Remove my roast</h3>
+                    <p class="text-xs text-[#6e6e73]">Delete a public roast and its screenshot</p>
+                </div>
+                <button onclick="hideOptOutModal()" class="text-[#a1a1a6] hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-sm text-[#a1a1a6] leading-relaxed">
+                    Enter the URL that was roasted. Because roasts are public and there are no accounts, anyone with the URL can request removal.
+                </p>
+                <div>
+                    <label for="opt-out-url" class="text-sm text-[#a1a1a6] mb-2 block">Page URL</label>
+                    <input type="url" id="opt-out-url" placeholder="https://yoursite.com" class="input-dark w-full px-4 py-3 rounded-xl text-sm text-white placeholder-[#424245]">
+                </div>
+                <div>
+                    <label for="opt-out-email" class="text-sm text-[#a1a1a6] mb-2 block">Email <span class="text-[#424245]">(optional)</span></label>
+                    <input type="email" id="opt-out-email" placeholder="you@company.com" class="input-dark w-full px-4 py-3 rounded-xl text-sm text-white placeholder-[#424245]">
+                </div>
+                <label class="flex gap-3 text-xs text-[#a1a1a6] leading-relaxed">
+                    <input type="checkbox" id="opt-out-confirm" class="mt-1 accent-[#FF6B35]">
+                    <span>I understand this will remove matching public roasts and screenshots for this URL.</span>
+                </label>
+                <div id="opt-out-error" class="hidden text-red-400 text-xs"></div>
+                <button onclick="submitOptOut()" id="opt-out-submit-btn" class="w-full btn-primary px-6 py-3 rounded-xl font-semibold text-sm transition-all">
+                    Request removal
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Embed Badge Modal -->
     <div id="embed-modal" class="hidden fixed inset-0 z-50 modal bg-black/80 flex items-center justify-center p-6">
         <div class="card max-w-lg w-full p-6">
@@ -4119,6 +4153,7 @@
                         <li><span class="text-[13px] text-[#6e6e73]">No Signup Required</span></li>
                         <li><span class="text-[13px] text-[#6e6e73]">Open Analysis</span></li>
                         <li><a href="/roast/self-roast-01" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Our Own Roast</a></li>
+                        <li><button onclick="showOptOutModal()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Remove my roast</button></li>
                     </ul>
                     <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3 mt-5">Contact</h4>
                     <ul class="space-y-2">
@@ -8531,6 +8566,69 @@ Your landing page is like a first date where you talk about yourself for 45 minu
 
         function hideFeedbackModal() {
             document.getElementById('feedback-modal').classList.add('hidden');
+        }
+
+        function showOptOutModal() {
+            const modal = document.getElementById('opt-out-modal');
+            const urlInput = document.getElementById('opt-out-url');
+            const emailInput = document.getElementById('opt-out-email');
+            const confirmInput = document.getElementById('opt-out-confirm');
+            const errorEl = document.getElementById('opt-out-error');
+            if (urlInput) urlInput.value = window._currentRoastUrl || '';
+            if (emailInput) emailInput.value = '';
+            if (confirmInput) confirmInput.checked = false;
+            if (errorEl) {
+                errorEl.textContent = '';
+                errorEl.classList.add('hidden');
+            }
+            modal?.classList.remove('hidden');
+        }
+
+        function hideOptOutModal() {
+            document.getElementById('opt-out-modal')?.classList.add('hidden');
+        }
+
+        function showOptOutError(message) {
+            const errorEl = document.getElementById('opt-out-error');
+            if (!errorEl) return;
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
+
+        async function submitOptOut() {
+            const btn = document.getElementById('opt-out-submit-btn');
+            const urlInput = document.getElementById('opt-out-url');
+            const emailInput = document.getElementById('opt-out-email');
+            const confirmInput = document.getElementById('opt-out-confirm');
+            let removeUrl = urlInput?.value.trim() || '';
+            const email = emailInput?.value.trim() || '';
+
+            if (!removeUrl) return showOptOutError('Enter the URL you want removed.');
+            if (!removeUrl.startsWith('http')) removeUrl = 'https://' + removeUrl;
+            try { new URL(removeUrl); } catch { return showOptOutError('Enter a valid URL.'); }
+            if (!confirmInput?.checked) return showOptOutError('Confirm that you want matching public roasts removed.');
+
+            btn.disabled = true;
+            btn.textContent = 'Removing...';
+            try {
+                const res = await fetch('/api/opt-out', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: removeUrl, email: email || undefined })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Removal request failed');
+                hideOptOutModal();
+                showToast(data.message || 'Removal request processed.', data.deleted > 0 ? 'success' : 'info');
+                if (urlInput) urlInput.value = '';
+                if (emailInput) emailInput.value = '';
+            } catch (error) {
+                showOptOutError(error.message || 'Removal request failed.');
+                showToast(error.message || 'Removal request failed.', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Request removal';
+            }
         }
 
         function toggleFeedbackReason(el) {

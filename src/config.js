@@ -35,6 +35,8 @@ const CONFIG = {
   // NEW: Batch uses up to 5x resources
   RATE_LIMIT_FEEDBACK_MAX: 20,
   // Feedback submissions per hour
+  RATE_LIMIT_OPTOUT_MAX: 10,
+  // Roast removal requests per hour
   RATE_LIMIT_SUBSCRIBE_MAX: 10,
   // Email subscribe per hour
   RATE_LIMIT_THREAT_MAX: 10,

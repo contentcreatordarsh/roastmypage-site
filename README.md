@@ -48,3 +48,7 @@ The application's source code in `src/` is separated into focused modules:
 ## Environment Setup
 
 The worker requires bindings for `DB` (D1), `SCREENSHOTS` (R2), `CONFIG` (KV), `BROWSER`, and `AI`. Ensure your `wrangler.toml` is configured with the corresponding namespace IDs for your Cloudflare account.
+
+## Opt-Out Removal
+
+Users can also request removal at any time through `POST /api/opt-out` with `{ "url": "https://example.com" }` or `{ "roastId": "abc12345" }`, plus an optional `email`. The product has no user accounts, so no authentication is required: anyone with the public URL or roast ID can request deletion, matching the public gallery model.

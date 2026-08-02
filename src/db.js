@@ -54,6 +54,7 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
     compare: CONFIG.RATE_LIMIT_COMPARE_MAX,
     batch: CONFIG.RATE_LIMIT_BATCH_MAX,
     feedback: CONFIG.RATE_LIMIT_FEEDBACK_MAX,
+    optout: CONFIG.RATE_LIMIT_OPTOUT_MAX,
     subscribe: CONFIG.RATE_LIMIT_SUBSCRIBE_MAX,
     threat: CONFIG.RATE_LIMIT_THREAT_MAX
   };
