@@ -19,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    getScoreHistory, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -85,6 +85,7 @@ export default {
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
+        const force = body.force === true;
         const targetUrl = sanitizeUrl(rawUrl);
         if (!targetUrl || !isValidUrl(targetUrl)) {
           return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
@@ -100,9 +101,11 @@ export default {
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        if (!force) {
+          const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedResult) {
+            return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
         }
         const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
           (async () => {
@@ -642,6 +645,7 @@ export default {
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
         const fullPage = body.fullPage === true;
+        const force = body.force === true;
         const targetUrl = sanitizeUrl(body.url);
         if (!targetUrl || !isValidUrl(targetUrl)) {
           return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
@@ -657,9 +661,11 @@ export default {
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        if (!force) {
+          const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+          if (cachedResult) {
+            return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          }
         }
         if (inFlightRequests.has(urlHash)) {
           return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
@@ -798,6 +804,22 @@ data: ${JSON.stringify(data)}
       }
       const roastIndustry = roast.industry || "other";
       return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
+    }
+    if (url.pathname === "/api/score-history" && request.method === "GET") {
+      try {
+        const limit = Math.max(1, Math.min(20, parseInt(url.searchParams.get("limit") || "20", 10) || 20));
+        const result = await getScoreHistory(env22, {
+          url: url.searchParams.get("url"),
+          hostname: url.searchParams.get("hostname")
+        }, { limit });
+        if (!result) {
+          return Response.json({ error: "Provide a url or hostname query parameter" }, { status: 400, headers: corsHeaders });
+        }
+        return Response.json(result, { headers: corsHeaders });
+      } catch (error32) {
+        safeLogError("Score history failed:", error32);
+        return Response.json({ error: "Could not load score history" }, { status: 400, headers: corsHeaders });
+      }
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
@@ -3312,12 +3334,13 @@ data: ${JSON.stringify(data)}
       }
       const verdictText = roast.roast_response || verdict;
       const scoreLabel = score >= 8 ? 'High Performer' : score >= 6 ? 'Room to Improve' : score >= 4 ? 'Needs Work' : 'Critical Issues';
+      const scoreHistory = await getScoreHistory(env22, { url: roast.url }, { limit: 20 });
       const html = renderRoastPage({
           roast, hostname, scoreColor, score, emoji, dateStr, categories, sections,
           quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
           heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
           ogTitle, ogDesc, ogImage, pageUrl, createdAt, industrySampleSize, heatmap,
-          seoDetailsHtml, perfDetailsHtml
+          seoDetailsHtml, perfDetailsHtml, scoreHistory: scoreHistory?.history || []
         });
       return new Response(html, {
         headers: {

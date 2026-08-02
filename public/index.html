@@ -1520,6 +1520,19 @@
                     <div id="benchmark-summary" class="mt-4 pt-3 border-t border-white/[0.04] text-[12px] text-[#6e6e73]"></div>
                 </div>
 
+                <!-- Score History -->
+                <div id="score-history-card" class="card p-6 md:p-8 mb-8 hidden">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                        <div>
+                            <h3 class="text-lg font-semibold tracking-tight">Score History</h3>
+                            <p id="score-history-summary" class="text-[12px] text-[#6e6e73]">Past roasts for this URL</p>
+                        </div>
+                        <div id="score-history-change" class="text-right text-sm font-semibold"></div>
+                    </div>
+                    <div id="score-history-sparkline" class="mb-4"></div>
+                    <div id="score-history-list" class="grid sm:grid-cols-2 gap-2"></div>
+                </div>
+
                 <!-- Score Breakdown -->
                 <div class="card p-6 md:p-8 mb-8">
                     <h3 class="text-lg font-semibold mb-1 tracking-tight">Conversion Breakdown</h3>
@@ -5521,6 +5534,91 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             btn.textContent = 'Roast All Pages';
         }
 
+        function scoreHistoryColor(score) {
+            return score >= 8 ? '#22C55E' : score >= 6 ? '#EAB308' : '#EF4444';
+        }
+
+        function formatScoreHistoryDate(value) {
+            if (!value) return 'Unknown date';
+            const date = new Date(/Z$/.test(value) ? value : `${value}Z`);
+            if (Number.isNaN(date.getTime())) return 'Unknown date';
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function renderScoreHistorySparkline(history) {
+            const scores = history.map(item => Number(item.overallScore)).filter(Number.isFinite);
+            if (!scores.length) return '';
+            const width = 260;
+            const height = 64;
+            const pad = 5;
+            const points = scores.map((score, index) => {
+                const x = scores.length === 1 ? width / 2 : pad + index * ((width - pad * 2) / (scores.length - 1));
+                const y = height - pad - (Math.max(0, Math.min(10, score)) / 10) * (height - pad * 2);
+                return { x, y };
+            });
+            const first = scores[0];
+            const last = scores[scores.length - 1];
+            const stroke = last > first ? '#22C55E' : last < first ? '#EF4444' : '#FF6B35';
+            const polyline = points.map(point => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
+            return `<svg viewBox="0 0 ${width} ${height}" class="w-full h-16" role="img" aria-label="Score history sparkline">
+                <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" stroke="rgba(245,240,232,0.08)" stroke-width="1"></line>
+                <polyline fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyline}"></polyline>
+                ${points.map((point, index) => `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${index === points.length - 1 ? 4 : 3}" fill="${index === points.length - 1 ? stroke : '#F5F0E8'}" opacity="${index === points.length - 1 ? '1' : '0.7'}"></circle>`).join('')}
+            </svg>`;
+        }
+
+        function renderScoreHistory(history, currentId) {
+            const card = document.getElementById('score-history-card');
+            const summary = document.getElementById('score-history-summary');
+            const changeEl = document.getElementById('score-history-change');
+            const sparkline = document.getElementById('score-history-sparkline');
+            const list = document.getElementById('score-history-list');
+            if (!card || !summary || !changeEl || !sparkline || !list) return;
+
+            const items = (history || []).filter(item => Number.isFinite(Number(item.overallScore)));
+            if (items.length < 2) {
+                card.classList.add('hidden');
+                return;
+            }
+
+            const firstScore = Number(items[0].overallScore);
+            const latestScore = Number(items[items.length - 1].overallScore);
+            const change = latestScore - firstScore;
+            const changeColor = change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-[#a1a1a6]';
+            const changeLabel = Math.abs(change) < 0.05 ? 'No change' : `${change > 0 ? '+' : ''}${change.toFixed(1)} pts`;
+
+            summary.textContent = `${items.length} roasts for this URL, oldest to newest`;
+            changeEl.className = `text-right text-sm font-semibold ${changeColor}`;
+            changeEl.textContent = changeLabel;
+            sparkline.innerHTML = renderScoreHistorySparkline(items);
+            list.innerHTML = items.map(item => {
+                const score = Number(item.overallScore);
+                const isCurrent = item.id === currentId;
+                return `<a href="/roast/${encodeURIComponent(item.id)}" class="flex items-center justify-between gap-3 rounded-xl px-3 py-2 border ${isCurrent ? 'bg-orange-500/10 border-orange-500/25' : 'bg-white/[0.03] border-white/[0.05]'} hover:border-orange-500/30 transition-colors">
+                    <div class="min-w-0">
+                        <div class="text-xs text-[#d1d1d6]">${formatScoreHistoryDate(item.createdAt)}${isCurrent ? ' · current' : ''}</div>
+                        <div class="text-[11px] text-[#6e6e73] truncate">${sanitizeHtml(item.device || 'unknown')} device</div>
+                    </div>
+                    <div class="text-sm font-bold" style="color:${scoreHistoryColor(score)}">${score.toFixed(1)}/10</div>
+                </a>`;
+            }).join('');
+            card.classList.remove('hidden');
+        }
+
+        async function loadScoreHistory(data) {
+            const card = document.getElementById('score-history-card');
+            if (card) card.classList.add('hidden');
+            if (!data?.url || data.isExample) return;
+            try {
+                const res = await fetch(`/api/score-history?url=${encodeURIComponent(data.url)}`);
+                if (!res.ok) return;
+                const payload = await res.json();
+                renderScoreHistory(payload.history || [], data.id);
+            } catch (err) {
+                console.error('loadScoreHistory error:', err);
+            }
+        }
+
         // Display Results
         function displayResults(data, isCached) {
             // Make sure hero section is visible again
@@ -5545,6 +5643,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             document.getElementById('device-badge').textContent = (data.device || 'desktop').toUpperCase();
             document.getElementById('cache-badge').classList.toggle('hidden', !isCached);
             renderVideoAnalysis(data.video || data.seo?.video);
+            loadScoreHistory(data);
 
             // Animate score
             const scoreEl = document.getElementById('overall-score');

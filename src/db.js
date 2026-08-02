@@ -1,6 +1,189 @@
 import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './config.js';
-import { getApiDayKey } from './utils.js';
+import { getApiDayKey, normalizeUrl, hashUrl } from './utils.js';
 import { calculatePercentile } from './ai.js';
+
+const SCORE_HISTORY_LIMIT = 20;
+const SCORE_HISTORY_DEVICES = ["desktop", "tablet", "mobile"];
+const SCORE_HISTORY_HASH_VARIANTS = SCORE_HISTORY_DEVICES.flatMap((device) => [device, `${device}-full`]);
+
+function normalizeHistoryHostname(hostname) {
+  return String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "")
+    .replace(/^www\./, "");
+}
+
+function normalizeScoreHistoryTarget({ url, hostname } = {}) {
+  const rawHostname = String(hostname || "").trim();
+  const rawUrl = String(url || "").trim();
+  if (!rawHostname && !rawUrl) return null;
+
+  if (rawHostname) {
+    const parsed = rawHostname.includes("://") ? new URL(rawHostname) : new URL(`https://${rawHostname}`);
+    const normalizedHostname = normalizeHistoryHostname(parsed.hostname);
+    if (!normalizedHostname) return null;
+    return {
+      input: rawHostname,
+      mode: "hostname",
+      hostname: normalizedHostname,
+      normalizedUrl: null
+    };
+  }
+
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl);
+  const parsed = new URL(hasScheme ? rawUrl : `https://${rawUrl}`);
+  const normalizedHostname = normalizeHistoryHostname(parsed.hostname);
+  if (!normalizedHostname) return null;
+
+  const isBareHostname = !hasScheme && !/[/?#]/.test(rawUrl);
+  return {
+    input: rawUrl,
+    mode: isBareHostname ? "hostname" : "url",
+    hostname: normalizedHostname,
+    normalizedUrl: normalizeUrl(parsed.toString())
+  };
+}
+
+function scoreHistoryHostVariants(hostname) {
+  const normalizedHostname = normalizeHistoryHostname(hostname);
+  if (!normalizedHostname) return [];
+  return normalizedHostname.startsWith("www.")
+    ? [normalizedHostname]
+    : [normalizedHostname, `www.${normalizedHostname}`];
+}
+
+function buildScoreHistoryHostClauses(hostname) {
+  const clauses = [];
+  const bindings = [];
+  for (const host of scoreHistoryHostVariants(hostname)) {
+    for (const protocol of ["http", "https"]) {
+      const origin = `${protocol}://${host}`;
+      clauses.push("LOWER(url) = ?");
+      bindings.push(origin);
+      clauses.push("LOWER(url) = ?");
+      bindings.push(`${origin}/`);
+      clauses.push("LOWER(url) LIKE ?");
+      bindings.push(`${origin}/%`);
+      clauses.push("LOWER(url) LIKE ?");
+      bindings.push(`${origin}?%`);
+      clauses.push("LOWER(url) LIKE ?");
+      bindings.push(`${origin}#%`);
+    }
+  }
+  return { clauses, bindings };
+}
+
+function buildScoreHistoryUrlClauses(normalizedUrl) {
+  const normalized = String(normalizedUrl || "").toLowerCase();
+  if (!normalized) return { clauses: [], bindings: [] };
+  const variants = new Set([normalized]);
+  if (normalized.endsWith("/")) variants.add(normalized.slice(0, -1));
+  else variants.add(`${normalized}/`);
+  return {
+    clauses: Array.from(variants).map(() => "LOWER(url) = ?"),
+    bindings: Array.from(variants)
+  };
+}
+
+async function buildScoreHistoryQuery(target, limit = SCORE_HISTORY_LIMIT) {
+  const boundedLimit = Math.max(1, Math.min(SCORE_HISTORY_LIMIT, Number(limit) || SCORE_HISTORY_LIMIT));
+  const whereClauses = [];
+  const bindings = [];
+
+  if (target.mode === "url" && target.normalizedUrl) {
+    const hashes = await Promise.all(
+      SCORE_HISTORY_HASH_VARIANTS.map((variant) => hashUrl(target.normalizedUrl, variant))
+    );
+    whereClauses.push(`url_hash IN (${hashes.map(() => "?").join(", ")})`);
+    bindings.push(...hashes);
+    const urlQuery = buildScoreHistoryUrlClauses(target.normalizedUrl);
+    if (urlQuery.clauses.length > 0) {
+      whereClauses.push(`(${urlQuery.clauses.join(" OR ")})`);
+      bindings.push(...urlQuery.bindings);
+    }
+  }
+
+  const hostQuery = target.mode === "hostname" ? buildScoreHistoryHostClauses(target.hostname) : { clauses: [], bindings: [] };
+  if (hostQuery.clauses.length > 0) {
+    whereClauses.push(`(${hostQuery.clauses.join(" OR ")})`);
+    bindings.push(...hostQuery.bindings);
+  }
+
+  return {
+    sql: `
+      SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+      FROM roasts
+      WHERE ${whereClauses.join(" OR ")}
+      ORDER BY created_at DESC
+      LIMIT ?
+    `,
+    bindings: [...bindings, boundedLimit],
+    limit: boundedLimit
+  };
+}
+
+function rowMatchesScoreHistoryTarget(row, target) {
+  try {
+    const rowUrl = new URL(row.url);
+    const rowHostname = normalizeHistoryHostname(rowUrl.hostname);
+    if (target.mode === "hostname") {
+      return rowHostname === target.hostname;
+    }
+    return normalizeUrl(rowUrl.toString()) === target.normalizedUrl;
+  } catch {
+    return false;
+  }
+}
+
+async function inferScoreHistoryDevice(row) {
+  if (!row?.url_hash || !row?.url) return "unknown";
+  for (const variant of SCORE_HISTORY_HASH_VARIANTS) {
+    if (await hashUrl(row.url, variant) === row.url_hash) {
+      return variant.replace(/-full$/, "");
+    }
+  }
+  return "unknown";
+}
+
+async function formatScoreHistoryRow(row) {
+  return {
+    id: row.id,
+    url: row.url,
+    overallScore: row.overall_score,
+    scores: {
+      hero: row.hero_score,
+      cta: row.cta_score,
+      trust: row.trust_score,
+      copy: row.copy_score,
+      design: row.design_score
+    },
+    createdAt: row.created_at,
+    device: await inferScoreHistoryDevice(row)
+  };
+}
+
+async function getScoreHistory(env22, params, { limit = SCORE_HISTORY_LIMIT } = {}) {
+  const target = normalizeScoreHistoryTarget(params);
+  if (!target) return null;
+
+  const query = await buildScoreHistoryQuery(target, limit);
+  const result = await env22.DB.prepare(query.sql).bind(...query.bindings).all();
+  const rows = (result.results || [])
+    .filter((row) => rowMatchesScoreHistoryTarget(row, target))
+    .slice(0, query.limit)
+    .reverse();
+
+  return {
+    target: {
+      input: target.input,
+      mode: target.mode,
+      normalizedUrl: target.normalizedUrl,
+      hostname: target.hostname
+    },
+    history: await Promise.all(rows.map(formatScoreHistoryRow))
+  };
+}
 
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();
@@ -293,4 +476,4 @@ function apiV1RateLimitHeaders(ipCount, globalCount) {
   };
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, getScoreHistory, normalizeScoreHistoryTarget, buildScoreHistoryQuery, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
