@@ -1141,14 +1141,14 @@
             <div id="gallery-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 <!-- Gallery items loaded dynamically -->
             </div>
-            <div id="gallery-loading" class="text-center py-8 text-cream-300/35 text-[14px]">
+            <div id="gallery-loading" class="text-center py-8 text-cream-300/35 text-[14px]" role="status" aria-live="polite">
                 Loading recent roasts...
             </div>
             <div id="gallery-empty" class="hidden text-center py-8 text-cream-300/35 text-[14px]">
                 No roasts yet. Be the first.
             </div>
             <div class="text-center mt-2">
-                <button id="gallery-load-more" class="hidden inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] text-[13px] text-[#a1a1a6] hover:text-white hover:border-white/[0.16] transition-colors"
+                <button id="gallery-load-more" type="button" aria-controls="gallery-grid" class="hidden inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] text-[13px] text-[#a1a1a6] hover:text-white hover:border-white/[0.16] transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-[#a1a1a6] disabled:hover:border-white/[0.08]"
                     onclick="loadGallery(true)">Load more</button>
             </div>
         </div>
@@ -8644,8 +8644,10 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         }
 
         // Gallery
+        const GALLERY_PAGE_SIZE = 8;
         let _galleryPage = 1;
         let _galleryLoading = false;
+        let _galleryHasMore = true;
         let _galleryIndustry = ''; // #57 — active industry filter ('' = all)
         const GALLERY_INDUSTRIES = [
             { key: '', label: 'All', emoji: '✨' },
@@ -8671,48 +8673,74 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 return `<button type="button" data-industry="${i.key}" aria-pressed="${active}" onclick="setGalleryIndustry('${i.key}')" class="px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors ${cls}">${i.emoji} ${i.label}</button>`;
             }).join('');
         }
+        function setGalleryLoadMoreState({ visible, disabled = false, label = 'Load more' }) {
+            const button = document.getElementById('gallery-load-more');
+            if (!button) return;
+            button.textContent = label;
+            button.disabled = disabled;
+            button.setAttribute('aria-busy', disabled && label.toLowerCase().includes('loading') ? 'true' : 'false');
+            button.classList.toggle('hidden', !visible);
+        }
         function setGalleryIndustry(key) {
             if (key === _galleryIndustry || _galleryLoading) return;
             _galleryIndustry = key;
             _galleryPage = 1;
+            _galleryHasMore = true;
             const grid = document.getElementById('gallery-grid');
             if (grid) grid.innerHTML = '';
             document.getElementById('gallery-empty')?.classList.add('hidden');
-            document.getElementById('gallery-load-more')?.classList.add('hidden');
+            setGalleryLoadMoreState({ visible: false });
             const loading = document.getElementById('gallery-loading');
             if (loading) { loading.textContent = 'Loading roasts…'; loading.classList.remove('hidden'); }
             renderGalleryFilters();
             loadGallery();
         }
         async function loadGallery(next = false) {
-            if (_galleryLoading) return;
+            if (_galleryLoading || (next && !_galleryHasMore)) return;
             _galleryLoading = true;
+            const loadingEl = document.getElementById('gallery-loading');
+            if (next) {
+                setGalleryLoadMoreState({ visible: true, disabled: true, label: 'Loading…' });
+            } else {
+                setGalleryLoadMoreState({ visible: false });
+                if (loadingEl) {
+                    loadingEl.textContent = 'Loading recent roasts...';
+                    loadingEl.classList.remove('hidden');
+                }
+            }
             try {
-                const qs = `page=${_galleryPage}` + (_galleryIndustry ? `&industry=${encodeURIComponent(_galleryIndustry)}` : '');
+                const qs = `page=${_galleryPage}&limit=${GALLERY_PAGE_SIZE}&meta=1` + (_galleryIndustry ? `&industry=${encodeURIComponent(_galleryIndustry)}` : '');
                 const res = await fetch(`/api/gallery?${qs}`);
-                const roasts = await res.json();
+                if (!res.ok) throw new Error('Gallery request failed');
+                const payload = await res.json();
+                const roasts = Array.isArray(payload) ? payload : (payload.roasts || []);
+                const pagination = Array.isArray(payload) ? null : payload.pagination;
 
-                document.getElementById('gallery-loading').classList.add('hidden');
+                loadingEl?.classList.add('hidden');
 
                 if (!roasts || roasts.length === 0) {
                     if (_galleryPage === 1) {
                         const emptyEl = document.getElementById('gallery-empty');
                         emptyEl.textContent = _galleryIndustry ? 'No roasts in this category yet.' : 'No roasts yet. Be the first.';
                         emptyEl.classList.remove('hidden');
+                        setGalleryLoadMoreState({ visible: false });
+                    } else {
+                        setGalleryLoadMoreState({ visible: true, disabled: true, label: 'No more roasts' });
                     }
-                    _galleryLoading = false; // #57 — was missing; empty result froze the gallery
+                    _galleryHasMore = false;
+                    _galleryLoading = false;
                     return;
                 }
                 document.getElementById('gallery-empty')?.classList.add('hidden');
 
                 const grid = document.getElementById('gallery-grid');
                 const html = roasts.map(roast => `
-                    <a href="/roast/${roast.id}" class="gallery-card card p-3 block hover:no-underline">
+                    <a href="/roast/${encodeURIComponent(roast.id)}" class="gallery-card card p-3 block hover:no-underline">
                         <div class="aspect-video bg-white/[0.05] rounded-lg overflow-hidden mb-2">
-                            <img src="${roast.screenshotUrl}" alt="${roast.hostname}" class="w-full h-full object-cover object-top" loading="lazy">
+                            <img src="${sanitizeHtml(roast.screenshotUrl || `/api/screenshot/${roast.id}`)}" alt="${sanitizeHtml(roast.hostname || 'Roast screenshot')}" class="w-full h-full object-cover object-top" loading="lazy">
                         </div>
                         <div class="flex justify-between items-center">
-                            <span class="text-xs text-[#a1a1a6] truncate flex-1">${roast.hostname}</span>
+                            <span class="text-xs text-[#a1a1a6] truncate flex-1">${sanitizeHtml(roast.hostname || 'Unknown site')}</span>
                             <span class="text-sm font-bold ${roast.overall_score >= 7 ? 'text-green-400' : roast.overall_score >= 5 ? 'text-yellow-400' : 'text-red-400'}">${roast.overall_score}/10</span>
                         </div>
                     </a>
@@ -8720,9 +8748,19 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 if (next) grid.insertAdjacentHTML('beforeend', html);
                 else grid.innerHTML = html;
                 _galleryPage += 1;
-                document.getElementById('gallery-load-more')?.classList.remove('hidden');
+                _galleryHasMore = pagination ? pagination.hasMore : roasts.length === GALLERY_PAGE_SIZE;
+                setGalleryLoadMoreState({
+                    visible: true,
+                    disabled: !_galleryHasMore,
+                    label: _galleryHasMore ? 'Load more' : 'No more roasts'
+                });
             } catch (err) {
-                document.getElementById('gallery-loading').textContent = 'Failed to load gallery';
+                if (next) {
+                    setGalleryLoadMoreState({ visible: true, disabled: false, label: 'Try again' });
+                } else if (loadingEl) {
+                    loadingEl.textContent = 'Failed to load gallery';
+                    loadingEl.classList.remove('hidden');
+                }
             }
             _galleryLoading = false;
         }

@@ -7,7 +7,7 @@ import {
 import {
     generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, 
     hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, 
-    fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, 
+    fetchWithTimeout, parsePaginationParams, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml,
     sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, secondsUntilMidnightUTC,
     getAllowedOrigins, getSecurityHeaders
 } from './utils.js';
@@ -806,9 +806,8 @@ data: ${JSON.stringify(data)}
       return Response.json(roasts.results, { headers: corsHeaders });
     }
     if (url.pathname === "/api/gallery" && request.method === "GET") {
-      const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
-      const perPage = 24;
-      const offset = (page - 1) * perPage;
+      const { page, limit, offset } = parsePaginationParams(url.searchParams, { defaultLimit: 24, maxLimit: 48 });
+      const includeMeta = url.searchParams.get("meta") === "1" || url.searchParams.get("includeMeta") === "true";
       // #57 — optional industry filter for the homepage gallery. Validate against the
       // known key set so the value can only ever be a fixed column filter (never user text).
       const industryParam = url.searchParams.get("industry");
@@ -816,15 +815,32 @@ data: ${JSON.stringify(data)}
       const roasts = industryFilter ? await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
         FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
-      `).bind(industryFilter, perPage, offset).all() : await env22.DB.prepare(`
+      `).bind(industryFilter, limit, offset).all() : await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
         FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
-      `).bind(perPage, offset).all();
+      `).bind(limit, offset).all();
       const results = roasts.results.map((roast) => ({
         ...roast,
         screenshotUrl: `/api/screenshot/${roast.id}`,
         hostname: new URL(roast.url).hostname
       }));
+      if (includeMeta) {
+        const totalResult = industryFilter
+          ? await env22.DB.prepare("SELECT COUNT(*) as count FROM roasts WHERE industry = ?").bind(industryFilter).first()
+          : await env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first();
+        const total = totalResult?.count || 0;
+        return Response.json({
+          roasts: results,
+          pagination: {
+            page,
+            limit,
+            offset,
+            total,
+            pages: Math.ceil(total / limit),
+            hasMore: offset + results.length < total
+          }
+        }, { headers: corsHeaders });
+      }
       return Response.json(results, { headers: corsHeaders });
     }
     if (url.pathname === "/api/stats" && request.method === "GET") {
