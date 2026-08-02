@@ -833,7 +833,7 @@
                 "name": "Is there a developer API?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Yes. The Developer API v1 lets you programmatically roast pages via POST /api/v1/roast and check your usage with GET /api/v1/usage. It supports open CORS, requires no authentication, and includes rate limit headers on every response. The free tier allows 5 roasts per IP per day."
+                    "text": "Yes. The Developer API v1 lets you programmatically roast pages via POST /api/v1/roast and check your usage with GET /api/v1/usage. It supports open CORS, optional rmp_ API keys for higher daily limits, and rate limit headers on every response. Without a key, the free anonymous tier allows 5 roasts per IP per day."
                 }
             }
         ]
@@ -3768,20 +3768,42 @@
                 <!-- Live Usage -->
                 <div id="api-usage-card" class="p-4 bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl">
                     <div class="flex items-center justify-between mb-2">
-                        <span class="text-sm font-medium text-blue-400">Your Usage Today</span>
+                        <span id="api-usage-title" class="text-sm font-medium text-blue-400">Your Usage Today</span>
                         <span id="api-usage-reset" class="text-xs text-[#6e6e73]">Resets at midnight UTC</span>
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <div class="text-2xl font-bold"><span id="api-ip-used">-</span><span class="text-sm font-normal text-[#6e6e73]"> / 5</span></div>
-                            <div class="text-xs text-[#6e6e73]">Your requests</div>
+                            <div class="text-2xl font-bold"><span id="api-ip-used">-</span><span class="text-sm font-normal text-[#6e6e73]"> / <span id="api-ip-limit">5</span></span></div>
+                            <div id="api-ip-label" class="text-xs text-[#6e6e73]">Your requests</div>
                             <div class="mt-1.5 h-1.5 bg-white/[0.05] rounded-full overflow-hidden"><div id="api-ip-bar" class="h-full bg-blue-500 rounded-full transition-all" style="width:0%"></div></div>
                         </div>
                         <div>
-                            <div class="text-2xl font-bold"><span id="api-global-used">-</span><span class="text-sm font-normal text-[#6e6e73]"> / 50</span></div>
-                            <div class="text-xs text-[#6e6e73]">Global capacity</div>
+                            <div class="text-2xl font-bold"><span id="api-global-used">-</span><span class="text-sm font-normal text-[#6e6e73]"> / <span id="api-global-limit">50</span></span></div>
+                            <div id="api-global-label" class="text-xs text-[#6e6e73]">Global capacity</div>
                             <div class="mt-1.5 h-1.5 bg-white/[0.05] rounded-full overflow-hidden"><div id="api-global-bar" class="h-full bg-purple-500 rounded-full transition-all" style="width:0%"></div></div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- API Key Generator -->
+                <div class="p-4 bg-white/[0.03] border border-white/[0.04] rounded-xl space-y-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <h4 class="text-sm font-semibold text-[#d1d1d6] uppercase tracking-wider">API Key</h4>
+                            <p class="text-xs text-[#6e6e73] mt-1">Generate a free key for higher daily limits. Store it now; it is shown only once.</p>
+                        </div>
+                        <span class="px-2 py-0.5 bg-orange-500/15 text-orange-400 rounded text-xs font-bold">rmp_</span>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input id="api-key-label" class="input-dark px-3 py-2 text-sm flex-1" maxlength="80" placeholder="Key label, e.g. CI or My app">
+                        <button id="api-key-generate-btn" onclick="generateApiKey()" class="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-sm font-semibold rounded-lg transition-colors">Generate key</button>
+                    </div>
+                    <div id="api-key-result" class="hidden p-3 bg-black/50 border border-orange-500/20 rounded-lg space-y-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <p class="text-xs text-orange-300">Copy this key now. The server stores only a SHA-256 hash and cannot show it again.</p>
+                            <button onclick="copyGeneratedApiKey()" class="px-2 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded text-xs text-[#a1a1a6] transition-colors">Copy</button>
+                        </div>
+                        <code id="api-key-value" class="block p-2 bg-black/60 rounded text-xs text-[#d1d1d6] break-all"></code>
                     </div>
                 </div>
 
@@ -3808,7 +3830,16 @@
                             <span class="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-bold">GET</span>
                             <code class="text-sm text-[#d1d1d6] font-mono">/api/v1/usage</code>
                         </div>
-                        <p class="text-xs text-[#a1a1a6]">Check your current rate limit status. No authentication required.</p>
+                        <p class="text-xs text-[#a1a1a6]">Check your current rate limit status. Add a bearer key to see key-specific remaining quota.</p>
+                    </div>
+
+                    <!-- GET /api/keys/usage -->
+                    <div class="p-4 bg-white/[0.03] border border-white/[0.04] rounded-xl space-y-3">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-bold">GET</span>
+                            <code class="text-sm text-[#d1d1d6] font-mono">/api/keys/usage</code>
+                        </div>
+                        <p class="text-xs text-[#a1a1a6]">Authenticated key usage with daily limit, used count, and remaining requests.</p>
                     </div>
                 </div>
 
@@ -3825,6 +3856,20 @@
                             <div class="text-xs text-[#6e6e73]">global / day</div>
                         </div>
                     </div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="p-3 bg-white/[0.03] border border-white/[0.04] rounded-xl text-center">
+                            <div class="text-xl font-bold text-orange-400">25</div>
+                            <div class="text-xs text-[#6e6e73]">free key / day</div>
+                        </div>
+                        <div class="p-3 bg-white/[0.03] border border-white/[0.04] rounded-xl text-center">
+                            <div class="text-xl font-bold text-orange-400">250</div>
+                            <div class="text-xs text-[#6e6e73]">pro key / day</div>
+                        </div>
+                        <div class="p-3 bg-white/[0.03] border border-white/[0.04] rounded-xl text-center">
+                            <div class="text-xl font-bold text-orange-400">1000</div>
+                            <div class="text-xs text-[#6e6e73]">agency key / day</div>
+                        </div>
+                    </div>
                     <p class="text-xs text-[#6e6e73]">Counters reset at midnight UTC. Every response includes <code class="text-[#a1a1a6]">X-RateLimit-*</code> headers.</p>
                 </div>
 
@@ -3834,6 +3879,7 @@
                     <div class="relative group">
                         <pre class="p-4 bg-black/60 border border-white/[0.06] rounded-xl text-xs font-mono text-[#d1d1d6] overflow-x-auto leading-relaxed"><code>curl -X POST https://roastmypage.site/api/v1/roast \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_RMP_KEY" \
   -d '{"url": "https://yoursite.com"}'</code></pre>
                         <button onclick="copyApiExample()" class="absolute top-2 right-2 px-2 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded text-xs text-[#a1a1a6] transition-colors opacity-0 group-hover:opacity-100">Copy</button>
                     </div>
@@ -3862,7 +3908,7 @@
                     <div class="flex items-start gap-2">
                         <span class="text-sm mt-0.5">&#9889;</span>
                         <div class="text-xs text-[#d1d1d6] space-y-1">
-                            <p><span class="font-medium">No API key required</span> — just start making requests.</p>
+                            <p><span class="font-medium">API key optional</span> — anonymous requests still work with IP-based limits.</p>
                             <p>Fresh roasts take 8-15 seconds (screenshot + AI analysis). Cached results return instantly.</p>
                             <p>CORS is open (<code class="text-orange-400/80">Access-Control-Allow-Origin: *</code>) — call from any frontend.</p>
                         </div>
@@ -3871,7 +3917,7 @@
 
             </div>
             <div class="p-4 border-t border-white/[0.04] flex items-center justify-between">
-                <span class="text-xs text-[#6e6e73]">API v1 — IP-based rate limiting</span>
+                <span class="text-xs text-[#6e6e73]">API v1 — optional API keys</span>
                 <button onclick="hideApiDocsModal()" class="px-4 py-2 bg-white/[0.06] hover:bg-white/[0.1] text-sm font-medium rounded-lg transition-colors">Close</button>
             </div>
         </div>
@@ -7635,12 +7681,34 @@ Your landing page is like a first date where you talk about yourself for 45 minu
 
         async function fetchApiUsage() {
             try {
-                const res = await fetch('/api/v1/usage');
+                const savedKey = localStorage.getItem('roastApiKey') || '';
+                const res = await fetch(savedKey ? '/api/keys/usage' : '/api/v1/usage', {
+                    headers: savedKey ? { 'Authorization': `Bearer ${savedKey}` } : {}
+                });
                 const data = await res.json();
-                document.getElementById('api-ip-used').textContent = data.limits.perIp.used;
-                document.getElementById('api-global-used').textContent = data.limits.global.used;
-                document.getElementById('api-ip-bar').style.width = ((data.limits.perIp.used / data.limits.perIp.limit) * 100) + '%';
-                document.getElementById('api-global-bar').style.width = ((data.limits.global.used / data.limits.global.limit) * 100) + '%';
+                if (!res.ok) throw new Error(data.message || 'Failed to load usage');
+                if (data.limits.daily) {
+                    const daily = data.limits.daily;
+                    document.getElementById('api-usage-title').textContent = `API Key Usage (${data.key.tier})`;
+                    document.getElementById('api-ip-used').textContent = daily.used;
+                    document.getElementById('api-ip-limit').textContent = daily.limit;
+                    document.getElementById('api-ip-label').textContent = `${data.key.prefix} requests`;
+                    document.getElementById('api-ip-bar').style.width = ((daily.used / daily.limit) * 100) + '%';
+                    document.getElementById('api-global-used').textContent = daily.remaining;
+                    document.getElementById('api-global-limit').textContent = daily.limit;
+                    document.getElementById('api-global-label').textContent = 'Remaining today';
+                    document.getElementById('api-global-bar').style.width = ((daily.remaining / daily.limit) * 100) + '%';
+                } else {
+                    document.getElementById('api-usage-title').textContent = 'Your Usage Today';
+                    document.getElementById('api-ip-used').textContent = data.limits.perIp.used;
+                    document.getElementById('api-ip-limit').textContent = data.limits.perIp.limit;
+                    document.getElementById('api-ip-label').textContent = 'Your requests';
+                    document.getElementById('api-global-used').textContent = data.limits.global.used;
+                    document.getElementById('api-global-limit').textContent = data.limits.global.limit;
+                    document.getElementById('api-global-label').textContent = 'Global capacity';
+                    document.getElementById('api-ip-bar').style.width = ((data.limits.perIp.used / data.limits.perIp.limit) * 100) + '%';
+                    document.getElementById('api-global-bar').style.width = ((data.limits.global.used / data.limits.global.limit) * 100) + '%';
+                }
                 if (data.resetsIn) {
                     const hrs = Math.floor(data.resetsIn / 3600);
                     const mins = Math.floor((data.resetsIn % 3600) / 60);
@@ -7652,8 +7720,41 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             }
         }
 
+        async function generateApiKey() {
+            const btn = document.getElementById('api-key-generate-btn');
+            const label = document.getElementById('api-key-label').value;
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+            try {
+                const res = await fetch('/api/keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to generate key');
+                localStorage.setItem('roastApiKey', data.key);
+                document.getElementById('api-key-value').textContent = data.key;
+                document.getElementById('api-key-result').classList.remove('hidden');
+                showToast('API key generated. Copy and store it now.', 'success');
+                fetchApiUsage();
+            } catch (err) {
+                showToast(err.message || 'Failed to generate API key', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Generate key';
+            }
+        }
+
+        function copyGeneratedApiKey() {
+            const key = document.getElementById('api-key-value').textContent;
+            if (!key) return;
+            navigator.clipboard.writeText(key).then(() => showToast('API key copied!', 'success'));
+        }
+
         function copyApiExample() {
-            const cmd = 'curl -X POST https://roastmypage.site/api/v1/roast \\\n  -H "Content-Type: application/json" \\\n  -d \'{"url": "https://yoursite.com"}\'';
+            const savedKey = localStorage.getItem('roastApiKey') || 'YOUR_RMP_KEY';
+            const cmd = `curl -X POST https://roastmypage.site/api/v1/roast \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${savedKey}" \\\n  -d '{"url": "https://yoursite.com"}'`;
             navigator.clipboard.writeText(cmd).then(() => showToast('Copied to clipboard!', 'success'));
         }
         async function loadFromHistory(id) {

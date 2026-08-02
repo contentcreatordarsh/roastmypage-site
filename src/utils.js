@@ -129,7 +129,7 @@ function getSecurityHeaders(origin, environment) {
     // CORS
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key",
     "Access-Control-Max-Age": "86400",
     // Security headers
     "X-Content-Type-Options": "nosniff",

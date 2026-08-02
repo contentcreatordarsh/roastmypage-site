@@ -2,6 +2,15 @@ import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './c
 import { getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
 
+function getApiV1DailyLimit(tier) {
+  if (!tier) return API_V1_LIMITS.PER_IP_DAILY;
+  return API_V1_LIMITS.API_KEY_DAILY_BY_TIER[tier] || API_V1_LIMITS.API_KEY_DAILY_BY_TIER.free;
+}
+
+function getApiV1CounterKeyForApiKey(apiKey) {
+  return `key:${apiKey.id}`;
+}
+
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();
   const hourKey = `global_hourly_${now.getUTCFullYear()}_${now.getUTCMonth()}_${now.getUTCDate()}_${now.getUTCHours()}`;
@@ -161,52 +170,57 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   };
 }
 
-async function getApiV1Counts(env, ipHash) {
+async function getApiV1Counts(env, actorKey) {
   const dayKey = getApiDayKey();
-  const [ipRow, globalRow] = await Promise.all([
+  const [actorRow, globalRow] = await Promise.all([
     env.DB.prepare(
       "SELECT request_count FROM api_v1_counters WHERE day_key = ? AND ip_hash = ?"
-    ).bind(dayKey, ipHash).first(),
+    ).bind(dayKey, actorKey).first(),
     env.DB.prepare(
-      "SELECT COALESCE(SUM(request_count), 0) AS request_count FROM api_v1_counters WHERE day_key = ?"
+      "SELECT COALESCE(SUM(request_count), 0) AS request_count FROM api_v1_counters WHERE day_key = ? AND ip_hash NOT LIKE 'key:%'"
     ).bind(dayKey).first()
   ]);
+  const actorCount = Number(actorRow?.request_count || 0);
   return {
-    ipCount: Number(ipRow?.request_count || 0),
+    actorCount,
+    ipCount: actorCount,
     globalCount: Number(globalRow?.request_count || 0)
   };
 }
 
-function deniedApiV1Result(ipCount, globalCount) {
-  if (globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
+function deniedApiV1Result(actorCount, globalCount, { dailyLimit = API_V1_LIMITS.PER_IP_DAILY, includeGlobal = true } = {}) {
+  if (includeGlobal && globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
     return {
       allowed: false,
-      ipCount,
+      actorCount,
+      ipCount: actorCount,
       globalCount,
       error: `The API has reached its daily capacity of ${API_V1_LIMITS.GLOBAL_DAILY} roasts. Please try again tomorrow.`,
       errorType: "global_limit"
     };
   }
-  if (ipCount >= API_V1_LIMITS.PER_IP_DAILY) {
+  if (actorCount >= dailyLimit) {
     return {
       allowed: false,
-      ipCount,
+      actorCount,
+      ipCount: actorCount,
       globalCount,
-      error: `You've reached the daily limit of ${API_V1_LIMITS.PER_IP_DAILY} roasts. Please try again tomorrow.`,
-      errorType: "ip_limit"
+      error: `You've reached the daily limit of ${dailyLimit} roasts. Please try again tomorrow.`,
+      errorType: "daily_limit"
     };
   }
-  return { allowed: true, ipCount, globalCount };
+  return { allowed: true, actorCount, ipCount: actorCount, globalCount };
 }
 
-async function checkApiV1RateLimits(env, ipHash) {
+async function checkApiV1RateLimits(env, actorKey, options = {}) {
   try {
-    const { ipCount, globalCount } = await getApiV1Counts(env, ipHash);
-    return deniedApiV1Result(ipCount, globalCount);
+    const { actorCount, globalCount } = await getApiV1Counts(env, actorKey);
+    return deniedApiV1Result(actorCount, globalCount, options);
   } catch (error) {
     console.error("API v1 rate limit check failed:", error);
     return {
       allowed: false,
+      actorCount: 0,
       ipCount: 0,
       globalCount: 0,
       error: "Rate limiting unavailable. Please try again later.",
@@ -215,46 +229,63 @@ async function checkApiV1RateLimits(env, ipHash) {
   }
 }
 
-async function consumeApiV1Quota(env, ipHash) {
+async function consumeApiV1Quota(env, actorKey, options = {}) {
   const dayKey = getApiDayKey();
+  const dailyLimit = options.dailyLimit || API_V1_LIMITS.PER_IP_DAILY;
+  const includeGlobal = options.includeGlobal !== false;
   try {
     // A single SQLite write serializes the per-IP increment and both limit checks.
     // This avoids the KV read-modify-write race and the check/increment TOCTOU gap.
-    const reserved = await env.DB.prepare(`
-      INSERT INTO api_v1_counters (day_key, ip_hash, request_count, updated_at)
-      SELECT ?, ?, 1, datetime('now')
-      WHERE (
-        SELECT COALESCE(SUM(request_count), 0)
-        FROM api_v1_counters
-        WHERE day_key = ?
-      ) < ?
-      ON CONFLICT(day_key, ip_hash) DO UPDATE SET
-        request_count = api_v1_counters.request_count + 1,
-        updated_at = datetime('now')
-      WHERE api_v1_counters.request_count < ?
-        AND (
+    const reserved = includeGlobal
+      ? await env.DB.prepare(`
+        INSERT INTO api_v1_counters (day_key, ip_hash, request_count, updated_at)
+        SELECT ?, ?, 1, datetime('now')
+        WHERE (
           SELECT COALESCE(SUM(request_count), 0)
           FROM api_v1_counters
-          WHERE day_key = ?
+          WHERE day_key = ? AND ip_hash NOT LIKE 'key:%'
         ) < ?
-      RETURNING request_count
-    `).bind(
-      dayKey,
-      ipHash,
-      dayKey,
-      API_V1_LIMITS.GLOBAL_DAILY,
-      API_V1_LIMITS.PER_IP_DAILY,
-      dayKey,
-      API_V1_LIMITS.GLOBAL_DAILY
-    ).first();
+        ON CONFLICT(day_key, ip_hash) DO UPDATE SET
+          request_count = api_v1_counters.request_count + 1,
+          updated_at = datetime('now')
+        WHERE api_v1_counters.request_count < ?
+          AND (
+            SELECT COALESCE(SUM(request_count), 0)
+            FROM api_v1_counters
+            WHERE day_key = ? AND ip_hash NOT LIKE 'key:%'
+          ) < ?
+        RETURNING request_count
+      `).bind(
+        dayKey,
+        actorKey,
+        dayKey,
+        API_V1_LIMITS.GLOBAL_DAILY,
+        dailyLimit,
+        dayKey,
+        API_V1_LIMITS.GLOBAL_DAILY
+      ).first()
+      : await env.DB.prepare(`
+        INSERT INTO api_v1_counters (day_key, ip_hash, request_count, updated_at)
+        VALUES (?, ?, 1, datetime('now'))
+        ON CONFLICT(day_key, ip_hash) DO UPDATE SET
+          request_count = api_v1_counters.request_count + 1,
+          updated_at = datetime('now')
+        WHERE api_v1_counters.request_count < ?
+        RETURNING request_count
+      `).bind(
+        dayKey,
+        actorKey,
+        dailyLimit
+      ).first();
 
-    const { ipCount, globalCount } = await getApiV1Counts(env, ipHash);
-    if (!reserved) return deniedApiV1Result(ipCount, globalCount);
-    return { allowed: true, ipCount, globalCount };
+    const { actorCount, globalCount } = await getApiV1Counts(env, actorKey);
+    if (!reserved) return deniedApiV1Result(actorCount, globalCount, { dailyLimit, includeGlobal });
+    return { allowed: true, actorCount, ipCount: actorCount, globalCount };
   } catch (error) {
     console.error("API v1 quota reservation failed:", error);
     return {
       allowed: false,
+      actorCount: 0,
       ipCount: 0,
       globalCount: 0,
       error: "Rate limiting unavailable. Please try again later.",
@@ -281,16 +312,20 @@ async function releaseApiV1Quota(env, ipHash) {
   }
 }
 
-function apiV1RateLimitHeaders(ipCount, globalCount) {
+function apiV1RateLimitHeaders(actorCount, globalCount, { dailyLimit = API_V1_LIMITS.PER_IP_DAILY, includeGlobal = true, tier } = {}) {
   const resetAt = /* @__PURE__ */ new Date();
   resetAt.setUTCHours(24, 0, 0, 0);
-  return {
-    "X-RateLimit-Limit": String(API_V1_LIMITS.PER_IP_DAILY),
-    "X-RateLimit-Remaining": String(Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount)),
+  const headers = {
+    "X-RateLimit-Limit": String(dailyLimit),
+    "X-RateLimit-Remaining": String(Math.max(0, dailyLimit - actorCount)),
     "X-RateLimit-Reset": String(Math.floor(resetAt.getTime() / 1e3)),
-    "X-RateLimit-Global-Limit": String(API_V1_LIMITS.GLOBAL_DAILY),
-    "X-RateLimit-Global-Remaining": String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount))
+    ...(tier ? { "X-RateLimit-Tier": tier } : {})
   };
+  if (includeGlobal) {
+    headers["X-RateLimit-Global-Limit"] = String(API_V1_LIMITS.GLOBAL_DAILY);
+    headers["X-RateLimit-Global-Remaining"] = String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount));
+  }
+  return headers;
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, getApiV1DailyLimit, getApiV1CounterKeyForApiKey, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
