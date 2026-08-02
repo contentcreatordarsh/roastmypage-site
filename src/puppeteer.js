@@ -4,6 +4,32 @@ import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
 import { analyzeVideoSignals } from './video.js';
+import { detectBotChallenge, botChallengeError, isBotChallengeError } from './botcheck.js';
+
+// Collected inside the page so detectBotChallenge() can stay a pure, testable
+// predicate. Reads the DOM only — no network, no navigation.
+function collectChallengeSignals() {
+  const scripts = Array.from(document.querySelectorAll("script"));
+  const noscriptText = Array.from(document.querySelectorAll("noscript"))
+    .map((n) => n.textContent || "")
+    .join(" ")
+    .toLowerCase();
+  return {
+    title: document.title || "",
+    bodyTextLength: (document.body?.innerText || "").trim().length,
+    markers: {
+      cfChallengeRunning: !!document.querySelector("#cf-challenge-running"),
+      challengeForm: !!document.querySelector("#challenge-form"),
+      cfBrowserVerification: !!document.querySelector(
+        ".cf-browser-verification, #cf-browser-verification, [class*='cf-browser-verification']"
+      ),
+      cfChlOptScript: scripts.some((s) => (s.textContent || "").includes("_cf_chl_opt")),
+      challengePlatformScript: scripts.some((s) => (s.src || "").includes("/cdn-cgi/challenge-platform/")),
+      turnstile: !!document.querySelector(".cf-turnstile, iframe[src*='challenges.cloudflare.com']"),
+      noscriptChallenge: noscriptText.includes("enable javascript and cookies")
+    }
+  };
+}
 
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;
@@ -38,14 +64,59 @@ async function capturePageWithMetrics(env22, url, options = {}) {
     }
     const startTime = Date.now();
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
+      const navResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
       await sleep(fullPage ? 2e3 : 1500);
       // Re-validate the final landed URL in case a redirect slipped through interception.
       const finalUrl = page.url();
       if (!isUrlSafeForFetching(finalUrl)) {
         throw new Error("Blocked: page redirected to an internal or private address");
       }
-      const loadTime = Date.now() - startTime;
+      let loadTime = Date.now() - startTime;
+      // Bot-challenge / interstitial check. Scoring a "Just a moment..." page produces a
+      // confidently wrong roast (bogus SEO issues, meaningless perf numbers), so bail out
+      // before any AI analysis or persistence rather than publish a fabricated score.
+      const readChallengeSignals = async (status) => {
+        try {
+          const collected = await page.evaluate(collectChallengeSignals);
+          return { ...collected, status };
+        } catch (e) {
+          console.log("Challenge signal collection failed, falling back to status only:", e?.message || e);
+          return { title: "", bodyTextLength: 0, markers: {}, status };
+        }
+      };
+      let challenge = detectBotChallenge(await readChallengeSignals(navResponse?.status?.() || 0));
+      if (challenge.blocked) {
+        console.log(`Bot challenge suspected for ${url}: ${challenge.reasons.join("; ")} — re-checking once`);
+        // One honest second chance: a genuine browser's JS challenge frequently
+        // self-resolves within a few seconds, and sending the Accept-Language header
+        // every real Chrome sends makes the request accurate, not disguised. That is
+        // the whole retry — no token forging, no fingerprint patching, no evasion. If
+        // the page is still a challenge afterwards we report it instead of scoring it.
+        try {
+          await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
+        } catch (e) {
+          console.warn("Could not set extra headers for bot-challenge re-check:", e?.message || e);
+        }
+        await sleep(CONFIG.BOT_CHALLENGE_SETTLE_MS);
+        const retryStart = Date.now();
+        let retryResponse;
+        try {
+          retryResponse = await page.reload({ waitUntil: "domcontentloaded", timeout: CONFIG.BOT_CHALLENGE_RELOAD_TIMEOUT_MS });
+        } catch (e) {
+          console.log("Bot-challenge re-check reload failed:", e?.message || e);
+          throw botChallengeError(challenge.reasons);
+        }
+        await sleep(1500);
+        if (!isUrlSafeForFetching(page.url())) {
+          throw new Error("Blocked: page redirected to an internal or private address");
+        }
+        challenge = detectBotChallenge(await readChallengeSignals(retryResponse?.status?.() || 0));
+        if (challenge.blocked) {
+          throw botChallengeError(challenge.reasons);
+        }
+        // Real page on the second try — measure it, not the challenge round-trip.
+        loadTime = Date.now() - retryStart;
+      }
       const seoData = await page.evaluate(() => {
         const title22 = document.title || "";
         const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
@@ -469,6 +540,9 @@ async function capturePageWithMetrics(env22, url, options = {}) {
     console.error(`Capture attempt ${attempt} failed:`, errorMsg, error32.stack);
     if (errorMsg.startsWith("Blocked:")) {
       throw error32; // SSRF redirect block — fail fast, never retry or screenshot
+    }
+    if (isBotChallengeError(error32)) {
+      throw error32; // Interstitial detected — already re-checked once; retrying is pointless
     }
     if (errorMsg.includes("429") || errorMsg.includes("Rate limit") || errorMsg.includes("rate limit") || errorMsg.includes("Browser") || errorMsg.includes("browser") || errorMsg.includes("limit")) {
       if (attempt < CONFIG.MAX_BROWSER_RETRIES) {

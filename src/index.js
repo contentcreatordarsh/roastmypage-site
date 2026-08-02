@@ -24,6 +24,8 @@ import {
 
 import { capturePageWithMetrics } from './puppeteer.js';
 
+import { isBotChallengeError, BOT_CHALLENGE_MESSAGE } from './botcheck.js';
+
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
 
 import {
@@ -189,6 +191,13 @@ export default {
         return Response.json(roastResult, { headers: { ...corsHeaders, "X-Cache": deduplicated ? "DEDUP" : "MISS" } });
       } catch (error32) {
         safeLogError("Roast failed:", error32);
+        // Bot-challenge interstitial: never scored, never persisted — say so plainly.
+        if (isBotChallengeError(error32)) {
+          return Response.json(
+            { error: "blocked_by_bot_protection", message: BOT_CHALLENGE_MESSAGE },
+            { status: 422, headers: corsHeaders }
+          );
+        }
         let errorMessage = error32.message;
         let statusCode = 500;
         let retryAfter = 0;
@@ -501,6 +510,12 @@ export default {
       } catch (error32) {
         safeLogError("Compare failed:", error32);
         const errorMsg = error32.message || "";
+        if (isBotChallengeError(error32)) {
+          return Response.json({
+            error: "blocked_by_bot_protection",
+            message: BOT_CHALLENGE_MESSAGE
+          }, { status: 422, headers: corsHeaders });
+        }
         if (errorMsg.includes("timed out")) {
           return Response.json({
             error: "Comparison took too long. Try simpler pages or try again later.",
@@ -608,7 +623,7 @@ export default {
             await sleep(1e3);
           } catch (err) {
             safeLogError(`Batch roast failed for URL:`, err);
-            errors.push({ url: targetUrl, error: "Failed to analyze this page. Please try again." });
+            errors.push(isBotChallengeError(err) ? { url: targetUrl, error: "blocked_by_bot_protection", message: BOT_CHALLENGE_MESSAGE } : { url: targetUrl, error: "Failed to analyze this page. Please try again." });
           }
         }
         return Response.json({
@@ -754,7 +769,11 @@ data: ${JSON.stringify(data)}
                 await sendEvent("complete", result);
               })(), CONFIG.ROAST_TOTAL_TIMEOUT_MS, "Stream roast operation");
             } catch (error32) {
-              await sendEvent("error", { message: error32.message || "Analysis timed out. Please try again." });
+              if (isBotChallengeError(error32)) {
+                await sendEvent("error", { error: "blocked_by_bot_protection", message: BOT_CHALLENGE_MESSAGE });
+              } else {
+                await sendEvent("error", { message: error32.message || "Analysis timed out. Please try again." });
+              }
             } finally {
               await writer.close();
             }
@@ -2725,6 +2744,13 @@ data: ${JSON.stringify(data)}
         return response;
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
+        if (isBotChallengeError(error32)) {
+          return Response.json({
+            success: false,
+            error: "blocked_by_bot_protection",
+            message: BOT_CHALLENGE_MESSAGE
+          }, { status: 422, headers: apiV1CorsHeaders });
+        }
         let message = "Something went wrong. Please try again.";
         let statusCode = 500;
         if (error32.message?.includes("timeout") || error32.message?.includes("Timeout")) {
