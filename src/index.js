@@ -19,7 +19,8 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders,
+    purgeExpiredRoasts
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -3388,6 +3389,14 @@ data: ${JSON.stringify(data)}
       return env22.ASSETS.fetch(request);
     }
     return new Response("Not Found", { status: 404 });
+  },
+
+  scheduled(_event, env22, ctx) {
+    const purgeTask = purgeExpiredRoasts(env22)
+      .then((summary) => console.log("Retention purge complete:", summary))
+      .catch((error32) => console.error("Retention purge failed:", error32));
+
+    ctx.waitUntil(purgeTask);
   }
 
 };

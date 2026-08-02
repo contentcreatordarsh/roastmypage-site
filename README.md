@@ -48,3 +48,7 @@ The application's source code in `src/` is separated into focused modules:
 ## Environment Setup
 
 The worker requires bindings for `DB` (D1), `SCREENSHOTS` (R2), `CONFIG` (KV), `BROWSER`, and `AI`. Ensure your `wrangler.toml` is configured with the corresponding namespace IDs for your Cloudflare account.
+
+## Data Retention
+
+Roast records and their R2 screenshots are retained for 90 days by default. The scheduled Worker cron runs daily and purges expired `roasts` rows plus their stored `screenshot_key` objects; set the `RETENTION_DAYS` environment variable to override the default.

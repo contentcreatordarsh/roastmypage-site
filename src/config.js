@@ -66,6 +66,8 @@ const CONFIG = {
   // Storage limits
   MAX_SCREENSHOT_BYTES: 5 * 1024 * 1024,
   // 5MB — reject screenshots larger than this to prevent storage abuse
+  RETENTION_DAYS: 90,
+  // Delete stored roast rows and screenshots after this many days unless RETENTION_DAYS is set
   // AI settings
   AI_MAX_TOKENS: 1536,
   // Reduced from 2500 — compact prompt needs less output
