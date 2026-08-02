@@ -138,6 +138,7 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     if (cached.heatmap_data) heatmap = JSON.parse(cached.heatmap_data);
   } catch {
   }
+  const cms = seo?.cms || null;
   const industry = cached.industry || "other";
   const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, cached.overall_score, industry, "overall") : null;
   return {
@@ -151,6 +152,7 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     screenshotUrl: `/api/screenshot/${cached.id}`,
     cached: true,
     seo,
+    cms,
     performance: performance22,
     video: seo?.video || null,
     heatmap,

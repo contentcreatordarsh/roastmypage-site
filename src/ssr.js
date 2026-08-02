@@ -1,5 +1,6 @@
 import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
 import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
+import { getCmsTips } from './cms.js';
 
 function generateNotFoundPage(baseUrl) {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#0A0908;color:#F5F0E8;font-family:'DM Sans',system-ui,sans-serif}h1{font-family:'Syne',system-ui,sans-serif;letter-spacing:-0.02em}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#E85D04] hover:bg-[#FF6B1A] text-[#0A0908] font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
@@ -46,6 +47,8 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const cms = params.cms || seo?.cms || null;
+    const cmsTips = cms ? getCmsTips(cms) : [];
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -365,6 +368,22 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
           </div>
         </div>`;
       }).join("\n        ")}
+      </div>
+    </div>` : ""}
+
+    ${cms && cmsTips.length > 0 ? `<div class="card p-6 mb-6" style="background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(14,165,233,0.05));border-color:rgba(59,130,246,0.18);">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center"><span class="text-xl">CMS</span></div>
+        <div>
+          <h2 class="text-lg font-semibold">CMS tips</h2>
+          <p class="text-xs text-[#6e6e73]">Detected ${escapeHtml(cms.name || "CMS")}${cms.confidence ? ` with ${Math.round(cms.confidence)}% confidence` : ""}</p>
+        </div>
+      </div>
+      <div class="space-y-2">
+        ${cmsTips.slice(0, 4).map((tip, i) => `<div class="flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl">
+          <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs font-bold mt-0.5">${i + 1}</span>
+          <p class="text-sm text-[#d1d1d6] leading-relaxed">${escapeHtml(tip)}</p>
+        </div>`).join("\n        ")}
       </div>
     </div>` : ""}
   </div>

@@ -4,6 +4,7 @@ import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
 import { analyzeVideoSignals } from './video.js';
+import { detectCms } from './cms.js';
 
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;
@@ -38,7 +39,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
     }
     const startTime = Date.now();
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
+      const mainResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
       await sleep(fullPage ? 2e3 : 1500);
       // Re-validate the final landed URL in case a redirect slipped through interception.
       const finalUrl = page.url();
@@ -179,6 +180,21 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           });
         });
 
+        const generator = document.querySelector('meta[name="generator" i]')?.getAttribute("content") || "";
+        const assetUrls = Array.from(document.querySelectorAll("script[src], link[href], img[src]"))
+          .slice(0, 160)
+          .map((el) => el.getAttribute("src") || el.getAttribute("href") || "")
+          .filter(Boolean);
+        const markers = [
+          document.documentElement.getAttribute("data-wf-page"),
+          document.documentElement.getAttribute("data-wf-site"),
+          document.documentElement.className,
+          document.body?.className || "",
+          window.Shopify ? "Shopify global" : "",
+          window.Static?.SQUARESPACE_CONTEXT ? "Static.SQUARESPACE_CONTEXT" : "",
+          window.drupalSettings ? "drupalSettings" : ""
+        ].filter(Boolean);
+
         return {
           title: title22,
           metaDescription: metaDesc,
@@ -187,7 +203,8 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           h2Count,
           imgWithoutAlt: imgsWithoutAlt,
           accessibility: a11y,
-          videoRaw: { count: items.length, items }
+          videoRaw: { count: items.length, items },
+          cmsSignals: { generator, assetUrls, markers }
         };
       });
       let perfData = {
@@ -419,6 +436,12 @@ async function capturePageWithMetrics(env22, url, options = {}) {
 
       const radarApiToken = await env22.CONFIG.get("RADAR_API_TOKEN") || env22.RADAR_API_TOKEN;
       const radarInsights = await getRadarInsights(url, radarApiToken || void 0);
+      const cms = detectCms({
+        generator: seoData.cmsSignals?.generator,
+        assetUrls: seoData.cmsSignals?.assetUrls,
+        markers: seoData.cmsSignals?.markers,
+        headers: mainResponse?.headers?.() || {}
+      });
       const seo = {
         score: Math.max(0, seoScore),
         title: { text: seoData.title, length: seoData.title.length, status: titleStatus },
@@ -431,6 +454,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         hasVideo: video.present,
         videoCount: video.count,
         video,
+        cms,
         radar: {
           ranking: radarInsights.ranking,
           geoDistribution: radarInsights.geoDistribution,

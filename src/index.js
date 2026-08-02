@@ -33,6 +33,7 @@ import {
 } from './ai.js';
 
 import { renderSvgToPng } from './render.js';
+import { detectCms } from './cms.js';
 
 import {
     generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, 
@@ -171,6 +172,7 @@ export default {
               device,
               fullPage,
               seo: pageData.seo,
+              cms: pageData.seo?.cms || null,
               performance: pageData.performance,
               video: pageData.video || pageData.seo?.video || null,
               heatmap: enhancedHeatmap,
@@ -743,6 +745,7 @@ data: ${JSON.stringify(data)}
                   device,
                   fullPage,
                   seo: pageData.seo,
+                  cms: pageData.seo?.cms || null,
                   performance: pageData.performance,
                   video: pageData.video || pageData.seo?.video || null,
                   heatmap: enhancedHeatmap,
@@ -2456,6 +2459,13 @@ data: ${JSON.stringify(data)}
           country: scanResult?.page?.country || "Unknown"
         };
         const radarRank = scanResult?.meta?.processors?.radarRank?.data?.[0] || null;
+        const cms = detectCms({
+          technologies,
+          headers: {
+            server: scanResult?.page?.server || "",
+            poweredBy: scanResult?.page?.poweredBy || ""
+          }
+        });
         const result = {
           success: true,
           url: scanResult?.task?.url || "",
@@ -2471,6 +2481,7 @@ data: ${JSON.stringify(data)}
               website: tech.website
             }))
           },
+          cms,
           hosting,
           rank: radarRank ? {
             bucket: radarRank.bucket,
@@ -2629,6 +2640,7 @@ data: ${JSON.stringify(data)}
             quickWins: cachedResult.quickWins || [],
             industry: cachedResult.industry || "other",
             seo: cachedResult.seo || null,
+            cms: cachedResult.cms || cachedResult.seo?.cms || null,
             performance: cachedResult.performance || null,
             heatmap: cachedResult.heatmap || null,
             screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${cachedResult.id}`,
@@ -2707,6 +2719,7 @@ data: ${JSON.stringify(data)}
           industry,
           benchmarks: analysis.benchmarks || INDUSTRY_BENCHMARKS[industry] || INDUSTRY_BENCHMARKS.other,
           seo: pageData.seo || null,
+          cms: pageData.seo?.cms || null,
           performance: pageData.performance || null,
           video: pageData.video || pageData.seo?.video || null,
           heatmap: enhancedHeatmap,
