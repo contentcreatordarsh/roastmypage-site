@@ -21,7 +21,7 @@ export function renderRoastPage(params) {
         ogTitle: ogTitleProp, ogDesc: ogDescProp, ogImage: ogImageProp,
         pageUrl: pageUrlProp, createdAt: createdAtProp,
         industrySampleSize: industrySampleSizeProp, heatmap,
-        seoDetailsHtml, perfDetailsHtml
+        seoDetailsHtml, perfDetailsHtml, scoreDiff: roastScoreDiff
     } = params;
 
     // Use passed-in OG/meta values or compute fallbacks
@@ -46,6 +46,41 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const scoreDiffHtml = roastScoreDiff?.previous && roastScoreDiff?.deltas ? (() => {
+        const deltaItems = [
+            { key: 'overall', label: 'Overall' },
+            { key: 'hero', label: 'Hero' },
+            { key: 'cta', label: 'CTA' },
+            { key: 'trust', label: 'Trust' },
+            { key: 'copy', label: 'Copy' },
+            { key: 'design', label: 'Design' }
+        ];
+        const previousDate = roastScoreDiff.previous.date
+            ? new Date((/Z$/.test(roastScoreDiff.previous.date) ? roastScoreDiff.previous.date : `${roastScoreDiff.previous.date}Z`)).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            : "last time";
+        return `<div class="card p-5 mb-6" style="background:linear-gradient(135deg,rgba(34,197,94,0.06),rgba(232,93,4,0.04));border-color:rgba(34,197,94,0.14);">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      <div>
+        <h2 class="text-sm font-semibold text-white">Since last roast</h2>
+        <p class="text-xs text-[#6e6e73]">Compared with ${roastScoreDiff.previous.score}/10 from ${previousDate}</p>
+      </div>
+      <a href="/roast/${escapeHtml(roastScoreDiff.previous.id)}" class="text-xs text-[#a1a1a6] hover:text-[#FF6B35] transition-colors">View previous</a>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+      ${deltaItems.map((item) => {
+          const delta = roastScoreDiff.deltas[item.key];
+          if (!delta) return "";
+          const color = delta.change > 0 ? "#22C55E" : delta.change < 0 ? "#EF4444" : "#a1a1a6";
+          const bg = delta.change > 0 ? "rgba(34,197,94,0.08)" : delta.change < 0 ? "rgba(239,68,68,0.08)" : "rgba(245,240,232,0.035)";
+          const sign = delta.change > 0 ? "+" : "";
+          return `<div class="rounded-xl p-3 text-center" style="background:${bg};border:1px solid rgba(245,240,232,0.06);">
+        <div class="text-[11px] text-[#6e6e73] mb-1">${item.label}</div>
+        <div class="text-lg font-bold" style="color:${color}">${sign}${delta.change.toFixed(1)}</div>
+      </div>`;
+        }).join("")}
+    </div>
+  </div>`;
+      })() : "";
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -204,6 +239,8 @@ export function renderRoastPage(params) {
     </div>`;
       })() : ""}
   </div>
+
+  ${scoreDiffHtml}
 
   <!-- Industry Benchmark + Tweet Callout -->
   <div class="card p-5 mb-6" style="background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(236,72,153,0.06));border-color:rgba(139,92,246,0.2);">
