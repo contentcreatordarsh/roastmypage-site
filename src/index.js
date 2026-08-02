@@ -104,7 +104,7 @@ export default {
         if (cachedResult) {
           return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
-        const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
+        const { result: roastResult, deduplicated, alreadyAnalyzing, retryAfter } = await deduplicatedRoast(env22, urlHash, () => withTimeout(
           (async () => {
             await trackBrowserUsage(env22, 1);
             const roastId = generateId();
@@ -185,6 +185,20 @@ export default {
           CONFIG.ROAST_TOTAL_TIMEOUT_MS,
           "Roast operation"
         ));
+        if (alreadyAnalyzing) {
+          console.log(`[${Date.now() - startTime}ms] Roast already in progress for ${urlHash}`);
+          return Response.json(
+            {
+              error: "This page is already being analyzed. Please retry in a few seconds.",
+              alreadyAnalyzing: true,
+              retryAfter
+            },
+            {
+              status: 409,
+              headers: { ...corsHeaders, "Retry-After": String(retryAfter), "X-Cache": "INFLIGHT" }
+            }
+          );
+        }
         console.log(`[${Date.now() - startTime}ms] Total time${deduplicated ? " (deduplicated)" : ""}`);
         return Response.json(roastResult, { headers: { ...corsHeaders, "X-Cache": deduplicated ? "DEDUP" : "MISS" } });
       } catch (error32) {
