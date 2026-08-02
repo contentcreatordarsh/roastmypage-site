@@ -39,6 +39,10 @@ const CONFIG = {
   // Email subscribe per hour
   RATE_LIMIT_THREAT_MAX: 10,
   // Threat scans per hour
+  RATE_LIMIT_WATCHLIST_MAX: 30,
+  // Watchlist add/check operations per hour
+  MAX_WATCHLIST_ITEMS: 25,
+  // Max competitor URLs per owner_key
   RATE_LIMIT_WINDOW_MINUTES: 60,
   // Global limits (circuit breaker)
   GLOBAL_HOURLY_LIMIT: 2e3,
