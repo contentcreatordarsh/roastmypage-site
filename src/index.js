@@ -25,6 +25,7 @@ import {
 import { capturePageWithMetrics } from './puppeteer.js';
 
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
+import { getCategoryWinners, pickShareHighlight, renderCompareCardPng } from './compareCard.js';
 
 import {
     parseMarkdownResponse, ensureLlamaLicenseAgreed, analyzeWithVisionAndHeatmap, 
@@ -462,6 +463,14 @@ export default {
             conversionLift: Math.round(conversionLift),
             confidence: Math.abs(prob1 - prob2) > 20 ? "high" : Math.abs(prob1 - prob2) > 10 ? "medium" : "low"
           };
+          const categoryWinners = getCategoryWinners(analysis1.analysis.scores, analysis2.analysis.scores);
+          const shareHighlight = pickShareHighlight(
+            analysis1.analysis.scores,
+            analysis2.analysis.scores,
+            url1Host,
+            url2Host
+          );
+          const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
           return {
             page1: {
               id: id1,
@@ -489,6 +498,11 @@ export default {
             },
             winner,
             scoreDiff: Math.abs(score1 - score2),
+            categoryWinners,
+            shareHighlight,
+            // #80 shareable deep link + OG compare card
+            shareUrl: `${base}/compare?a=${encodeURIComponent(url1)}&b=${encodeURIComponent(url2)}`,
+            compareCardUrl: `${base}/api/compare-card?id1=${encodeURIComponent(id1)}&id2=${encodeURIComponent(id2)}`,
             insights,
             stealThis,
             abTestPrediction,
@@ -3372,8 +3386,52 @@ data: ${JSON.stringify(data)}
       const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
       return Response.redirect(`${base}/api/og/${roastId}`, 301);
     }
-    // Pricing page — served as SPA route from index.html
-    if (url.pathname === "/pricing" && request.method === "GET") {
+    // #80 — shareable compare card PNG/SVG
+    if (url.pathname === "/api/compare-card" && request.method === "GET") {
+      const id1 = url.searchParams.get("id1") || "";
+      const id2 = url.searchParams.get("id2") || "";
+      if (!isValidRoastIdLoose(id1) || !isValidRoastIdLoose(id2)) {
+        return new Response("Invalid roast IDs", { status: 400, headers: corsHeaders });
+      }
+      const [r1, r2] = await Promise.all([
+        env22.DB.prepare(
+          "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score FROM roasts WHERE id = ?"
+        ).bind(id1).first(),
+        env22.DB.prepare(
+          "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score FROM roasts WHERE id = ?"
+        ).bind(id2).first()
+      ]);
+      if (!r1 || !r2) {
+        return new Response("Compare roasts not found", { status: 404, headers: corsHeaders });
+      }
+      const score1 = Number(r1.overall_score) || 0;
+      const score2 = Number(r2.overall_score) || 0;
+      const scores1 = {
+        hero: r1.hero_score, cta: r1.cta_score, trust: r1.trust_score, copy: r1.copy_score, design: r1.design_score
+      };
+      const scores2 = {
+        hero: r2.hero_score, cta: r2.cta_score, trust: r2.trust_score, copy: r2.copy_score, design: r2.design_score
+      };
+      const rendered = await renderCompareCardPng(env22, {
+        id1, id2,
+        url1: r1.url,
+        url2: r2.url,
+        score1,
+        score2,
+        scores1,
+        scores2,
+        winner: score1 > score2 ? "page1" : score2 > score1 ? "page2" : "tie"
+      });
+      return new Response(rendered.body, {
+        headers: {
+          "Content-Type": rendered.contentType,
+          "Cache-Control": rendered.cache,
+          ...corsHeaders
+        }
+      });
+    }
+    // Pricing + compare deep-link routes — served as SPA from index.html
+    if ((url.pathname === "/pricing" || url.pathname === "/compare") && request.method === "GET") {
       if (env22.ASSETS) {
         const indexUrl = new URL(request.url);
         indexUrl.pathname = "/";
