@@ -44,6 +44,11 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    detectWebhookPlatform, buildNotifyPayload,
+    buildTestPayload, fireWebhook
+} from './webhooks.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -957,6 +962,74 @@ data: ${JSON.stringify(data)}
         return Response.json({ success: true, message: "Subscribed successfully!" }, { headers: corsHeaders });
       } catch (error32) {
         return Response.json({ error: "Failed to subscribe" }, { status: 500, headers: corsHeaders });
+      }
+    }
+    // #60 — Slack / Discord roast notifications
+    if (url.pathname === "/api/notify/test" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const webhookUrl = String(body.webhookUrl || "").trim();
+        const platform = detectWebhookPlatform(webhookUrl);
+        if (!platform) {
+          return Response.json({
+            error: "Provide a valid https Slack or Discord webhook URL"
+          }, { status: 400, headers: corsHeaders });
+        }
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "notify");
+        if (!rateLimit.allowed) {
+          return Response.json({ error: "Too many notify requests. Try again later." }, { status: 429, headers: corsHeaders });
+        }
+        const result = await fireWebhook(webhookUrl, buildTestPayload(platform));
+        return Response.json({
+          success: result.ok,
+          platform,
+          error: result.ok ? null : result.error
+        }, { status: result.ok ? 200 : 502, headers: corsHeaders });
+      } catch (error32) {
+        safeLogError("Notify test failed:", error32);
+        return Response.json({ error: "Failed to test webhook" }, { status: 500, headers: corsHeaders });
+      }
+    }
+    if (url.pathname === "/api/notify" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const webhookUrl = String(body.webhookUrl || "").trim();
+        const roastId = body.roastId;
+        const platform = detectWebhookPlatform(webhookUrl);
+        if (!platform) {
+          return Response.json({
+            error: "Provide a valid https Slack or Discord webhook URL"
+          }, { status: 400, headers: corsHeaders });
+        }
+        if (!isValidRoastIdLoose(roastId)) {
+          return Response.json({ error: "Valid roastId required" }, { status: 400, headers: corsHeaders });
+        }
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "notify");
+        if (!rateLimit.allowed) {
+          return Response.json({ error: "Too many notify requests. Try again later." }, { status: 429, headers: corsHeaders });
+        }
+        const roast = await env22.DB.prepare(
+          "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, quick_wins FROM roasts WHERE id = ?"
+        ).bind(roastId).first();
+        if (!roast) {
+          return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
+        }
+        const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
+        const payload = buildNotifyPayload(platform, roast, { baseUrl: base });
+        const result = await fireWebhook(webhookUrl, payload);
+        return Response.json({
+          success: result.ok,
+          platform,
+          roastId,
+          error: result.ok ? null : result.error
+        }, { status: result.ok ? 200 : 502, headers: corsHeaders });
+      } catch (error32) {
+        safeLogError("Notify failed:", error32);
+        return Response.json({ error: "Failed to send notification" }, { status: 500, headers: corsHeaders });
       }
     }
     if (url.pathname.startsWith("/api/badge/") && request.method === "GET" && !url.pathname.includes("/html")) {

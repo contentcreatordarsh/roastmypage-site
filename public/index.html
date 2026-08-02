@@ -2754,6 +2754,31 @@
                 <button onclick="roastAnother()" class="btn-primary px-5 py-2 rounded-xl text-sm font-medium">Roast Another</button>
             </div>
 
+            <!-- #60 Slack / Discord notifications -->
+            <div id="notify-integrations" class="card p-6 mt-8 max-w-xl mx-auto">
+                <div class="flex items-start gap-3 mb-4">
+                    <div class="w-9 h-9 rounded-xl bg-white/[0.05] flex items-center justify-center shrink-0">
+                        <svg class="w-4 h-4 text-[#a1a1a6]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="text-[15px] font-semibold">Slack &amp; Discord</h3>
+                        <p class="text-sm text-[#a1a1a6] mt-1">Post this roast to a channel with an incoming webhook. Enable auto-send to notify on future roasts from this browser.</p>
+                    </div>
+                </div>
+                <label class="block text-[12px] text-[#6e6e73] mb-1.5" for="notify-webhook-url">Webhook URL</label>
+                <input type="url" id="notify-webhook-url" placeholder="https://hooks.slack.com/... or https://discord.com/api/webhooks/..." class="input-dark w-full px-4 py-2.5 rounded-xl text-sm mb-3">
+                <label class="flex items-center gap-2 text-sm text-[#a1a1a6] mb-4 cursor-pointer select-none">
+                    <input type="checkbox" id="notify-auto-send" class="rounded border-white/20 bg-transparent">
+                    Auto-send future roast results
+                </label>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="sendRoastNotification()" id="notify-send-btn" class="btn-primary px-4 py-2 rounded-xl text-sm font-medium">Send this roast</button>
+                    <button onclick="testWebhookNotification()" id="notify-test-btn" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.08] rounded-xl text-sm font-medium transition-colors">Test webhook</button>
+                    <button onclick="saveWebhookSettings()" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.08] rounded-xl text-sm font-medium transition-colors">Save</button>
+                </div>
+                <div id="notify-status" class="hidden mt-3 text-sm"></div>
+            </div>
+
             <!-- Email Capture -->
             <div id="email-capture" class="card p-6 mt-8 max-w-md mx-auto text-center">
                 <div class="text-lg mb-2">📧</div>
@@ -6554,6 +6579,8 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             }
             updateBadgePreviews();
             loadShareCardPreview();
+            initNotifyIntegrations();
+            maybeAutoNotifyRoast(data);
             
             // Check for improvement (re-roast detection) and show before/after slider
             checkImprovement(data);
@@ -8272,6 +8299,114 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         document.getElementById('changelog-modal').addEventListener('click', e => { if (e.target.id === 'changelog-modal') hideChangelogModal(); });
         document.getElementById('api-docs-modal').addEventListener('click', e => { if (e.target.id === 'api-docs-modal') hideApiDocsModal(); });
         document.getElementById('email-gate-modal').addEventListener('click', e => { if (e.target.id === 'email-gate-modal') hideEmailGateModal(); });
+
+        // #60 Slack / Discord notifications
+        const NOTIFY_WEBHOOK_KEY = 'rmp_notify_webhook';
+        const NOTIFY_AUTO_KEY = 'rmp_notify_auto';
+
+        function setNotifyStatus(msg, type = 'info') {
+            const el = document.getElementById('notify-status');
+            if (!el) return;
+            if (!msg) { el.classList.add('hidden'); el.textContent = ''; return; }
+            el.classList.remove('hidden');
+            el.className = 'mt-3 text-sm ' + (type === 'error' ? 'text-red-400' : type === 'success' ? 'text-green-400' : 'text-[#a1a1a6]');
+            el.textContent = msg;
+        }
+
+        function initNotifyIntegrations() {
+            const urlInput = document.getElementById('notify-webhook-url');
+            const autoInput = document.getElementById('notify-auto-send');
+            if (urlInput && !urlInput.dataset.bound) {
+                urlInput.value = localStorage.getItem(NOTIFY_WEBHOOK_KEY) || '';
+                urlInput.dataset.bound = '1';
+            } else if (urlInput && !urlInput.value) {
+                urlInput.value = localStorage.getItem(NOTIFY_WEBHOOK_KEY) || '';
+            }
+            if (autoInput) autoInput.checked = localStorage.getItem(NOTIFY_AUTO_KEY) === '1';
+        }
+
+        function saveWebhookSettings() {
+            const url = document.getElementById('notify-webhook-url')?.value?.trim() || '';
+            const auto = !!document.getElementById('notify-auto-send')?.checked;
+            if (url) localStorage.setItem(NOTIFY_WEBHOOK_KEY, url);
+            else localStorage.removeItem(NOTIFY_WEBHOOK_KEY);
+            localStorage.setItem(NOTIFY_AUTO_KEY, auto ? '1' : '0');
+            setNotifyStatus('Webhook settings saved in this browser.', 'success');
+        }
+
+        async function testWebhookNotification() {
+            const webhookUrl = document.getElementById('notify-webhook-url')?.value?.trim();
+            if (!webhookUrl) {
+                setNotifyStatus('Paste a Slack or Discord webhook URL first.', 'error');
+                return;
+            }
+            const btn = document.getElementById('notify-test-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+            try {
+                const res = await fetch('/api/notify/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ webhookUrl })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Test failed');
+                localStorage.setItem(NOTIFY_WEBHOOK_KEY, webhookUrl);
+                setNotifyStatus(`Test sent to ${data.platform}. Check your channel.`, 'success');
+            } catch (err) {
+                setNotifyStatus(err.message || 'Test failed', 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Test webhook'; }
+            }
+        }
+
+        async function sendRoastNotification(opts = {}) {
+            const silent = !!opts.silent;
+            const webhookUrl = (opts.webhookUrl || document.getElementById('notify-webhook-url')?.value || localStorage.getItem(NOTIFY_WEBHOOK_KEY) || '').trim();
+            const roastId = opts.roastId || currentRoast?.id || window._currentRoastId;
+            if (!webhookUrl) {
+                if (!silent) setNotifyStatus('Paste a Slack or Discord webhook URL first.', 'error');
+                return false;
+            }
+            if (!roastId) {
+                if (!silent) setNotifyStatus('No roast to send yet.', 'error');
+                return false;
+            }
+            const btn = document.getElementById('notify-send-btn');
+            if (btn && !silent) { btn.disabled = true; btn.textContent = 'Sending…'; }
+            try {
+                const res = await fetch('/api/notify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ webhookUrl, roastId })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Send failed');
+                localStorage.setItem(NOTIFY_WEBHOOK_KEY, webhookUrl);
+                if (!silent) setNotifyStatus(`Posted to ${data.platform}.`, 'success');
+                else showToast(`Roast posted to ${data.platform}`, 'success');
+                return true;
+            } catch (err) {
+                if (!silent) setNotifyStatus(err.message || 'Send failed', 'error');
+                else showToast(err.message || 'Webhook notify failed', 'error');
+                return false;
+            } finally {
+                if (btn && !silent) { btn.disabled = false; btn.textContent = 'Send this roast'; }
+            }
+        }
+
+        function maybeAutoNotifyRoast(data) {
+            try {
+                if (localStorage.getItem(NOTIFY_AUTO_KEY) !== '1') return;
+                const webhookUrl = localStorage.getItem(NOTIFY_WEBHOOK_KEY);
+                const roastId = data?.id;
+                if (!webhookUrl || !roastId || data?.cached) return;
+                // Avoid double-posts for the same roast in this session
+                const sentKey = `rmp_notify_sent_${roastId}`;
+                if (sessionStorage.getItem(sentKey)) return;
+                sessionStorage.setItem(sentKey, '1');
+                setTimeout(() => sendRoastNotification({ silent: true, webhookUrl, roastId }), 600);
+            } catch { /* ignore */ }
+        }
 
         // Email capture
         async function submitEmail() {
