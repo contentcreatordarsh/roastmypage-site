@@ -44,6 +44,8 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import { sendWeeklyDigest } from './mail.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -52,6 +54,14 @@ const __name2 = (fn, _name) => fn;
 const inFlightRequests = new Set();
 
 export default {
+    async scheduled(event, env22, ctx) {
+      ctx.waitUntil(
+        sendWeeklyDigest(env22, { now: new Date(event.scheduledTime || Date.now()) })
+          .then((result) => console.log("Weekly digest scheduled run:", JSON.stringify(result)))
+          .catch((error) => console.error("Weekly digest scheduled run failed:", error instanceof Error ? error.message : String(error)))
+      );
+    },
+
     async fetch(request, env22, ctx) {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
