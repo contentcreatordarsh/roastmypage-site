@@ -978,6 +978,17 @@ data: ${JSON.stringify(data)}
         if (!OWNER_KEY_RE.test(ownerKey)) {
           return Response.json({ error: "Valid ownerKey required" }, { status: 400, headers: corsHeaders });
         }
+        // An ownerKey is a bearer secret, so this read must not be a free oracle:
+        // without a limit anyone could enumerate keys and harvest other people's lists.
+        const wlIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const wlIpHash = await hashIp(wlIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const wlLimit = await checkOperationRateLimit(env22, wlIpHash, "watchlist");
+        if (!wlLimit.allowed) {
+          return Response.json(
+            { error: "Too many watchlist requests. Please try again later." },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": String(wlLimit.resetIn || 3600) } }
+          );
+        }
         const items = await env22.DB.prepare(
           `SELECT id, url, url_hash, label, email, webhook_url, last_score, last_roast_id,
                   notify_on_change, active, created_at, updated_at
@@ -994,8 +1005,12 @@ data: ${JSON.stringify(data)}
             id: row.id,
             url: row.url,
             label: row.label || null,
-            email: row.email || null,
-            webhookUrl: row.webhook_url || null,
+            // Never echo the stored email or webhook URL back out. A Slack/Discord
+            // webhook URL is itself a secret (anyone holding it can post to the
+            // channel), and the email is PII. The UI only needs to know whether
+            // alerts are configured.
+            hasEmail: !!row.email,
+            hasWebhook: !!row.webhook_url,
             lastScore: row.last_score,
             lastRoastId: row.last_roast_id,
             notifyOnChange: !!row.notify_on_change,
@@ -1101,8 +1116,10 @@ data: ${JSON.stringify(data)}
             id,
             url: normalized,
             label,
-            email,
-            webhookUrl: webhookUrl || null,
+            // Match the GET shape: report only whether alerts are configured, never
+            // echo the stored email / webhook URL back out.
+            hasEmail: !!email,
+            hasWebhook: !!webhookUrl,
             lastScore: latest?.overall_score ?? null,
             lastRoastId: latest?.id ?? null
           }

@@ -81,3 +81,8 @@ ENVIRONMENT = "production"
 BASE_URL = "https://roastmypage.site"
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
+
+# #49 — named environments do NOT inherit the top-level [triggers], so production
+# needs its own block or the watchlist alert scan would never run there.
+[env.production.triggers]
+crons = ["0 */6 * * *"]

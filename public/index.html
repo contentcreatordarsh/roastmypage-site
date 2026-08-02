@@ -4435,17 +4435,29 @@
 
         const WATCHLIST_OWNER_KEY = 'watchlist_owner_key';
 
+        // The ownerKey is a bearer secret for the whole watchlist, so it must always be
+        // cryptographically random. A time-derived key (e.g. 'anon' + Date.now()) is
+        // guessable — anyone could enumerate a time window and read other people's lists.
+        function newWatchlistOwnerKey() {
+            if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+            const bytes = new Uint8Array(16);
+            crypto.getRandomValues(bytes);
+            return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        }
+
         function getWatchlistOwnerKey() {
             try {
                 let key = localStorage.getItem(WATCHLIST_OWNER_KEY);
                 if (!key || !/^[a-zA-Z0-9_-]{8,64}$/.test(key)) {
-                    key = (crypto.randomUUID && crypto.randomUUID().replace(/-/g, '')) ||
-                        ('wl' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+                    key = newWatchlistOwnerKey();
                     localStorage.setItem(WATCHLIST_OWNER_KEY, key);
                 }
                 return key;
             } catch {
-                return 'anon' + Date.now().toString(36);
+                // Storage unavailable (private mode / blocked): still use a random key.
+                // It won't persist across reloads, but it is never guessable.
+                if (!window.__wlEphemeralKey) window.__wlEphemeralKey = newWatchlistOwnerKey();
+                return window.__wlEphemeralKey;
             }
         }
 
