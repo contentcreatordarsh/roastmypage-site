@@ -1509,6 +1509,18 @@
                     </div>
                 </div>
 
+                <!-- Category delta summary -->
+                <div id="score-diff-card" class="card p-6 md:p-7 mb-8 hidden">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h3 class="text-lg font-semibold tracking-tight">Since last roast</h3>
+                            <p id="score-diff-summary" class="text-[12px] text-[#6e6e73]">Category score changes from the previous roast</p>
+                        </div>
+                        <a id="score-diff-previous-link" href="#" class="hidden text-xs text-[#a1a1a6] hover:text-[#FF6B35] transition-colors">View previous</a>
+                    </div>
+                    <div id="score-diff-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"></div>
+                </div>
+
                 <!-- Industry Benchmark Comparison -->
                 <div id="benchmark-card" class="card p-6 md:p-8 mb-8 hidden">
                     <div class="flex items-center justify-between mb-1">
@@ -5521,6 +5533,125 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             btn.textContent = 'Roast All Pages';
         }
 
+        const SCORE_DELTA_ITEMS = [
+            { key: 'overall', label: 'Overall' },
+            { key: 'hero', label: 'Hero' },
+            { key: 'cta', label: 'CTA' },
+            { key: 'trust', label: 'Trust' },
+            { key: 'copy', label: 'Copy' },
+            { key: 'design', label: 'Design' }
+        ];
+
+        function normalizeClientUrl(value) {
+            try {
+                const parsed = new URL(value);
+                parsed.hostname = parsed.hostname.toLowerCase();
+                if (parsed.pathname !== '/' && parsed.pathname.endsWith('/')) {
+                    parsed.pathname = parsed.pathname.slice(0, -1);
+                }
+                parsed.searchParams.delete('utm_source');
+                parsed.searchParams.delete('utm_medium');
+                parsed.searchParams.delete('utm_campaign');
+                parsed.searchParams.delete('ref');
+                return parsed.toString();
+            } catch {
+                return value || '';
+            }
+        }
+
+        function scoreFromRoast(roast, key) {
+            if (!roast) return null;
+            const raw = key === 'overall'
+                ? (roast.overallScore ?? roast.score ?? roast.overall_score)
+                : (roast.scores?.[key] ?? roast[`${key}_score`]);
+            const score = Number(raw);
+            return Number.isFinite(score) ? Number(score.toFixed(1)) : null;
+        }
+
+        function makeClientDiff(previous, current) {
+            if (!previous || !current) return { previous: previous || null, current: current || null, deltas: null };
+            const deltas = {};
+            SCORE_DELTA_ITEMS.forEach(item => {
+                const previousScore = scoreFromRoast(previous, item.key);
+                const currentScore = scoreFromRoast(current, item.key);
+                if (previousScore === null || currentScore === null) return;
+                const change = Number((currentScore - previousScore).toFixed(1));
+                deltas[item.key] = { ...item, previous: previousScore, current: currentScore, change };
+            });
+            return { previous, current, deltas };
+        }
+
+        function renderScoreDiff(diff) {
+            const card = document.getElementById('score-diff-card');
+            const grid = document.getElementById('score-diff-grid');
+            const summary = document.getElementById('score-diff-summary');
+            const previousLink = document.getElementById('score-diff-previous-link');
+            if (!card || !grid) return false;
+            card.classList.add('hidden');
+            grid.innerHTML = '';
+            if (!diff?.previous || !diff?.deltas) return false;
+
+            const previousScore = scoreFromRoast(diff.previous, 'overall');
+            const previousDate = diff.previous.date || diff.previous.createdAt || diff.previous.timestamp;
+            let previousLabel = 'the previous roast';
+            if (previousScore !== null) previousLabel = `${previousScore.toFixed(1)}/10`;
+            if (previousDate) {
+                const date = new Date(previousDate);
+                if (!Number.isNaN(date.getTime())) previousLabel += ` from ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            }
+            if (summary) summary.textContent = `Compared with ${previousLabel}`;
+            if (previousLink) {
+                if (diff.previous.id) {
+                    previousLink.href = `/roast/${diff.previous.id}`;
+                    previousLink.classList.remove('hidden');
+                } else {
+                    previousLink.classList.add('hidden');
+                }
+            }
+
+            grid.innerHTML = SCORE_DELTA_ITEMS.map(item => {
+                const delta = diff.deltas[item.key];
+                if (!delta) return '';
+                const change = Number(delta.change || 0);
+                const sign = change > 0 ? '+' : '';
+                const colorClass = change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-[#a1a1a6]';
+                const bgClass = change > 0 ? 'bg-green-500/[0.08] border-green-500/10' : change < 0 ? 'bg-red-500/[0.08] border-red-500/10' : 'bg-white/[0.03] border-white/[0.06]';
+                return `<div class="${bgClass} border rounded-xl p-3 text-center">
+                    <div class="text-[11px] text-[#6e6e73] mb-1">${item.label}</div>
+                    <div class="${colorClass} text-lg font-bold">${sign}${change.toFixed(1)}</div>
+                </div>`;
+            }).join('');
+            card.classList.remove('hidden');
+            return true;
+        }
+
+        function findLocalHistoryDiff(data) {
+            try {
+                const history = JSON.parse(localStorage.getItem('roastHistory') || '[]');
+                const normalizedCurrent = normalizeClientUrl(data.url);
+                const previous = history
+                    .filter(item => normalizeClientUrl(item.url) === normalizedCurrent && item.id !== data.id)
+                    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))[0];
+                return previous ? makeClientDiff(previous, data) : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function loadScoreDiff(data) {
+            if (renderScoreDiff(data.diff)) return;
+            const localDiff = findLocalHistoryDiff(data);
+            if (renderScoreDiff(localDiff)) return;
+            if (!data?.url || data.isExample) return;
+            const currentParam = data.id ? `&current=${encodeURIComponent(data.id)}` : '';
+            fetch(`/api/diff?url=${encodeURIComponent(data.url)}${currentParam}`)
+                .then(res => res.ok ? res.json() : null)
+                .then(diff => {
+                    if (!renderScoreDiff(diff)) renderScoreDiff(findLocalHistoryDiff(data));
+                })
+                .catch(() => renderScoreDiff(findLocalHistoryDiff(data)));
+        }
+
         // Display Results
         function displayResults(data, isCached) {
             // Make sure hero section is visible again
@@ -5545,6 +5676,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             document.getElementById('device-badge').textContent = (data.device || 'desktop').toUpperCase();
             document.getElementById('cache-badge').classList.toggle('hidden', !isCached);
             renderVideoAnalysis(data.video || data.seo?.video);
+            loadScoreDiff(data);
 
             // Animate score
             const scoreEl = document.getElementById('overall-score');
@@ -7610,7 +7742,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         function getHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } }
         function saveToHistory(roast) {
             const h = getHistory().filter(x => x.id !== roast.id);
-            h.unshift({ id: roast.id, url: roast.url, overallScore: roast.overallScore, timestamp: new Date().toISOString() });
+            h.unshift({ id: roast.id, url: roast.url, overallScore: roast.overallScore, scores: roast.scores || {}, timestamp: new Date().toISOString() });
             localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0, 20)));
         }
         function showHistoryModal() {

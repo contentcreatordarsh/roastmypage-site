@@ -27,6 +27,10 @@ import { capturePageWithMetrics } from './puppeteer.js';
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
 
 import {
+    buildRoastDiff, numericCategoryChanges
+} from './diff.js';
+
+import {
     parseMarkdownResponse, ensureLlamaLicenseAgreed, analyzeWithVisionAndHeatmap, 
     formatRoast, generateBreakdownFromScore, ensureScoreBreakdowns, 
     resolveIndustry, calculatePercentile, createFallbackAnalysis
@@ -50,6 +54,125 @@ const __name2 = (fn, _name) => fn;
 
 // Module-level dedup set — prevents duplicate concurrent roast requests for the same URL.
 const inFlightRequests = new Set();
+
+const ROAST_DIFF_COLUMNS = "id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at";
+
+function toTimestamp(value) {
+  if (!value) return 0;
+  const normalized = /Z$/.test(value) ? value : `${value}Z`;
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function hostFromInput(value) {
+  if (!value) return null;
+  try {
+    return new URL(value).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    try {
+      return new URL(`https://${value}`).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+}
+
+function hostUrlWhereClause() {
+  return `
+    (lower(url) = ? OR lower(url) LIKE ?
+      OR lower(url) = ? OR lower(url) LIKE ?
+      OR lower(url) = ? OR lower(url) LIKE ?
+      OR lower(url) = ? OR lower(url) LIKE ?)
+  `;
+}
+
+function hostUrlBindings(hostname) {
+  const host = hostname.toLowerCase();
+  const wwwHost = host.startsWith("www.") ? host : `www.${host}`;
+  return [
+    `https://${host}`, `https://${host}/%`,
+    `http://${host}`, `http://${host}/%`,
+    `https://${wwwHost}`, `https://${wwwHost}/%`,
+    `http://${wwwHost}`, `http://${wwwHost}/%`
+  ];
+}
+
+async function getRoastsForUrl(env22, targetUrl, limit = 25) {
+  const hostname = hostFromInput(targetUrl);
+  if (!hostname) return [];
+  const normalizedTarget = normalizeUrl(targetUrl);
+  const result = await env22.DB.prepare(`
+    SELECT ${ROAST_DIFF_COLUMNS}
+    FROM roasts
+    WHERE ${hostUrlWhereClause()}
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).bind(...hostUrlBindings(hostname), limit).all();
+  return (result.results || [])
+    .filter((roast) => normalizeUrl(roast.url) === normalizedTarget)
+    .sort((a, b) => toTimestamp(b.created_at) - toTimestamp(a.created_at));
+}
+
+async function getRoastsByHashOrHost(env22, identifier, limit = 100) {
+  const decoded = decodeURIComponent(identifier || "").trim();
+  if (/^[a-f0-9]{32}$/i.test(decoded)) {
+    const roasts = await env22.DB.prepare(`
+      SELECT ${ROAST_DIFF_COLUMNS}
+      FROM roasts
+      WHERE url_hash = ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).bind(decoded, limit).all();
+    return roasts.results || [];
+  }
+  const hostname = hostFromInput(decoded);
+  if (!hostname) return [];
+  const roasts = await env22.DB.prepare(`
+    SELECT ${ROAST_DIFF_COLUMNS}
+    FROM roasts
+    WHERE ${hostUrlWhereClause()}
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).bind(...hostUrlBindings(hostname), limit).all();
+  return roasts.results || [];
+}
+
+async function getPreviousRoastForCurrent(env22, current) {
+  const currentId = current.id;
+  const currentCreatedAt = current.createdAt ?? current.created_at ?? null;
+  const currentUrlHash = current.urlHash ?? current.url_hash ?? null;
+  if (currentUrlHash) {
+    const query = currentCreatedAt ? `
+      SELECT ${ROAST_DIFF_COLUMNS}
+      FROM roasts
+      WHERE url_hash = ? AND id != ? AND created_at < ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    ` : `
+      SELECT ${ROAST_DIFF_COLUMNS}
+      FROM roasts
+      WHERE url_hash = ? AND id != ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const bound = currentCreatedAt
+      ? env22.DB.prepare(query).bind(currentUrlHash, currentId, currentCreatedAt)
+      : env22.DB.prepare(query).bind(currentUrlHash, currentId);
+    const previous = await bound.first();
+    if (previous) return previous;
+  }
+  if (!current.url) return null;
+  const roasts = await getRoastsForUrl(env22, current.url, 50);
+  return roasts.find((roast) => {
+    if (currentId && roast.id === currentId) return false;
+    if (!currentCreatedAt) return true;
+    return toTimestamp(roast.created_at) < toTimestamp(currentCreatedAt);
+  }) || null;
+}
+
+async function getDiffForCurrentRoast(env22, current) {
+  return buildRoastDiff(await getPreviousRoastForCurrent(env22, current), current);
+}
 
 export default {
     async fetch(request, env22, ctx) {
@@ -102,7 +225,8 @@ export default {
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          const diff = await getDiffForCurrentRoast(env22, cachedResult);
+          return Response.json({ ...cachedResult, device, fullPage, diff }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
         const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
           (async () => {
@@ -153,7 +277,7 @@ export default {
                 industry
               ).run()
             );
-            return {
+            const currentResult = {
               id: roastId,
               url: targetUrl,
               urlHash,
@@ -181,6 +305,8 @@ export default {
               // { percentile, betterThan, totalSamples }
               aiUnavailable: analysis.aiUnavailable || false
             };
+            const diff = buildRoastDiff(await getPreviousRoastForCurrent(env22, currentResult), currentResult);
+            return { ...currentResult, diff };
           })(),
           CONFIG.ROAST_TOTAL_TIMEOUT_MS,
           "Roast operation"
@@ -659,7 +785,8 @@ export default {
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+          const diff = await getDiffForCurrentRoast(env22, cachedResult);
+          return Response.json({ ...cachedResult, device, fullPage, cached: true, diff }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
         if (inFlightRequests.has(urlHash)) {
           return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
@@ -703,29 +830,7 @@ data: ${JSON.stringify(data)}
                 if (pageData.video?.present) await sendEvent("video", pageData.video);
                 await sendEvent("progress", { step: "finalize", message: "Generating report...", progress: 90 });
                 const formattedRoast = formatRoast(analysis, targetUrl, brandName);
-                await env22.DB.prepare(`
-              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(
-                  roastId,
-                  targetUrl,
-                  urlHash,
-                  screenshotKey,
-                  analysis.overallScore,
-                  analysis.scores.hero,
-                  analysis.scores.cta,
-                  analysis.scores.trust,
-                  analysis.scores.copy,
-                  analysis.scores.design,
-                  formattedRoast,
-                  JSON.stringify(analysis.quickWins),
-                  roastCountry,
-                  JSON.stringify(pageData.seo),
-                  JSON.stringify(pageData.performance),
-                  JSON.stringify(enhancedHeatmap),
-                  analysis.industry || "other"
-                ).run();
-                const result = {
+                const currentResult = {
                   id: roastId,
                   url: targetUrl,
                   urlHash,
@@ -751,6 +856,30 @@ data: ${JSON.stringify(data)}
                   benchmarks: analysis.benchmarks || INDUSTRY_BENCHMARKS.other,
                   aiUnavailable: analysis.aiUnavailable || false
                 };
+                const diff = buildRoastDiff(await getPreviousRoastForCurrent(env22, currentResult), currentResult);
+                await env22.DB.prepare(`
+              INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+                  roastId,
+                  targetUrl,
+                  urlHash,
+                  screenshotKey,
+                  analysis.overallScore,
+                  analysis.scores.hero,
+                  analysis.scores.cta,
+                  analysis.scores.trust,
+                  analysis.scores.copy,
+                  analysis.scores.design,
+                  formattedRoast,
+                  JSON.stringify(analysis.quickWins),
+                  roastCountry,
+                  JSON.stringify(pageData.seo),
+                  JSON.stringify(pageData.performance),
+                  JSON.stringify(enhancedHeatmap),
+                  analysis.industry || "other"
+                ).run();
+                const result = { ...currentResult, diff };
                 await sendEvent("complete", result);
               })(), CONFIG.ROAST_TOTAL_TIMEOUT_MS, "Stream roast operation");
             } catch (error32) {
@@ -1541,28 +1670,40 @@ data: ${JSON.stringify(data)}
         period: "All time"
       }, { headers: corsHeaders });
     }
+    if (url.pathname === "/api/diff" && request.method === "GET") {
+      const requestedUrl = sanitizeUrl(url.searchParams.get("url") || "");
+      if (!requestedUrl || !isValidUrl(requestedUrl) || !isUrlSafeForFetching(requestedUrl)) {
+        return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
+      }
+      const currentId = url.searchParams.get("current") || url.searchParams.get("currentId");
+      const roasts = await getRoastsForUrl(env22, requestedUrl, 50);
+      if (!roasts.length) {
+        return Response.json({ previous: null, current: null, deltas: null }, { headers: corsHeaders });
+      }
+      const currentIndex = currentId ? roasts.findIndex((roast) => roast.id === currentId) : 0;
+      const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0;
+      const current = roasts[safeCurrentIndex];
+      const previous = roasts.slice(safeCurrentIndex + 1).find((roast) => roast.id !== current.id) || null;
+      return Response.json(buildRoastDiff(previous, current), { headers: corsHeaders });
+    }
     if (url.pathname.startsWith("/api/improvement/") && request.method === "GET") {
       const urlHashParam = url.pathname.split("/").pop();
-      const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
-        FROM roasts 
-        WHERE url_hash = ?
-        ORDER BY created_at ASC
-      `).bind(urlHashParam).all();
-      if (!roasts.results || roasts.results.length === 0) {
+      const roastResults = await getRoastsByHashOrHost(env22, urlHashParam, 100);
+      if (!roastResults.length) {
         return Response.json({ error: "No roasts found for this URL" }, { status: 404, headers: corsHeaders });
       }
-      const first2 = roasts.results[0];
-      const latest = roasts.results[roasts.results.length - 1];
+      const first2 = roastResults[0];
+      const latest = roastResults[roastResults.length - 1];
       let hostname = "unknown";
       try {
         hostname = new URL(first2.url).hostname.replace("www.", "");
       } catch {
       }
+      const diff = buildRoastDiff(first2.id === latest.id ? null : first2, latest);
       const improvement = {
         hostname,
         url: first2.url,
-        totalRoasts: roasts.results.length,
+        totalRoasts: roastResults.length,
         firstRoast: {
           id: first2.id,
           score: first2.overall_score,
@@ -1577,17 +1718,15 @@ data: ${JSON.stringify(data)}
           date: latest.created_at,
           screenshotUrl: `/api/screenshot/${latest.id}`
         },
-        scoreChange: latest.overall_score - first2.overall_score,
-        categoryChanges: {
-          hero: latest.hero_score - first2.hero_score,
-          cta: latest.cta_score - first2.cta_score,
-          trust: latest.trust_score - first2.trust_score,
-          copy: latest.copy_score - first2.copy_score,
-          design: latest.design_score - first2.design_score
-        },
-        history: roasts.results.map((r) => ({
+        scoreChange: diff.deltas?.overall?.change ?? 0,
+        categoryChanges: numericCategoryChanges(diff.deltas),
+        previous: diff.previous,
+        current: diff.current,
+        deltas: diff.deltas,
+        history: roastResults.map((r) => ({
           id: r.id,
           score: r.overall_score,
+          scores: { hero: r.hero_score, cta: r.cta_score, trust: r.trust_score, copy: r.copy_score, design: r.design_score },
           date: r.created_at
         }))
       };
@@ -2821,7 +2960,7 @@ data: ${JSON.stringify(data)}
     if (url.pathname.match(/^\/roast\/[a-z0-9][\w-]{2,30}$/i) && request.method === "GET") {
       const roastId = url.pathname.split("/").pop();
       const roast = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score,
+        SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score,
                roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, created_at
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
@@ -3312,12 +3451,13 @@ data: ${JSON.stringify(data)}
       }
       const verdictText = roast.roast_response || verdict;
       const scoreLabel = score >= 8 ? 'High Performer' : score >= 6 ? 'Room to Improve' : score >= 4 ? 'Needs Work' : 'Critical Issues';
+      const roastScoreDiff = buildRoastDiff(await getPreviousRoastForCurrent(env22, roast), roast);
       const html = renderRoastPage({
           roast, hostname, scoreColor, score, emoji, dateStr, categories, sections,
           quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
           heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
           ogTitle, ogDesc, ogImage, pageUrl, createdAt, industrySampleSize, heatmap,
-          seoDetailsHtml, perfDetailsHtml
+          seoDetailsHtml, perfDetailsHtml, scoreDiff: roastScoreDiff
         });
       return new Response(html, {
         headers: {
