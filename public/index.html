@@ -2344,13 +2344,17 @@
                                 </div>
                                 <div>
                                     <h4 class="text-[15px] font-semibold">Lookalike Domains</h4>
-                                    <p class="text-xs text-[#6e6e73]">Typosquatted & impersonation domains</p>
+                                    <p class="text-xs text-[#6e6e73]">Typosquatted domains plus metadata similarity heuristic (not ML vision)</p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-2">
+                                <div id="lookalike-visual-count" class="px-3 py-1 bg-purple-500/20 rounded-full text-xs font-medium text-purple-400">
+                                    0 high similarity
+                                </div>
                                 <button onclick="filterLookalikes('all')" id="filter-all" class="px-3 py-1 bg-white/[0.04] rounded-lg text-xs font-medium">All</button>
                                 <button onclick="filterLookalikes('registered')" id="filter-registered" class="px-3 py-1 bg-white/[0.05] rounded-lg text-xs font-medium text-[#6e6e73]">Registered</button>
                                 <button onclick="filterLookalikes('high')" id="filter-high" class="px-3 py-1 bg-white/[0.05] rounded-lg text-xs font-medium text-[#6e6e73]">High Risk</button>
+                                <button onclick="filterLookalikes('visual')" id="filter-visual" class="px-3 py-1 bg-white/[0.05] rounded-lg text-xs font-medium text-[#6e6e73]">High Similarity</button>
                             </div>
                         </div>
                         <div id="lookalike-domains" class="space-y-2 max-h-96 overflow-y-auto">
@@ -4570,6 +4574,14 @@
             document.getElementById('lookalike-count').textContent = data.lookalikes.registered;
             document.getElementById('suspicious-count').textContent = data.lookalikes.suspicious;
             document.getElementById('social-imposter-stat').textContent = data.socialMedia?.impostersFound || 0;
+            const visualCountEl = document.getElementById('lookalike-visual-count');
+            const highVisualCount = data.lookalikes?.highVisualSimilarity || data.lookalikes?.visualSimilarity?.highSimilarity || 0;
+            if (visualCountEl) {
+                visualCountEl.textContent = `${highVisualCount} high similarity`;
+                visualCountEl.className = highVisualCount > 0
+                    ? 'px-3 py-1 bg-red-500/20 rounded-full text-xs font-medium text-red-400'
+                    : 'px-3 py-1 bg-purple-500/20 rounded-full text-xs font-medium text-purple-400';
+            }
 
             // Security Grade
             const gradeEl = document.getElementById('security-grade');
@@ -4744,6 +4756,8 @@
                 filtered = domains.filter(d => d.registered);
             } else if (lookalikeFilter === 'high') {
                 filtered = domains.filter(d => d.risk === 'high');
+            } else if (lookalikeFilter === 'visual') {
+                filtered = domains.filter(d => d.visualSimilarity?.highSimilarity);
             }
 
             // Limit display
@@ -4756,7 +4770,23 @@
                 return;
             }
 
-            container.innerHTML = toShow.map(d => `
+            container.innerHTML = toShow.map(d => {
+                const visual = d.visualSimilarity?.status === 'fetched' ? d.visualSimilarity : null;
+                const visualBadge = visual ? `
+                    <span class="px-2 py-1 rounded text-xs font-medium ${
+                        visual.highSimilarity ? 'bg-red-500/20 text-red-400' :
+                        visual.risk === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-white/[0.04] text-[#a1a1a6]'
+                    }" title="${sanitizeHtml(visual.label || 'Metadata token-overlap heuristic')}">
+                        ${visual.highSimilarity ? 'High similarity' : 'Similarity'} ${visual.score}/100 heuristic
+                    </span>
+                ` : '';
+                const visualDetail = visual && (visual.metadata?.title || visual.metadata?.ogTitle) ? `
+                    <div class="text-xs text-[#6e6e73] max-w-lg truncate" title="${sanitizeHtml(visual.label)}">
+                        Metadata: ${sanitizeHtml(visual.metadata.ogTitle || visual.metadata.title)}
+                    </div>
+                ` : '';
+                return `
                 <div class="flex items-center justify-between p-3 rounded-lg border ${
                     d.registered 
                         ? d.risk === 'high' ? 'bg-red-500/10 border-red-500/30' 
@@ -4769,10 +4799,12 @@
                         <div>
                             <div class="font-mono text-sm ${d.registered ? 'text-white' : 'text-[#6e6e73]'}">${sanitizeHtml(d.domain)}</div>
                             <div class="text-xs ${d.registered ? 'text-[#a1a1a6]' : 'text-[#6e6e73]'}">${sanitizeHtml(d.type)}</div>
+                            ${visualDetail}
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
                         ${d.registered ? `
+                            ${visualBadge}
                             <span class="px-2 py-1 rounded text-xs font-medium ${
                                 d.risk === 'high' ? 'bg-red-500/20 text-red-400' :
                                 d.risk === 'medium' ? 'bg-orange-500/20 text-orange-400' :
@@ -4784,7 +4816,7 @@
                         `}
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
 
             if (hasMore) {
                 moreBtn.classList.remove('hidden');
@@ -4821,10 +4853,12 @@
             
             const d = currentThreatData;
             const imposterCount = d.socialMedia?.impostersFound || 0;
+            const highVisualCount = d.lookalikes?.highVisualSimilarity || d.lookalikes?.visualSimilarity?.highSimilarity || 0;
             
             const text = `Brand Threat Report for ${d.domain}:\n\n` +
                 `Threat Score: ${d.threatScore}/100 (${d.riskLevel} risk)\n` +
                 `Lookalike Domains: ${d.lookalikes.registered} found\n` +
+                `High Similarity Heuristic: ${highVisualCount} flagged\n` +
                 `Social Imposters: ${imposterCount} found\n` +
                 `Security Grade: ${d.security.grade}\n\n` +
                 `Scan your brand at:`;
@@ -4883,6 +4917,7 @@
             const stats = [
                 ['Registered lookalikes', String(d.lookalikes?.registered ?? 0)],
                 ['Suspicious domains', String(d.lookalikes?.suspicious ?? 0)],
+                ['High similarity heuristic', String(d.lookalikes?.highVisualSimilarity ?? d.lookalikes?.visualSimilarity?.highSimilarity ?? 0)],
                 ['Social imposters', String(d.socialMedia?.impostersFound ?? 0)],
                 ['Security grade', `${d.security?.grade ?? '-'} (${d.security?.score ?? 0}/100)`]
             ];
