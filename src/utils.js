@@ -122,6 +122,76 @@ function getAllowedOrigins(environment) {
   }
   return PRODUCTION_ORIGINS;
 }
+
+const CSP_DIRECTIVES = {
+  "default-src": ["'self'"],
+  // TODO(#36): replace inline SPA/Tailwind setup with a frontend build and nonces,
+  // then remove unsafe-inline from script-src and style-src.
+  "script-src": [
+    "'self'",
+    "'unsafe-inline'",
+    "'report-sample'",
+    "https://cdn.tailwindcss.com",
+    "https://cdnjs.cloudflare.com",
+    "https://cdn.jsdelivr.net",
+    "https://pagead2.googlesyndication.com",
+    "https://googleads.g.doubleclick.net",
+    "https://tpc.googlesyndication.com",
+    "https://www.googletagservices.com",
+    "https://adservice.google.com",
+    "https://www.google.com"
+  ],
+  "style-src": [
+    "'self'",
+    "'unsafe-inline'",
+    "'report-sample'",
+    "https://cdn.tailwindcss.com",
+    "https://fonts.googleapis.com"
+  ],
+  "font-src": ["'self'", "https://fonts.gstatic.com"],
+  "img-src": [
+    "'self'",
+    "data:",
+    "blob:",
+    "https://api.producthunt.com",
+    "https://placehold.co",
+    "https://pagead2.googlesyndication.com",
+    "https://googleads.g.doubleclick.net",
+    "https://tpc.googlesyndication.com",
+    "https://www.googletagservices.com",
+    "https://adservice.google.com",
+    "https://www.google.com"
+  ],
+  "connect-src": [
+    "'self'",
+    "https://pagead2.googlesyndication.com",
+    "https://googleads.g.doubleclick.net",
+    "https://tpc.googlesyndication.com",
+    "https://www.googletagservices.com",
+    "https://adservice.google.com",
+    "https://www.google.com"
+  ],
+  "frame-src": [
+    "'self'",
+    "https://googleads.g.doubleclick.net",
+    "https://tpc.googlesyndication.com",
+    "https://www.googletagservices.com",
+    "https://adservice.google.com",
+    "https://www.google.com"
+  ],
+  "object-src": ["'none'"],
+  "frame-ancestors": ["'none'"],
+  "base-uri": ["'self'"],
+  "form-action": ["'self'"],
+  "upgrade-insecure-requests": []
+};
+
+function buildContentSecurityPolicy() {
+  return Object.entries(CSP_DIRECTIVES).map(([directive, sources]) => {
+    return sources.length > 0 ? `${directive} ${sources.join(" ")}` : directive;
+  }).join("; ");
+}
+
 function getSecurityHeaders(origin, environment) {
   const allowedOrigins = getAllowedOrigins(environment);
   const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : PRODUCTION_ORIGINS[0];
@@ -138,20 +208,7 @@ function getSecurityHeaders(origin, environment) {
     // Disabled — legacy filter can introduce vulnerabilities; CSP is the modern replacement
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    // Content Security Policy
-    "Content-Security-Policy": [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.googleadservices.com https://adservice.google.com https://*.google.com",
-      // TODO: migrate inline scripts to nonces to remove unsafe-inline
-      "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data: blob: https: http:",
-      "connect-src 'self' https://cloudflare-dns.com https://twitter.com https://www.instagram.com https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.google.com https://*.doubleclick.net https://*.googleadservices.com",
-      "frame-src 'self' https://googleads.g.doubleclick.net https://*.doubleclick.net https://*.googlesyndication.com https://tpc.googlesyndication.com https://www.google.com",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'"
-    ].join("; ")
+    "Content-Security-Policy": buildContentSecurityPolicy()
   };
 }
 
@@ -280,4 +337,4 @@ function isUrlSafeForFetching(urlString) {
       return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
     }
     
-export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, getSecurityHeaders };
+export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, buildContentSecurityPolicy, getSecurityHeaders };
