@@ -37,7 +37,7 @@ import { renderSvgToPng } from './render.js';
 import {
     generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, 
     scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, 
-    getImposterReason, generateThreatRecommendations
+    getImposterReason, generateThreatRecommendations, analyzeLookalikeVisualSimilarity
 } from './threats.js';
 
 import {
@@ -2289,7 +2289,7 @@ data: ${JSON.stringify(data)}
         if (!rateLimit.allowed) {
           return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
         }
-        const [typosquats, securityGrade, socialImposters] = await Promise.all([
+        let [typosquats, securityGrade, socialImposters] = await Promise.all([
           // 1. Generate and check typosquats
           (async () => {
             const variations = generateTyposquats(targetDomain);
@@ -2300,12 +2300,16 @@ data: ${JSON.stringify(data)}
           // 3. Social media imposter scan
           scanSocialMediaImposters(brandName, targetDomain)
         ]);
+        const visualSimilarity = await analyzeLookalikeVisualSimilarity(typosquats, brandName, targetDomain);
+        typosquats = visualSimilarity.domains;
         const registeredLookalikes = typosquats.filter((d) => d.registered);
         const suspiciousCount = registeredLookalikes.filter((d) => d.risk === "high" || d.risk === "medium").length;
+        const highVisualSimilarityCount = visualSimilarity.summary.highSimilarity;
         const imposterCount = socialImposters.filter((i) => i.risk === "high" || i.risk === "medium").length;
         let threatScore = 100;
         threatScore -= registeredLookalikes.length * 2;
         threatScore -= suspiciousCount * 5;
+        threatScore -= highVisualSimilarityCount * 6;
         threatScore -= imposterCount * 8;
         threatScore -= (100 - securityGrade.score) * 0.2;
         threatScore = Math.max(0, Math.min(100, Math.round(threatScore)));
@@ -2322,6 +2326,8 @@ data: ${JSON.stringify(data)}
             total: typosquats.length,
             registered: registeredLookalikes.length,
             suspicious: suspiciousCount,
+            highVisualSimilarity: highVisualSimilarityCount,
+            visualSimilarity: visualSimilarity.summary,
             domains: typosquats.slice(0, 50)
           },
           security: securityGrade,
@@ -2330,7 +2336,7 @@ data: ${JSON.stringify(data)}
             impostersFound: socialImposters.filter((i) => i.risk !== "low").length,
             accounts: socialImposters
           },
-          recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters),
+          recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters, visualSimilarity.summary),
           scannedAt: (/* @__PURE__ */ new Date()).toISOString()
         }, { headers: corsHeaders });
       } catch (error32) {

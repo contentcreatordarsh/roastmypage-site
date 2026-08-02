@@ -1,4 +1,128 @@
-import { hashUrl } from './utils.js';
+import { fetchWithTimeout } from './utils.js';
+
+const VISUAL_SIMILARITY_LABEL = "Metadata token-overlap heuristic (not ML vision)";
+const VISUAL_SIMILARITY_TIMEOUT_MS = 1200;
+const VISUAL_SIMILARITY_MAX_DOMAINS = 12;
+const VISUAL_SIMILARITY_HIGH_SCORE = 70;
+const VISUAL_SIMILARITY_MEDIUM_SCORE = 30;
+const METADATA_EXCERPT_LENGTH = 180;
+const TOKEN_STOP_WORDS = new Set([
+  "www", "com", "net", "org", "io", "co", "app", "dev", "xyz", "info", "biz", "us", "me",
+  "the", "and", "for", "with", "from", "your", "you", "our", "official", "home", "page",
+  "login", "sign", "signin", "account", "secure", "support", "help", "online", "site"
+]);
+
+function decodeHtmlEntities(value) {
+  if (!value) return "";
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, code) => {
+      const value2 = Number(code);
+      return Number.isFinite(value2) ? String.fromCodePoint(value2) : "";
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)));
+}
+
+function normalizeMetadataText(value, maxLength = METADATA_EXCERPT_LENGTH) {
+  return decodeHtmlEntities(String(value || ""))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function tokenizeSimilarityText(value) {
+  const normalized = decodeHtmlEntities(String(value || ""))
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[0@]/g, "o")
+    .replace(/[1!|]/g, "l")
+    .replace(/[3]/g, "e")
+    .replace(/[4]/g, "a")
+    .replace(/[5$]/g, "s")
+    .replace(/[7+]/g, "t");
+  return normalized
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !TOKEN_STOP_WORDS.has(token));
+}
+
+function buildBrandTokens(brandName, targetDomain) {
+  const tokens = new Set();
+  const domainName = String(targetDomain || "").split(".")[0] || "";
+  for (const source of [brandName, domainName]) {
+    const sourceTokens = tokenizeSimilarityText(source);
+    for (const token of sourceTokens) tokens.add(token);
+    const compact = sourceTokens.join("");
+    if (compact.length >= 3) tokens.add(compact);
+  }
+  return tokens;
+}
+
+function scoreMetadataSimilarity(metadata = {}, brandName = "", targetDomain = "") {
+  const brandTokens = buildBrandTokens(brandName, targetDomain);
+  const haystack = [
+    metadata.title,
+    metadata.ogTitle,
+    metadata.description,
+    metadata.ogDescription,
+    metadata.twitterTitle,
+    metadata.twitterDescription
+  ].filter(Boolean).join(" ");
+  const metadataTokens = new Set(tokenizeSimilarityText(haystack));
+  const normalizedHaystack = tokenizeSimilarityText(haystack).join("");
+  const matchedTokens = [...brandTokens].filter((token) => metadataTokens.has(token) || normalizedHaystack.includes(token));
+  const overlapScore = brandTokens.size > 0 ? Math.round((matchedTokens.length / brandTokens.size) * 100) : 0;
+  const score = Math.max(0, Math.min(100, overlapScore));
+  const risk = score >= VISUAL_SIMILARITY_HIGH_SCORE ? "high" : score >= VISUAL_SIMILARITY_MEDIUM_SCORE ? "medium" : "low";
+  return {
+    label: VISUAL_SIMILARITY_LABEL,
+    score,
+    risk,
+    highSimilarity: risk === "high",
+    matchedTokens,
+    explanation: score > 0
+      ? `Matched ${matchedTokens.length} of ${brandTokens.size} brand/domain token(s) in fetched title or metadata.`
+      : "No brand/domain token overlap found in fetched title or metadata."
+  };
+}
+
+function parseMetaAttributes(attributeText) {
+  const attrs = {};
+  const attrPattern = /([a-zA-Z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+  let match;
+  while ((match = attrPattern.exec(attributeText))) {
+    attrs[match[1].toLowerCase()] = decodeHtmlEntities(match[2] || match[3] || match[4] || "");
+  }
+  return attrs;
+}
+
+function extractMetadataFromHtml(html) {
+  const metadata = {};
+  const titleMatch = String(html || "").match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch) {
+    metadata.title = normalizeMetadataText(titleMatch[1]);
+  }
+  const metaPattern = /<meta\s+([^>]*?)>/gi;
+  let match;
+  while ((match = metaPattern.exec(String(html || "")))) {
+    const attrs = parseMetaAttributes(match[1]);
+    const key = (attrs.property || attrs.name || "").toLowerCase();
+    const content = normalizeMetadataText(attrs.content);
+    if (!key || !content) continue;
+    if (key === "description") metadata.description = metadata.description || content;
+    if (key === "og:title") metadata.ogTitle = metadata.ogTitle || content;
+    if (key === "og:description") metadata.ogDescription = metadata.ogDescription || content;
+    if (key === "twitter:title") metadata.twitterTitle = metadata.twitterTitle || content;
+    if (key === "twitter:description") metadata.twitterDescription = metadata.twitterDescription || content;
+  }
+  return metadata;
+}
 
 function generateTyposquats(domain22) {
   const variations = /* @__PURE__ */ new Set();
@@ -135,6 +259,85 @@ async function checkDomainRegistrations(domains) {
     return riskOrder[a.risk] - riskOrder[b.risk];
   });
 }
+
+async function fetchLookalikeMetadata(domain22, timeoutMs = VISUAL_SIMILARITY_TIMEOUT_MS) {
+  const schemes = ["https", "http"];
+  let lastError = "Fetch failed";
+  for (const scheme of schemes) {
+    try {
+      const response = await fetchWithTimeout(`${scheme}://${domain22}`, {
+        timeout: timeoutMs,
+        redirect: "follow",
+        headers: {
+          "Accept": "text/html,application/xhtml+xml",
+          "Range": "bytes=0-65535",
+          "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.0)"
+        }
+      });
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}`;
+        continue;
+      }
+      const html = (await response.text()).slice(0, 8e4);
+      return {
+        status: "fetched",
+        url: response.url || `${scheme}://${domain22}`,
+        metadata: extractMetadataFromHtml(html)
+      };
+    } catch (error32) {
+      lastError = error32 instanceof Error ? error32.message : "Fetch failed";
+    }
+  }
+  return {
+    status: "unavailable",
+    error: lastError,
+    metadata: {}
+  };
+}
+
+async function analyzeLookalikeVisualSimilarity(domainChecks, brandName, targetDomain, options = {}) {
+  const maxDomains = options.maxDomains ?? VISUAL_SIMILARITY_MAX_DOMAINS;
+  const timeoutMs = options.timeoutMs ?? VISUAL_SIMILARITY_TIMEOUT_MS;
+  const registeredDomains = domainChecks.filter((domainCheck) => domainCheck.registered).slice(0, maxDomains);
+  const analyses = await Promise.all(
+    registeredDomains.map(async (domainCheck) => {
+      const fetched = await fetchLookalikeMetadata(domainCheck.domain, timeoutMs);
+      const similarity = scoreMetadataSimilarity(fetched.metadata, brandName, targetDomain);
+      return [
+        domainCheck.domain,
+        {
+          ...similarity,
+          status: fetched.status,
+          url: fetched.url,
+          metadata: fetched.metadata,
+          error: fetched.error
+        }
+      ];
+    })
+  );
+  const similarityByDomain = new Map(analyses);
+  const enrichedChecks = domainChecks.map((domainCheck) => {
+    const visualSimilarity = similarityByDomain.get(domainCheck.domain);
+    if (!visualSimilarity) return domainCheck;
+    const risk = visualSimilarity.highSimilarity && domainCheck.risk !== "high" ? "high" : domainCheck.risk;
+    return { ...domainCheck, risk, visualSimilarity };
+  });
+  const highSimilarityDomains = enrichedChecks.filter((domainCheck) => domainCheck.visualSimilarity?.highSimilarity);
+  return {
+    domains: enrichedChecks,
+    summary: {
+      label: VISUAL_SIMILARITY_LABEL,
+      scanned: registeredDomains.length,
+      highSimilarity: highSimilarityDomains.length,
+      domains: highSimilarityDomains.map((domainCheck) => ({
+        domain: domainCheck.domain,
+        score: domainCheck.visualSimilarity.score,
+        matchedTokens: domainCheck.visualSimilarity.matchedTokens
+      }))
+    }
+  };
+}
+
 async function checkSecurityHeaders(targetUrl) {
   const headers = [];
   const issues = [];
@@ -310,16 +513,18 @@ function getImposterReason(handle, brandName) {
   }
   return "Similar to your brand name - could cause confusion";
 }
-function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, socialImposters) {
+function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, socialImposters, visualSimilaritySummary) {
   const recommendations = [];
   const highRiskDomains = domainChecks.filter((d) => d.registered && d.risk === "high");
   const mediumRiskDomains = domainChecks.filter((d) => d.registered && d.risk === "medium");
-  const registeredCount = domainChecks.filter((d) => d.registered).length;
   if (highRiskDomains.length > 0) {
     recommendations.push(`URGENT: ${highRiskDomains.length} potentially malicious lookalike domain(s) detected. Consider taking legal action or contacting registrars.`);
   }
   if (mediumRiskDomains.length > 0) {
     recommendations.push(`Found ${mediumRiskDomains.length} registered lookalike domain(s). Consider purchasing key variations to protect your brand.`);
+  }
+  if (visualSimilaritySummary?.highSimilarity > 0) {
+    recommendations.push(`HEURISTIC: ${visualSimilaritySummary.highSimilarity} registered lookalike domain(s) reused brand/domain terms in page title or metadata. Review these potential visual-similarity impersonation signals manually.`);
   }
   if (socialImposters && socialImposters.length > 0) {
     const highRiskImposters = socialImposters.filter((i) => i.risk === "high");
@@ -345,4 +550,4 @@ function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, s
   return recommendations.slice(0, 8);
 }
 
-export { generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, getImposterReason, generateThreatRecommendations };
+export { generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, getImposterReason, generateThreatRecommendations, scoreMetadataSimilarity, extractMetadataFromHtml, analyzeLookalikeVisualSimilarity };
