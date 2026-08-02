@@ -1,25 +1,26 @@
 import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './config.js';
 import { getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
+import { t as i18nT, DEFAULT_LOCALE } from './i18n.js';
 
-async function checkGlobalRateLimit(env22) {
+async function checkGlobalRateLimit(env22, locale = DEFAULT_LOCALE) {
   const now = /* @__PURE__ */ new Date();
   const hourKey = `global_hourly_${now.getUTCFullYear()}_${now.getUTCMonth()}_${now.getUTCDate()}_${now.getUTCHours()}`;
   const dayKey = `global_daily_browser_${now.getUTCFullYear()}_${now.getUTCMonth()}_${now.getUTCDate()}`;
   try {
     const hourlyCount = parseInt(await env22.CONFIG.get(hourKey) || "0");
     if (hourlyCount >= CONFIG.GLOBAL_HOURLY_LIMIT) {
-      return { allowed: false, reason: "Service is at capacity. Please try again in a few minutes." };
+      return { allowed: false, reason: i18nT(locale, "errors.capacity"), code: "errors.capacity" };
     }
     const dailyBrowser = parseInt(await env22.CONFIG.get(dayKey) || "0");
     if (dailyBrowser >= CONFIG.GLOBAL_DAILY_BROWSER_LIMIT) {
-      return { allowed: false, reason: "Daily capacity reached. Please try again tomorrow." };
+      return { allowed: false, reason: i18nT(locale, "errors.dailyCapacity"), code: "errors.dailyCapacity" };
     }
     await env22.CONFIG.put(hourKey, String(hourlyCount + 1), { expirationTtl: 7200 });
     return { allowed: true };
   } catch (error32) {
     console.error("Global rate limit check failed:", error32);
-    return { allowed: false, reason: "Rate limiting is temporarily unavailable. Please try again shortly." };
+    return { allowed: false, reason: i18nT(locale, "errors.rateLimitUnavailable"), code: "errors.rateLimitUnavailable" };
   }
 }
 async function trackBrowserUsage(env22, sessions2 = 1) {

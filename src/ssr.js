@@ -1,8 +1,10 @@
 import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
 import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
+import { createTranslator, DEFAULT_LOCALE } from './i18n.js';
 
-function generateNotFoundPage(baseUrl) {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#0A0908;color:#F5F0E8;font-family:'DM Sans',system-ui,sans-serif}h1{font-family:'Syne',system-ui,sans-serif;letter-spacing:-0.02em}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#E85D04] hover:bg-[#FF6B1A] text-[#0A0908] font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
+function generateNotFoundPage(baseUrl, locale = DEFAULT_LOCALE) {
+  const { t, locale: lang } = createTranslator(locale);
+  return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>${escapeHtml(t("ssr.notFoundTitle"))}</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#0A0908;color:#F5F0E8;font-family:'DM Sans','Noto Sans Devanagari',system-ui,sans-serif}h1{font-family:'Syne','Noto Sans Devanagari',system-ui,sans-serif;letter-spacing:-0.02em}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">${escapeHtml(t("ssr.notFoundTitle"))}</h1><p class="text-[#a1a1a6] mb-6">${escapeHtml(t("ssr.notFoundBody"))}</p><a href="/?lang=${lang}" class="px-6 py-3 bg-[#E85D04] hover:bg-[#FF6B1A] text-[#0A0908] font-semibold rounded-xl transition-colors">${escapeHtml(t("ssr.roastYourPage"))}</a><br><a href="/gallery?lang=${lang}" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">${escapeHtml(t("ssr.browseGallery"))}</a></div></body></html>`;
 }
 var PRODUCTION_ORIGINS = [
   "https://roastmypage.site",
@@ -21,8 +23,10 @@ export function renderRoastPage(params) {
         ogTitle: ogTitleProp, ogDesc: ogDescProp, ogImage: ogImageProp,
         pageUrl: pageUrlProp, createdAt: createdAtProp,
         industrySampleSize: industrySampleSizeProp, heatmap,
-        seoDetailsHtml, perfDetailsHtml
+        seoDetailsHtml, perfDetailsHtml,
+        locale: localeProp
     } = params;
+    const { t, locale: lang } = createTranslator(localeProp || DEFAULT_LOCALE);
 
     // Use passed-in OG/meta values or compute fallbacks
     const ogTitle = ogTitleProp || `${hostname} — Roast Score ${score}/10 | Roast My Page`;
@@ -48,7 +52,7 @@ export function renderRoastPage(params) {
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
 
     const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -127,8 +131,8 @@ export function renderRoastPage(params) {
       <span class="font-semibold text-white/90 text-sm">Roast My Landing Page</span>
     </a>
     <div class="flex items-center gap-1">
-      <a href="/gallery" class="text-sm text-white/50 hover:text-white/90 px-3 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">Gallery</a>
-      <a href="/" class="text-sm text-white/50 hover:text-white/90 px-3 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">Roast Yours</a>
+      <a href="/gallery?lang=${lang}" class="text-sm text-white/50 hover:text-white/90 px-3 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">${escapeHtml(t("ssr.galleryNav"))}</a>
+      <a href="/?lang=${lang}" class="text-sm text-white/50 hover:text-white/90 px-3 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">${escapeHtml(t("ssr.roastYours"))}</a>
     </div>
   </div>
 </nav>
@@ -138,8 +142,8 @@ export function renderRoastPage(params) {
   <!-- Header -->
   <div class="text-center mb-8">
     <div class="inline-flex items-center gap-2 text-xs text-[#6e6e73] bg-white/[0.03] border border-white/[0.06] rounded-full px-4 py-1.5 mb-4">
-      <span>Roasted on ${dateStr}</span>
-      ${roast.country && roast.country !== "XX" ? `<span>from ${roast.country}</span>` : ""}
+      <span>${escapeHtml(t("ssr.roastedOn", { date: dateStr }))}</span>
+      ${roast.country && roast.country !== "XX" ? `<span>${escapeHtml(t("ssr.fromCountry", { country: roast.country }))}</span>` : ""}
     </div>
     <h1 class="text-2xl md:text-3xl font-bold mb-2">${escapeHtml(hostname)}</h1>
     <a href="${escapeHtml(roast.url)}" target="_blank" rel="noopener" class="text-sm text-[#6e6e73] hover:text-[#d1d1d6] transition-colors break-all">${escapeHtml(roast.url)}</a>
@@ -155,8 +159,8 @@ export function renderRoastPage(params) {
           <span class="text-xs text-[#a1a1a6]">/10</span>
         </div>
       </div>
-      <div class="text-sm font-semibold" style="color:${scoreColor}">${emoji} ${scoreLabel}</div>
-      <div class="text-xs text-[#6e6e73]">Conversion</div>
+      <div class="text-sm font-semibold" style="color:${scoreColor}">${emoji} ${escapeHtml(scoreLabel)}</div>
+      <div class="text-xs text-[#6e6e73]">${escapeHtml(t("ssr.conversion"))}</div>
     </div>
     <!-- SEO Score -->
     ${seo ? (() => {
@@ -170,7 +174,7 @@ export function renderRoastPage(params) {
         </div>
       </div>
       <div class="text-sm font-semibold" style="color:${seoCardColor}">\u{1F50D} SEO</div>
-      <div class="text-xs text-[#6e6e73]">${seo.issues ? seo.issues.length : 0} issues found</div>
+      <div class="text-xs text-[#6e6e73]">${escapeHtml(t("ssr.issuesFound", { n: seo.issues ? seo.issues.length : 0 }))}</div>
     </div>`;
       })() : ""}
     <!-- Performance Score -->
@@ -634,17 +638,24 @@ ${JSON.stringify({
 
 export function renderGalleryPage(params) {
     const {
-        roasts, total, page, totalPages, prevPageUrl, nextPageUrl, validIndustry, BASE_URL, industryMeta
+        roasts, total, page, totalPages, prevPageUrl, nextPageUrl, validIndustry, BASE_URL, industryMeta,
+        locale: localeProp
     } = params;
+    const { t, locale: lang } = createTranslator(localeProp || DEFAULT_LOCALE);
+    const langQ = (url) => {
+      if (!url) return url;
+      const join = url.includes("?") ? "&" : "?";
+      return `${url}${join}lang=${lang}`;
+    };
     const galleryHtml = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- Google AdSense -->
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script>
-<title>Roast Gallery - ${total} Landing Pages Analyzed | Roast My Landing Page</title>
-<meta name="description" content="Browse ${total} landing page roasts. See real AI conversion scores, SEO audits, and design critiques from pages across the web.">
+<title>${escapeHtml(t("ssr.galleryTitle"))} - ${total} | Roast My Landing Page</title>
+<meta name="description" content="${escapeHtml(t("ssr.gallerySubtitle", { total }))}">
 <meta name="robots" content="index, follow">
 
 <meta property="og:type" content="website">
@@ -696,8 +707,8 @@ ${page < totalPages ? `<link rel="next" href="${BASE_URL}/gallery?page=${page + 
       <span class="font-semibold text-white/90 text-sm">Roast My Landing Page</span>
     </a>
     <div class="flex items-center gap-1">
-      <a href="/gallery" class="text-sm text-white/90 px-3 py-1.5 rounded-lg bg-white/[0.06]">Gallery</a>
-      <a href="/" class="text-sm text-white/50 hover:text-white/90 px-3 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">Roast Yours</a>
+      <a href="/gallery?lang=${lang}" class="text-sm text-white/90 px-3 py-1.5 rounded-lg bg-white/[0.06]">${escapeHtml(t("ssr.galleryNav"))}</a>
+      <a href="/?lang=${lang}" class="text-sm text-white/50 hover:text-white/90 px-3 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">${escapeHtml(t("ssr.roastYours"))}</a>
     </div>
   </div>
 </nav>
@@ -705,19 +716,19 @@ ${page < totalPages ? `<link rel="next" href="${BASE_URL}/gallery?page=${page + 
 <main class="max-w-6xl mx-auto px-4 pt-24 pb-16">
 
   <div class="text-center mb-10">
-    <h1 class="text-3xl md:text-4xl font-bold mb-3">${industryMeta ? `${industryMeta.emoji} ${industryMeta.label} ` : ""}Roast Gallery</h1>
-    <p class="text-[#a1a1a6]">${total} landing pages analyzed by AI. ${industryMeta ? `Showing ${industryMeta.label} pages only.` : "Browse scores, learn from others' mistakes."}</p>
+    <h1 class="text-3xl md:text-4xl font-bold mb-3">${industryMeta ? `${industryMeta.emoji} ${industryMeta.label} ` : ""}${escapeHtml(t("ssr.galleryTitle"))}</h1>
+    <p class="text-[#a1a1a6]">${escapeHtml(industryMeta ? t("ssr.galleryIndustrySubtitle", { label: industryMeta.label }) : t("ssr.gallerySubtitle", { total }))}</p>
   </div>
 
   <!-- Industry Filter -->
   <div class="flex flex-wrap gap-2 justify-center mb-8">
-    <a href="/gallery" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${!validIndustry ? "bg-[#FF6B35] text-white" : "bg-white/[0.04] text-[#a1a1a6] hover:bg-white/[0.08] hover:text-white"} border border-white/[0.06]">
-      \u{1F310} All
+    <a href="/gallery?lang=${lang}" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${!validIndustry ? "bg-[#FF6B35] text-white" : "bg-white/[0.04] text-[#a1a1a6] hover:bg-white/[0.08] hover:text-white"} border border-white/[0.06]">
+      \u{1F310} ${escapeHtml(t("ssr.all"))}
     </a>
     ${INDUSTRY_KEYS.filter((k) => k !== "other").map((k) => {
         const ind = INDUSTRY_BENCHMARKS[k];
         const isActive = validIndustry === k;
-        return `<a href="/gallery?industry=${k}" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isActive ? "bg-[#FF6B35] text-white" : "bg-white/[0.04] text-[#a1a1a6] hover:bg-white/[0.08] hover:text-white"} border border-white/[0.06]">
+        return `<a href="/gallery?industry=${k}&lang=${lang}" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isActive ? "bg-[#FF6B35] text-white" : "bg-white/[0.04] text-[#a1a1a6] hover:bg-white/[0.08] hover:text-white"} border border-white/[0.06]">
         ${ind.emoji} ${ind.label}
       </a>`;
       }).join("")}
@@ -770,23 +781,23 @@ ${page < totalPages ? `<link rel="next" href="${BASE_URL}/gallery?page=${page + 
         const prevUrl = page > 2 ? `${baseUrl}${validIndustry ? "&" : "?"}page=${page - 1}` : baseUrl;
         const nextUrl = `${baseUrl}${validIndustry ? "&" : "?"}page=${page + 1}`;
         return `<div class="flex justify-center items-center gap-2">
-      ${page > 1 ? `<a href="${prevUrl}" class="px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm hover:bg-white/[0.06] transition-colors">&larr; Previous</a>` : ""}
-      <span class="text-sm text-[#6e6e73] px-4">Page ${page} of ${totalPages}</span>
-      ${page < totalPages ? `<a href="${nextUrl}" class="px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm hover:bg-white/[0.06] transition-colors">Next &rarr;</a>` : ""}
+      ${page > 1 ? `<a href="${langQ(prevUrl)}" class="px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm hover:bg-white/[0.06] transition-colors">${escapeHtml(t("ssr.previous"))}</a>` : ""}
+      <span class="text-sm text-[#6e6e73] px-4">${escapeHtml(t("ssr.pageOf", { page, total: totalPages }))}</span>
+      ${page < totalPages ? `<a href="${langQ(nextUrl)}" class="px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm hover:bg-white/[0.06] transition-colors">${escapeHtml(t("ssr.next"))}</a>` : ""}
     </div>`;
       })() : ""}
 
   <!-- CTA -->
   <div class="card p-8 mt-10 text-center">
-    <h2 class="text-lg font-semibold mb-2">Get your page roasted</h2>
-    <p class="text-sm text-[#6e6e73] mb-5">Free AI conversion analysis in 30 seconds</p>
-    <a href="/" class="inline-block px-8 py-3 bg-[#FF6B35] hover:bg-[#E8552D] text-white font-semibold rounded-xl transition-colors">Roast My Page</a>
+    <h2 class="text-lg font-semibold mb-2">${escapeHtml(t("ssr.getRoastedTitle"))}</h2>
+    <p class="text-sm text-[#6e6e73] mb-5">${escapeHtml(t("ssr.getRoastedBody"))}</p>
+    <a href="/?lang=${lang}" class="inline-block px-8 py-3 bg-[#FF6B35] hover:bg-[#E8552D] text-white font-semibold rounded-xl transition-colors">${escapeHtml(t("ssr.roastMyPage"))}</a>
   </div>
 
 </main>
 
 <footer class="border-t border-white/[0.06] py-8 text-center">
-  <span class="text-sm text-[#6e6e73]">${total} pages roasted and counting</span>
+  <span class="text-sm text-[#6e6e73]">${escapeHtml(t("ssr.pagesRoasted", { total }))}</span>
 </footer>
 
 <!-- JSON-LD -->

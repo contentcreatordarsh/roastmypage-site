@@ -44,12 +44,29 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    SUPPORTED_LOCALES, LOCALE_LABELS, DEFAULT_LOCALE,
+    detectLocaleFromRequest, createTranslator, getCatalog, t as i18nT
+} from './i18n.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
 
 // Module-level dedup set — prevents duplicate concurrent roast requests for the same URL.
 const inFlightRequests = new Set();
+
+function localeFromRequest(request, url) {
+  return detectLocaleFromRequest(request, url);
+}
+
+function apiError(request, url, key, status, headers, vars = {}) {
+  const locale = localeFromRequest(request, url);
+  return Response.json(
+    { error: i18nT(locale, key, vars), code: key },
+    { status, headers: { ...headers, "Content-Language": locale } }
+  );
+}
 
 export default {
     async fetch(request, env22, ctx) {
@@ -60,17 +77,41 @@ export default {
       return new Response(null, { headers: securityHeaders });
     }
     const corsHeaders = securityHeaders;
+
+    // #34 i18n catalogs for the SPA client
+    if (url.pathname === "/api/i18n" && request.method === "GET") {
+      return Response.json({
+        locales: SUPPORTED_LOCALES,
+        labels: LOCALE_LABELS,
+        defaultLocale: DEFAULT_LOCALE
+      }, { headers: { ...corsHeaders, "Cache-Control": "public, max-age=3600" } });
+    }
+    if (url.pathname.startsWith("/api/i18n/") && request.method === "GET") {
+      const code = url.pathname.split("/").pop();
+      const locale = SUPPORTED_LOCALES.includes(code) ? code : DEFAULT_LOCALE;
+      return Response.json({
+        locale,
+        catalog: getCatalog(locale)
+      }, {
+        headers: {
+          ...corsHeaders,
+          "Content-Language": locale,
+          "Cache-Control": "public, max-age=3600"
+        }
+      });
+    }
+
     if (request.method === "POST" && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/v1/")) {
       const reqOrigin = request.headers.get("Origin");
       const allowedOrigins = getAllowedOrigins(env22.ENVIRONMENT);
       if (reqOrigin && !allowedOrigins.includes(reqOrigin)) {
-        return Response.json({ error: "Forbidden: origin not allowed" }, { status: 403, headers: corsHeaders });
+        return apiError(request, url, "errors.forbiddenOrigin", 403, corsHeaders);
       }
     }
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
@@ -87,16 +128,17 @@ export default {
         const fullPage = body.fullPage === true;
         const targetUrl = sanitizeUrl(rawUrl);
         if (!targetUrl || !isValidUrl(targetUrl)) {
-          return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.invalidUrl", 400, corsHeaders);
         }
         if (!isUrlSafeForFetching(targetUrl)) {
-          return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.privateUrl", 400, corsHeaders);
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
         if (!rateLimit.allowed) {
+          const locale = localeFromRequest(request, url);
           return Response.json(
-            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
-            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+            { error: i18nT(locale, "errors.rateLimited", { minutes: Math.ceil(rateLimit.resetIn / 60) }), code: "errors.rateLimited", retryAfter: rateLimit.resetIn },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString(), "Content-Language": locale } }
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
@@ -214,7 +256,7 @@ export default {
     }
     if (url.pathname === "/api/compare" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
@@ -229,17 +271,17 @@ export default {
         const url1 = sanitizeUrl(body.url1);
         const url2 = sanitizeUrl(body.url2);
         if (!url1 || !url2 || !isValidUrl(url1) || !isValidUrl(url2)) {
-          return Response.json({ error: "Please provide two valid URLs" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.twoUrls", 400, corsHeaders);
         }
         for (const checkUrl of [url1, url2]) {
           if (!isUrlSafeForFetching(checkUrl)) {
-            return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+            return apiError(request, url, "errors.privateUrl", 400, corsHeaders);
           }
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "compare");
         if (!rateLimit.allowed) {
           return Response.json(
-            { error: `Compare rate limit exceeded (${CONFIG.RATE_LIMIT_COMPARE_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { error: i18nT(localeFromRequest(request, url), "errors.compareRateLimited", { max: CONFIG.RATE_LIMIT_COMPARE_MAX, minutes: Math.ceil(rateLimit.resetIn / 60) }), code: "errors.compareRateLimited", retryAfter: rateLimit.resetIn },
             { status: 429, headers: corsHeaders }
           );
         }
@@ -518,7 +560,7 @@ export default {
     }
     if (url.pathname === "/api/batch-roast" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
@@ -534,16 +576,16 @@ export default {
           return Response.json({ error: "Please provide an array of URLs" }, { status: 400, headers: corsHeaders });
         }
         if (urls.length > CONFIG.MAX_BATCH_URLS) {
-          return Response.json({ error: `Maximum ${CONFIG.MAX_BATCH_URLS} URLs per batch` }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.batchMax", 400, corsHeaders, { n: CONFIG.MAX_BATCH_URLS });
         }
         const validUrls = urls.filter((u) => isValidUrl(u) && isUrlSafeForFetching(u));
         if (validUrls.length === 0) {
-          return Response.json({ error: "No valid URLs provided" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.noValidUrls", 400, corsHeaders);
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "batch");
         if (!rateLimit.allowed) {
           return Response.json(
-            { error: `Batch rate limit exceeded (${CONFIG.RATE_LIMIT_BATCH_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { error: i18nT(localeFromRequest(request, url), "errors.batchRateLimited", { max: CONFIG.RATE_LIMIT_BATCH_MAX, minutes: Math.ceil(rateLimit.resetIn / 60) }), code: "errors.batchRateLimited", retryAfter: rateLimit.resetIn },
             { status: 429, headers: corsHeaders }
           );
         }
@@ -628,7 +670,7 @@ export default {
     }
     if (url.pathname === "/api/roast-stream" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
@@ -644,16 +686,17 @@ export default {
         const fullPage = body.fullPage === true;
         const targetUrl = sanitizeUrl(body.url);
         if (!targetUrl || !isValidUrl(targetUrl)) {
-          return Response.json({ error: "Please provide a valid URL" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.invalidUrl", 400, corsHeaders);
         }
         if (!isUrlSafeForFetching(targetUrl)) {
-          return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.privateUrl", 400, corsHeaders);
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
         if (!rateLimit.allowed) {
+          const locale = localeFromRequest(request, url);
           return Response.json(
-            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
-            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+            { error: i18nT(locale, "errors.rateLimited", { minutes: Math.ceil(rateLimit.resetIn / 60) }), code: "errors.rateLimited", retryAfter: rateLimit.resetIn },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString(), "Content-Language": locale } }
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
@@ -662,7 +705,7 @@ export default {
           return Response.json({ ...cachedResult, device, fullPage, cached: true }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
         if (inFlightRequests.has(urlHash)) {
-          return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
+          return apiError(request, url, "errors.alreadyAnalyzing", 409, corsHeaders);
         }
         const { readable, writable } = new TransformStream();
         const writer = writable.getWriter();
@@ -794,7 +837,7 @@ data: ${JSON.stringify(data)}
       }
       const roast = await env22.DB.prepare("SELECT * FROM roasts WHERE id = ?").bind(roastId).first();
       if (!roast) {
-        return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
+        return apiError(request, url, "errors.roastNotFound", 404, corsHeaders);
       }
       const roastIndustry = roast.industry || "other";
       return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
@@ -919,7 +962,7 @@ data: ${JSON.stringify(data)}
         const fbIpHash = await hashIp(fbIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const fbLimit = await checkOperationRateLimit(env22, fbIpHash, "feedback");
         if (!fbLimit.allowed) {
-          return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
+          return apiError(request, url, "errors.tooManyRequests", 429, corsHeaders);
         }
         const context3 = (body.context || "roast").substring(0, 20);
         const reasons = Array.isArray(body.reasons) ? body.reasons.slice(0, 10).map((r) => String(r).substring(0, 50)).join(",") : "";
@@ -945,13 +988,13 @@ data: ${JSON.stringify(data)}
         const roastId = body.roastId;
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!rawEmail || rawEmail.length > 254 || !emailRegex.test(rawEmail)) {
-          return Response.json({ error: "Please provide a valid email address" }, { status: 400, headers: corsHeaders });
+          return apiError(request, url, "errors.invalidEmail", 400, corsHeaders);
         }
         const subIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const subIpHash = await hashIp(subIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const subLimit = await checkOperationRateLimit(env22, subIpHash, "subscribe");
         if (!subLimit.allowed) {
-          return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
+          return apiError(request, url, "errors.tooManyRequests", 429, corsHeaders);
         }
         const email = rawEmail.toLowerCase().trim();
         const validRoastId = isValidRoastIdLoose(roastId) ? roastId : null;
@@ -2251,7 +2294,7 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/threat-scan" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
@@ -2266,7 +2309,7 @@ data: ${JSON.stringify(data)}
             return Response.json({ error: "Invalid URL" }, { status: 400, headers: corsHeaders });
           }
           if (!isUrlSafeForFetching(sanitizedUrl)) {
-            return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
+            return apiError(request, url, "errors.privateUrl", 400, corsHeaders);
           }
           try {
             const parsedUrl = new URL(sanitizedUrl);
@@ -2335,12 +2378,12 @@ data: ${JSON.stringify(data)}
         }, { headers: corsHeaders });
       } catch (error32) {
         safeLogError("Threat scan error:", error32);
-        return Response.json({ error: "Threat scan failed" }, { status: 500, headers: corsHeaders });
+        return apiError(request, url, "errors.threatScanFailed", 500, corsHeaders);
       }
     }
     if (url.pathname === "/api/tech-scan" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
@@ -2552,7 +2595,7 @@ data: ${JSON.stringify(data)}
             }
           });
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, localeFromRequest(request, url));
         if (!globalLimit.allowed) {
           return Response.json({
             success: false,
@@ -2826,9 +2869,10 @@ data: ${JSON.stringify(data)}
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
       if (!roast) {
-        return new Response(generateNotFoundPage(BASE_URL), {
+        const locale404 = localeFromRequest(request, url);
+        return new Response(generateNotFoundPage(BASE_URL, locale404), {
           status: 404,
-          headers: { "Content-Type": "text/html; charset=utf-8", ...getSecurityHeaders(origin, env22.ENVIRONMENT) }
+          headers: { "Content-Type": "text/html; charset=utf-8", "Content-Language": locale404, ...getSecurityHeaders(origin, env22.ENVIRONMENT) }
         });
       }
       let hostname = "unknown";
@@ -2836,9 +2880,11 @@ data: ${JSON.stringify(data)}
         hostname = new URL(roast.url).hostname.replace(/^www\./, "");
       } catch {
       }
+      const pageLocale = localeFromRequest(request, url);
+      const tr = createTranslator(pageLocale);
       const score = roast.overall_score;
       const scoreColor = score >= 8 ? "#22C55E" : score >= 6 ? "#EAB308" : score >= 4 ? "#F97316" : "#EF4444";
-      const verdict = score >= 8 ? "Excellent" : score >= 6 ? "Needs Work" : score >= 4 ? "Concerning" : "Needs Help";
+      const verdict = score >= 8 ? tr.t("ssr.excellent") : score >= 6 ? tr.t("ssr.needsWork") : score >= 4 ? tr.t("ssr.concerning") : tr.t("ssr.needsHelp");
       const emoji = score >= 8 ? "\u{1F525}" : score >= 6 ? "\u{1F610}" : score >= 4 ? "\u{1F62C}" : "\u{1F480}";
       let quickWins = [];
       try {
@@ -3311,18 +3357,19 @@ data: ${JSON.stringify(data)}
         </div>`;
       }
       const verdictText = roast.roast_response || verdict;
-      const scoreLabel = score >= 8 ? 'High Performer' : score >= 6 ? 'Room to Improve' : score >= 4 ? 'Needs Work' : 'Critical Issues';
+      const scoreLabel = score >= 8 ? tr.t("ssr.highPerformer") : score >= 6 ? tr.t("ssr.roomToImprove") : score >= 4 ? tr.t("ssr.needsWork") : tr.t("ssr.criticalIssues");
       const html = renderRoastPage({
           roast, hostname, scoreColor, score, emoji, dateStr, categories, sections,
           quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
           heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
           ogTitle, ogDesc, ogImage, pageUrl, createdAt, industrySampleSize, heatmap,
-          seoDetailsHtml, perfDetailsHtml
+          seoDetailsHtml, perfDetailsHtml, locale: pageLocale
         });
       return new Response(html, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "public, max-age=3600, s-maxage=86400",
+          "Content-Language": pageLocale,
           ...getSecurityHeaders(origin, env22.ENVIRONMENT)
         }
       });
@@ -3356,16 +3403,18 @@ data: ${JSON.stringify(data)}
       const totalPages = Math.ceil(total / perPage);
       const roasts = roastsResult.results || [];
       const industryMeta = validIndustry ? INDUSTRY_BENCHMARKS[validIndustry] : null;
+      const galleryLocale = localeFromRequest(request, url);
       const galleryHtml = renderGalleryPage({
           roasts, total, page, totalPages,
           prevPageUrl: page > 1 ? `/gallery${validIndustry ? `?industry=${validIndustry}&page=${page - 1}` : `?page=${page - 1}`}` : null,
           nextPageUrl: page < totalPages ? `/gallery${validIndustry ? `?industry=${validIndustry}&page=${page + 1}` : `?page=${page + 1}`}` : null,
-          validIndustry, BASE_URL, industryMeta
+          validIndustry, BASE_URL, industryMeta, locale: galleryLocale
         });
       return new Response(galleryHtml, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "public, max-age=300, s-maxage=600",
+          "Content-Language": galleryLocale,
           ...getSecurityHeaders(origin, env22.ENVIRONMENT)
         }
       });

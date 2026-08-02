@@ -31,15 +31,16 @@
     <meta name="twitter:image" content="https://roastmypage.site/og/default">
     <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="i18n-title" content="meta.title">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
             fontFamily: {
-              display: ['Syne', 'system-ui', 'sans-serif'],
-              sans: ['DM Sans', 'system-ui', 'sans-serif'],
+              display: ['Syne', 'Noto Sans Devanagari', 'system-ui', 'sans-serif'],
+              sans: ['DM Sans', 'Noto Sans Devanagari', 'system-ui', 'sans-serif'],
             },
             colors: {
               ink: {
@@ -308,6 +309,17 @@
         }
         
         .font-display { font-family: 'Syne', system-ui, sans-serif; }
+        html.locale-hi, html.locale-hi body { font-family: 'DM Sans', 'Noto Sans Devanagari', system-ui, sans-serif; }
+        html.locale-hi .font-display { font-family: 'Syne', 'Noto Sans Devanagari', system-ui, sans-serif; }
+        #lang-select {
+            appearance: none; background: rgba(245,240,232,0.04);
+            border: 1px solid rgba(245,240,232,0.1); color: rgba(245,240,232,0.65);
+            border-radius: 8px; padding: 4px 22px 4px 8px; font-size: 12px;
+            font-family: inherit; cursor: pointer;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23a1a1a6' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 8px center;
+        }
+        #lang-select:hover { color: #F5F0E8; border-color: rgba(245,240,232,0.2); }
 
         /* ─── Elevation layer: a11y focus, motion safety, brand polish ─── */
         html { scroll-behavior: smooth; }
@@ -891,18 +903,25 @@
             </a>
             <div class="flex items-center gap-1 sm:gap-0.5">
                 <button onclick="showChangelogModal()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5 flex items-center gap-1.5">
-                    <span class="hidden sm:inline">What's New</span>
-                    <span class="sm:hidden">New</span>
+                    <span class="hidden sm:inline" data-i18n="nav.whatsNew">What's New</span>
+                    <span class="sm:hidden" data-i18n="nav.whatsNewShort">New</span>
                     <span class="relative flex h-1.5 w-1.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-orange opacity-60"></span><span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-orange"></span></span>
                 </button>
-                <button onclick="showTab('single')" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden md:block px-3 py-1.5">Roast</button>
-                <button onclick="showTab('compare')" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden md:block px-3 py-1.5">Compare</button>
-                <a href="/gallery" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5">Gallery</a>
-                <a href="/pricing" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden sm:block px-3 py-1.5">Pricing</a>
-                <button onclick="showApiDocsModal()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden lg:flex items-center gap-1.5 px-3 py-1.5">
+                <button onclick="showTab('single')" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden md:block px-3 py-1.5" data-i18n="nav.roast">Roast</button>
+                <button onclick="showTab('compare')" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden md:block px-3 py-1.5" data-i18n="nav.compare">Compare</button>
+                <a href="/gallery" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5" data-i18n="nav.gallery">Gallery</a>
+                <a href="/pricing" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden sm:block px-3 py-1.5" data-i18n="nav.pricing">Pricing</a>
+                <button onclick="showApiDocsModal()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors hidden lg:flex items-center gap-1.5 px-3 py-1.5" data-i18n="nav.api">
                     API
                 </button>
-                <button onclick="showHistoryModal()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5">History</button>
+                <button onclick="showHistoryModal()" class="text-[13px] font-medium text-cream-300/50 hover:text-cream-100 transition-colors px-2.5 sm:px-3 py-1.5" data-i18n="nav.history">History</button>
+                <label class="sr-only" for="lang-select" data-i18n="nav.language">Language</label>
+                <select id="lang-select" class="ml-1" aria-label="Language" title="Language">
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                    <option value="fr">Français</option>
+                    <option value="hi">हिन्दी</option>
+                </select>
             </div>
         </div>
     </nav>
@@ -916,51 +935,51 @@
                 <span class="brand-underline mx-auto w-24 sm:w-32 mt-4" aria-hidden="true"></span>
             </h1>
 
-            <p class="rise-in rise-in-delay-1 font-display text-lg sm:text-xl md:text-2xl font-semibold tracking-tight text-cream-100/90 mb-3 leading-snug">
+            <p class="rise-in rise-in-delay-1 font-display text-lg sm:text-xl md:text-2xl font-semibold tracking-tight text-cream-100/90 mb-3 leading-snug" data-i18n="hero.headline">
                 Brutally honest conversion scores — in 30 seconds.
             </p>
 
-            <p class="rise-in rise-in-delay-2 text-[15px] sm:text-base text-cream-300/65 mb-10 max-w-md mx-auto leading-relaxed">
+            <p class="rise-in rise-in-delay-2 text-[15px] sm:text-base text-cream-300/65 mb-10 max-w-md mx-auto leading-relaxed" data-i18n="hero.subhead">
                 AI grades your hero, CTA, copy, trust &amp; design — then hands you the fixes. SEO, performance, and attention heatmaps included. No signup.
             </p>
 
             <div class="rise-in rise-in-delay-3 segmented-control max-w-[300px] mx-auto mb-6">
-                <button onclick="showTab('single')" id="tab-single" class="active">Roast</button>
-                <button onclick="showTab('compare')" id="tab-compare">Compare</button>
-                <button onclick="showTab('batch')" id="tab-batch">Batch</button>
+                <button onclick="showTab('single')" id="tab-single" class="active" data-i18n="hero.tabRoast">Roast</button>
+                <button onclick="showTab('compare')" id="tab-compare" data-i18n="hero.tabCompare">Compare</button>
+                <button onclick="showTab('batch')" id="tab-batch" data-i18n="hero.tabBatch">Batch</button>
             </div>
             
             <!-- Single Roast Form -->
             <div id="form-single" class="rise-in rise-in-delay-4 card p-5 sm:p-7 max-w-xl mx-auto mb-4 text-left">
                 <div class="flex flex-col gap-5">
                     <div>
-                        <label for="url-input" class="sr-only">Landing page URL</label>
+                        <label for="url-input" class="sr-only" data-i18n="hero.urlLabel">Landing page URL</label>
                         <input type="url" id="url-input" placeholder="https://yoursite.com" class="input-dark w-full px-5 py-4">
                     </div>
                     
                     <div class="flex items-center justify-between gap-4">
-                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase">Device</span>
+                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase" data-i18n="hero.device">Device</span>
                         <div class="segmented-control">
-                            <button onclick="setDevice('desktop')" id="device-desktop" class="active">Desktop</button>
-                            <button onclick="setDevice('tablet')" id="device-tablet">Tablet</button>
-                            <button onclick="setDevice('mobile')" id="device-mobile">Mobile</button>
+                            <button onclick="setDevice('desktop')" id="device-desktop" class="active" data-i18n="hero.desktop">Desktop</button>
+                            <button onclick="setDevice('tablet')" id="device-tablet" data-i18n="hero.tablet">Tablet</button>
+                            <button onclick="setDevice('mobile')" id="device-mobile" data-i18n="hero.mobile">Mobile</button>
                         </div>
                     </div>
 
                     <div class="flex items-center justify-between gap-4">
-                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase">Capture</span>
+                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase" data-i18n="hero.capture">Capture</span>
                         <div class="segmented-control">
-                            <button onclick="setFullPage(false)" id="fullpage-viewport" class="active">Viewport</button>
-                            <button onclick="setFullPage(true)" id="fullpage-full">Full Page</button>
+                            <button onclick="setFullPage(false)" id="fullpage-viewport" class="active" data-i18n="hero.viewport">Viewport</button>
+                            <button onclick="setFullPage(true)" id="fullpage-full" data-i18n="hero.fullPage">Full Page</button>
                         </div>
                     </div>
                     
                     <button onclick="roastPage()" id="roast-btn" class="btn-primary w-full py-4 text-[16px] relative z-10">
-                        <span id="btn-text">Roast It</span>
+                        <span id="btn-text" data-i18n="hero.roastIt">Roast It</span>
                     </button>
                     
                     <div class="flex items-center justify-center">
-                        <button onclick="showExampleRoast()" class="text-[13px] text-cream-300/40 hover:text-cream-100 font-medium transition-colors">
+                        <button onclick="showExampleRoast()" class="text-[13px] text-cream-300/40 hover:text-cream-100 font-medium transition-colors" data-i18n="hero.seeExample">
                             See an example →
                         </button>
                     </div>
@@ -972,33 +991,33 @@
                 <div class="flex flex-col gap-5">
                     <div class="grid md:grid-cols-2 gap-4">
                         <div>
-                            <label for="compare-url1" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2">Your Page</label>
+                            <label for="compare-url1" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2" data-i18n="hero.yourPage">Your Page</label>
                             <input type="url" id="compare-url1" placeholder="https://your-page.com" class="input-dark w-full px-4 py-3.5">
                         </div>
                         <div>
-                            <label for="compare-url2" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2">Competitor</label>
+                            <label for="compare-url2" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2" data-i18n="hero.competitor">Competitor</label>
                             <input type="url" id="compare-url2" placeholder="https://competitor.com" class="input-dark w-full px-4 py-3.5">
                         </div>
                     </div>
                     
                     <div class="flex items-center justify-between gap-4">
-                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase">Device</span>
+                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase" data-i18n="hero.device">Device</span>
                         <div class="segmented-control">
-                            <button onclick="setDevice('desktop')" id="compare-device-desktop" class="active">Desktop</button>
-                            <button onclick="setDevice('tablet')" id="compare-device-tablet">Tablet</button>
-                            <button onclick="setDevice('mobile')" id="compare-device-mobile">Mobile</button>
+                            <button onclick="setDevice('desktop')" id="compare-device-desktop" class="active" data-i18n="hero.desktop">Desktop</button>
+                            <button onclick="setDevice('tablet')" id="compare-device-tablet" data-i18n="hero.tablet">Tablet</button>
+                            <button onclick="setDevice('mobile')" id="compare-device-mobile" data-i18n="hero.mobile">Mobile</button>
                         </div>
                     </div>
 
                     <div class="flex items-center justify-between gap-4">
-                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase">Capture</span>
+                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase" data-i18n="hero.capture">Capture</span>
                         <div class="segmented-control">
-                            <button onclick="setFullPage(false)" id="compare-fullpage-viewport" class="active">Viewport</button>
-                            <button onclick="setFullPage(true)" id="compare-fullpage-full">Full Page</button>
+                            <button onclick="setFullPage(false)" id="compare-fullpage-viewport" class="active" data-i18n="hero.viewport">Viewport</button>
+                            <button onclick="setFullPage(true)" id="compare-fullpage-full" data-i18n="hero.fullPage">Full Page</button>
                         </div>
                     </div>
                     
-                    <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-4 text-[16px]">
+                    <button onclick="comparePages()" id="compare-btn" class="btn-primary w-full py-4 text-[16px]" data-i18n="hero.comparePages">
                         Compare Pages
                     </button>
                 </div>
@@ -1007,7 +1026,7 @@
             <!-- Batch Roast Form -->
             <div id="form-batch" class="hidden card p-5 sm:p-7 max-w-xl mx-auto mb-4 text-left">
                 <div class="flex flex-col gap-4">
-                    <p class="text-[13px] text-cream-300/50">Up to three URLs — client audits, A/B variants, competitor sweeps.</p>
+                    <p class="text-[13px] text-cream-300/50" data-i18n="hero.batchHint">Up to three URLs — client audits, A/B variants, competitor sweeps.</p>
                     <div class="space-y-2.5">
                         <label for="batch-url-1" class="sr-only">URL 1</label>
                         <input type="url" id="batch-url-1" placeholder="https://page-one.com" class="input-dark w-full px-4 py-3.5">
@@ -1017,21 +1036,21 @@
                         <input type="url" id="batch-url-3" placeholder="https://page-three.com (optional)" class="input-dark w-full px-4 py-3.5">
                     </div>
                     <div class="flex items-center justify-between gap-4">
-                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase">Device</span>
+                        <span class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase" data-i18n="hero.device">Device</span>
                         <div class="segmented-control">
-                            <button onclick="setDevice('desktop')" id="batch-device-desktop" class="active">Desktop</button>
-                            <button onclick="setDevice('tablet')" id="batch-device-tablet">Tablet</button>
-                            <button onclick="setDevice('mobile')" id="batch-device-mobile">Mobile</button>
+                            <button onclick="setDevice('desktop')" id="batch-device-desktop" class="active" data-i18n="hero.desktop">Desktop</button>
+                            <button onclick="setDevice('tablet')" id="batch-device-tablet" data-i18n="hero.tablet">Tablet</button>
+                            <button onclick="setDevice('mobile')" id="batch-device-mobile" data-i18n="hero.mobile">Mobile</button>
                         </div>
                     </div>
-                    <button onclick="batchRoastPages()" id="batch-btn" class="btn-primary w-full py-4 text-[16px]">
+                    <button onclick="batchRoastPages()" id="batch-btn" class="btn-primary w-full py-4 text-[16px]" data-i18n="hero.roastAll">
                         Roast All Pages
                     </button>
                     <div id="batch-results" class="hidden space-y-3 pt-2 border-t border-white/[0.06]"></div>
                 </div>
             </div>
             
-            <p class="text-[12px] text-cream-300/30 tracking-wide">~30 seconds · free</p>
+            <p class="text-[12px] text-cream-300/30 tracking-wide" data-i18n="hero.freeNote">~30 seconds · free</p>
             <div id="rate-limit-warning" class="hidden mt-4 p-4 border border-red-500/25 rounded-xl text-red-400/90 text-[13px]">
                 <span id="rate-limit-message"></span>
             </div>
@@ -1065,24 +1084,24 @@
     <section class="py-20 px-6 border-t border-white/[0.05]">
         <div class="max-w-3xl mx-auto">
             <div class="text-center mb-14">
-                <h2 class="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-2 text-cream-50">How it works</h2>
-                <p class="text-cream-300/45 text-[15px]">URL in. Verdict out.</p>
+                <h2 class="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-2 text-cream-50" data-i18n="how.title">How it works</h2>
+                <p class="text-cream-300/45 text-[15px]" data-i18n="how.subtitle">URL in. Verdict out.</p>
             </div>
             <ol class="space-y-10 md:space-y-0 md:grid md:grid-cols-3 md:gap-10 list-none">
                 <li class="text-center md:text-left">
                     <span class="font-display text-4xl font-extrabold text-accent-orange/90 tracking-tightest">01</span>
-                    <h3 class="font-display text-[17px] font-semibold text-cream-100 mt-3 mb-1.5">Paste a URL</h3>
-                    <p class="text-[14px] text-cream-300/45 leading-relaxed">Desktop, tablet, or mobile. Viewport or full scroll.</p>
+                    <h3 class="font-display text-[17px] font-semibold text-cream-100 mt-3 mb-1.5" data-i18n="how.step1Title">Paste a URL</h3>
+                    <p class="text-[14px] text-cream-300/45 leading-relaxed" data-i18n="how.step1Body">Desktop, tablet, or mobile. Viewport or full scroll.</p>
                 </li>
                 <li class="text-center md:text-left">
                     <span class="font-display text-4xl font-extrabold text-accent-orange/90 tracking-tightest">02</span>
-                    <h3 class="font-display text-[17px] font-semibold text-cream-100 mt-3 mb-1.5">We capture &amp; score</h3>
-                    <p class="text-[14px] text-cream-300/45 leading-relaxed">Hero, CTA, trust, copy, design — plus SEO and speed.</p>
+                    <h3 class="font-display text-[17px] font-semibold text-cream-100 mt-3 mb-1.5" data-i18n="how.step2Title">We capture &amp; score</h3>
+                    <p class="text-[14px] text-cream-300/45 leading-relaxed" data-i18n="how.step2Body">Hero, CTA, trust, copy, design — plus SEO and speed.</p>
                 </li>
                 <li class="text-center md:text-left">
                     <span class="font-display text-4xl font-extrabold text-accent-orange/90 tracking-tightest">03</span>
-                    <h3 class="font-display text-[17px] font-semibold text-cream-100 mt-3 mb-1.5">Get the roast</h3>
-                    <p class="text-[14px] text-cream-300/45 leading-relaxed">Problems, fixes, heatmap, and quick wins you can ship.</p>
+                    <h3 class="font-display text-[17px] font-semibold text-cream-100 mt-3 mb-1.5" data-i18n="how.step3Title">Get the roast</h3>
+                    <p class="text-[14px] text-cream-300/45 leading-relaxed" data-i18n="how.step3Body">Problems, fixes, heatmap, and quick wins you can ship.</p>
                 </li>
             </ol>
         </div>
@@ -4073,7 +4092,7 @@
                     <div class="mb-3">
                         <span class="font-display font-bold text-[16px] tracking-tight text-cream-50">Roast My Landing Page</span>
                     </div>
-                    <p class="text-[12px] text-cream-300/40 leading-relaxed mb-4">Conversion scores, SEO, heatmaps, and benchmarks — free, no signup.</p>
+                    <p class="text-[12px] text-cream-300/40 leading-relaxed mb-4" data-i18n="footer.blurb">Conversion scores, SEO, heatmaps, and benchmarks — free, no signup.</p>
                     <!-- Social -->
                     <div class="flex items-center gap-3">
                         <a href="https://x.com/hegdedarsh" target="_blank" rel="noopener" class="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-[#6e6e73] hover:text-white hover:border-white/[0.12] transition-all" title="@hegdedarsh on X">
@@ -4087,40 +4106,40 @@
 
                 <!-- Product -->
                 <div>
-                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3">Product</h4>
+                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3" data-i18n="footer.product">Product</h4>
                     <ul class="space-y-2">
-                        <li><a href="#roast" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Roast a Page</a></li>
-                        <li><a href="#roast" onclick="document.querySelector('[data-tab=compare]')?.click()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Compare Pages</a></li>
-                        <li><a href="/gallery" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Gallery</a></li>
-                        <li><a href="/pricing" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Pricing</a></li>
-                        <li><a href="#leaderboard-section" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Leaderboard</a></li>
-                        <li><button onclick="showChangelogModal()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">What's New</button></li>
+                        <li><a href="#roast" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.roastAPage">Roast a Page</a></li>
+                        <li><a href="#roast" onclick="document.querySelector('[data-tab=compare]')?.click()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.comparePages">Compare Pages</a></li>
+                        <li><a href="/gallery" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.gallery">Gallery</a></li>
+                        <li><a href="/pricing" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.pricing">Pricing</a></li>
+                        <li><a href="#leaderboard-section" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.leaderboard">Leaderboard</a></li>
+                        <li><button onclick="showChangelogModal()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.whatsNew">What's New</button></li>
                     </ul>
                 </div>
 
                 <!-- Analysis -->
                 <div>
-                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3">Analysis</h4>
+                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3" data-i18n="footer.analysis">Analysis</h4>
                     <ul class="space-y-2">
-                        <li><span class="text-[13px] text-[#6e6e73]">Conversion Score</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">SEO Audit</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">Performance Metrics</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">AI Heatmap</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">Accessibility</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">Industry Benchmarks</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.conversionScore">Conversion Score</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.seoAudit">SEO Audit</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.performanceMetrics">Performance Metrics</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.aiHeatmap">AI Heatmap</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.accessibility">Accessibility</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.industryBenchmarks">Industry Benchmarks</span></li>
                     </ul>
                 </div>
 
                 <!-- About -->
                 <div>
-                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3">About</h4>
+                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3" data-i18n="footer.about">About</h4>
                     <ul class="space-y-2">
-                        <li><span class="text-[13px] text-[#6e6e73]">100% Free</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">No Signup Required</span></li>
-                        <li><span class="text-[13px] text-[#6e6e73]">Open Analysis</span></li>
-                        <li><a href="/roast/self-roast-01" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Our Own Roast</a></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.free">100% Free</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.noSignup">No Signup Required</span></li>
+                        <li><span class="text-[13px] text-[#6e6e73]" data-i18n="footer.openAnalysis">Open Analysis</span></li>
+                        <li><a href="/roast/self-roast-01" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors" data-i18n="footer.ourOwnRoast">Our Own Roast</a></li>
                     </ul>
-                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3 mt-5">Contact</h4>
+                    <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3 mt-5" data-i18n="footer.contact">Contact</h4>
                     <ul class="space-y-2">
                         <li><a href="mailto:contentcreatordarsh@gmail.com" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>Email</a></li>
                         <li><a href="https://x.com/hegdedarsh" target="_blank" rel="noopener" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@hegdedarsh</a></li>
@@ -4131,7 +4150,7 @@
             <!-- Built on Cloudflare -->
             <div class="flex flex-col md:flex-row items-center justify-between gap-4 py-6 border-t border-white/[0.04] mb-6">
                 <div class="flex items-center gap-2">
-                    <span class="text-[11px] text-[#424245]">Built on</span>
+                    <span class="text-[11px] text-[#424245]" data-i18n="footer.builtOn">Built on</span>
                     <svg class="w-5 h-5" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M103.5 83.4C103 83.1 102.5 83 102 83H31.5C31.1 83 30.7 83.2 30.5 83.5C30.3 83.8 30.3 84.2 30.4 84.5C31.7 87.7 34.8 89.8 38.3 89.9H104.8C105.2 89.9 105.6 89.7 105.8 89.4C106 89.1 106.1 88.7 106 88.3C105.3 85.4 103.5 83.4 103.5 83.4Z" fill="#F6821F"/>
                         <path d="M88.8 44.3C88.5 44.1 88.1 44 87.7 44.1C87.3 44.2 87 44.4 86.8 44.8C85.6 47.1 83.3 48.6 80.7 48.7C78.1 48.8 75.6 47.5 74.3 45.3C74.1 44.9 73.8 44.7 73.4 44.6C73 44.5 72.6 44.6 72.3 44.8C67.6 48.3 64.8 53.8 64.8 59.7V60.1C64.8 60.6 65.1 61 65.5 61.2C69.4 63.2 72.2 66.9 73 71.2C73.1 71.7 73.5 72.1 74 72.1H102.8C103.2 72.1 103.6 71.9 103.8 71.5C104 71.1 104.1 70.7 103.9 70.3C100.1 54.7 88.8 44.3 88.8 44.3Z" fill="#FBAD41"/>
@@ -4150,7 +4169,7 @@
 
             <!-- Copyright -->
             <div class="text-center text-[11px] text-[#424245]">
-<span>&copy; 2026 Roast My Landing Page · Built on the edge</span>
+<span data-i18n="footer.copyright">&copy; 2026 Roast My Landing Page · Built on the edge</span>
             </div>
         </div>
     </footer>
@@ -5234,10 +5253,10 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         async function roastPage() {
             const urlInput = document.getElementById('url-input');
             let url = urlInput.value.trim();
-            if (!url) return showToast('Please enter a URL', 'error');
+            if (!url) return showToast((window.RMLP_I18N?.t('toast.enterUrl') || 'Please enter a URL'), 'error');
             if (!url.startsWith('http')) url = 'https://' + url;
             urlInput.value = url;
-            try { new URL(url); } catch { return showToast('Invalid URL', 'error'); }
+            try { new URL(url); } catch { return showToast((window.RMLP_I18N?.t('toast.invalidUrl') || 'Invalid URL'), 'error'); }
 
             // Show simple loading modal
             showLoadingModal();
@@ -5325,7 +5344,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         async function comparePages() {
             const url1 = document.getElementById('compare-url1').value.trim();
             const url2 = document.getElementById('compare-url2').value.trim();
-            if (!url1 || !url2) return showToast('Enter both URLs', 'error');
+            if (!url1 || !url2) return showToast((window.RMLP_I18N?.t('toast.enterBothUrls') || 'Enter both URLs'), 'error');
             
             // Add https if missing
             const finalUrl1 = url1.startsWith('http') ? url1 : 'https://' + url1;
@@ -9595,6 +9614,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             if (window.location.hash === '#batch') showTab('batch');
         });
     </script>
+    <script src="/i18n.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
 </body>
