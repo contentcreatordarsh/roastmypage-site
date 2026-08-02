@@ -1030,6 +1030,35 @@
                     <div id="batch-results" class="hidden space-y-3 pt-2 border-t border-white/[0.06]"></div>
                 </div>
             </div>
+
+            <!-- Scheduled Re-roasts -->
+            <div id="schedule-panel" class="card p-5 sm:p-6 max-w-xl mx-auto mb-4 text-left">
+                <div class="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                        <h2 class="font-display text-[17px] font-semibold text-cream-100">Scheduled re-roasts</h2>
+                        <p class="text-[13px] text-cream-300/45 mt-1">Get an email reminder to re-check a page weekly or monthly.</p>
+                    </div>
+                    <span class="px-2 py-1 bg-orange-500/15 text-orange-400 rounded-lg text-[11px] font-semibold uppercase tracking-wide">Watch</span>
+                </div>
+                <div class="grid sm:grid-cols-[1fr_auto] gap-3 mb-3">
+                    <div class="space-y-2">
+                        <label for="schedule-email" class="sr-only">Reminder email</label>
+                        <input type="email" id="schedule-email" placeholder="you@example.com" class="input-dark w-full px-4 py-3">
+                    </div>
+                    <div class="flex gap-2">
+                        <label for="schedule-cadence" class="sr-only">Cadence</label>
+                        <select id="schedule-cadence" class="input-dark px-3 py-3 text-sm">
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
+                        <button onclick="saveSchedule()" id="schedule-save-btn" class="px-4 py-3 bg-white/[0.06] hover:bg-white/[0.1] rounded-xl text-sm font-semibold transition-colors whitespace-nowrap">Schedule</button>
+                    </div>
+                </div>
+                <p class="text-[12px] text-cream-300/35 mb-4">Uses the URL in the active roast field above. Reminder links reopen the roaster with that URL prefilled.</p>
+                <div id="schedule-list" class="space-y-2">
+                    <div class="text-[13px] text-[#6e6e73]">Loading schedules...</div>
+                </div>
+            </div>
             
             <p class="text-[12px] text-cream-300/30 tracking-wide">~30 seconds · free</p>
             <div id="rate-limit-warning" class="hidden mt-4 p-4 border border-red-500/25 rounded-xl text-red-400/90 text-[13px]">
@@ -4249,6 +4278,7 @@
         let currentTab = 'single';
         let fullPageMode = false;
         const HISTORY_KEY = 'roast_history';
+        const SCHEDULE_OWNER_KEY = 'roast_schedule_owner_key';
         
         // Queue state
         let queueCountdown = 0;
@@ -7690,6 +7720,123 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         function clearHistory() { if (confirm('Clear history?')) { localStorage.removeItem(HISTORY_KEY); showHistoryModal(); showToast('Cleared', 'success'); } }
         function formatDate(d) { const diff = (Date.now() - new Date(d)) / 1000; if (diff < 60) return 'Just now'; if (diff < 3600) return Math.floor(diff/60) + 'm ago'; if (diff < 86400) return Math.floor(diff/3600) + 'h ago'; return Math.floor(diff/86400) + 'd ago'; }
 
+        // Scheduled re-roast reminders
+        function getScheduleOwnerKey() {
+            let key = localStorage.getItem(SCHEDULE_OWNER_KEY);
+            if (key && /^[A-Za-z0-9_-]{16,128}$/.test(key)) return key;
+            const bytes = new Uint8Array(24);
+            crypto.getRandomValues(bytes);
+            key = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+            localStorage.setItem(SCHEDULE_OWNER_KEY, key);
+            return key;
+        }
+
+        function getScheduleUrl() {
+            const input = document.getElementById('url-input');
+            let url = (input?.value || '').trim();
+            if (!url && currentRoast?.url) url = currentRoast.url;
+            if (!url) return '';
+            if (!url.startsWith('http')) url = 'https://' + url;
+            return url;
+        }
+
+        function renderSchedules(schedules) {
+            const list = document.getElementById('schedule-list');
+            if (!list) return;
+            if (!schedules || schedules.length === 0) {
+                list.innerHTML = '<div class="text-[13px] text-[#6e6e73] p-3 bg-white/[0.02] rounded-xl">No scheduled reminders yet.</div>';
+                return;
+            }
+            list.innerHTML = schedules.map(s => {
+                let host = s.url;
+                try { host = new URL(s.url).hostname.replace('www.', ''); } catch {}
+                const next = s.nextRunAt ? new Date(s.nextRunAt.replace(' ', 'T') + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'soon';
+                return `
+                    <div class="flex items-center justify-between gap-3 p-3 bg-white/[0.03] border border-white/[0.04] rounded-xl">
+                        <div class="min-w-0">
+                            <div class="text-sm text-[#d1d1d6] truncate">${sanitizeHtml(host)}</div>
+                            <div class="text-[12px] text-[#6e6e73]">${sanitizeHtml(s.cadence)} reminder - next ${sanitizeHtml(next)}</div>
+                        </div>
+                        <button onclick="deleteSchedule('${sanitizeHtml(s.id)}')" class="px-3 py-1.5 text-xs rounded-lg bg-white/[0.04] hover:bg-red-500/15 text-[#a1a1a6] hover:text-red-300 transition-colors">Delete</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadSchedules() {
+            const list = document.getElementById('schedule-list');
+            if (!list) return;
+            try {
+                const ownerKey = getScheduleOwnerKey();
+                const res = await fetch(`/api/schedules?ownerKey=${encodeURIComponent(ownerKey)}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load schedules');
+                renderSchedules(data.schedules || []);
+            } catch (err) {
+                list.innerHTML = '<div class="text-[13px] text-red-400 p-3 bg-red-500/10 rounded-xl">Failed to load schedules</div>';
+            }
+        }
+
+        async function saveSchedule() {
+            const btn = document.getElementById('schedule-save-btn');
+            const emailInput = document.getElementById('schedule-email');
+            const cadenceInput = document.getElementById('schedule-cadence');
+            const url = getScheduleUrl();
+            const email = (emailInput?.value || localStorage.getItem('userEmail') || '').trim();
+            if (!url) return showToast('Enter a URL to schedule', 'error');
+            if (!email) return showToast('Enter an email for reminders', 'error');
+            try {
+                new URL(url);
+            } catch {
+                return showToast('Invalid URL', 'error');
+            }
+
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Saving...';
+            }
+            try {
+                const res = await fetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ownerKey: getScheduleOwnerKey(),
+                        url,
+                        email,
+                        cadence: cadenceInput?.value || 'weekly',
+                        lastRoastId: currentRoast?.id || null
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to save schedule');
+                localStorage.setItem('userEmail', email);
+                if (emailInput) emailInput.value = email;
+                showToast('Reminder scheduled', 'success');
+                loadSchedules();
+            } catch (err) {
+                showToast(err.message || 'Failed to save schedule', 'error');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Schedule';
+                }
+            }
+        }
+
+        async function deleteSchedule(id) {
+            try {
+                const res = await fetch(`/api/schedules?id=${encodeURIComponent(id)}&ownerKey=${encodeURIComponent(getScheduleOwnerKey())}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to delete schedule');
+                showToast(data.success ? 'Schedule deleted' : 'Schedule not found', data.success ? 'success' : 'info');
+                loadSchedules();
+            } catch (err) {
+                showToast(err.message || 'Failed to delete schedule', 'error');
+            }
+        }
+
         // Email gate for PDF export
         function showEmailGateModal() { document.getElementById('email-gate-modal').classList.remove('hidden'); }
         function hideEmailGateModal() { document.getElementById('email-gate-modal').classList.add('hidden'); }
@@ -9096,6 +9243,18 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             const params = new URLSearchParams(location.search);
             const roastId = params.get('roast');
             if (roastId) loadFromHistory(roastId);
+            const reminderUrl = params.get('url');
+            if (reminderUrl) {
+                showTab('single');
+                const urlInput = document.getElementById('url-input');
+                if (urlInput) urlInput.value = reminderUrl;
+                setTimeout(() => document.getElementById('roast')?.scrollIntoView({ behavior: 'smooth' }), 100);
+            }
+            const savedScheduleEmail = localStorage.getItem('userEmail');
+            if (savedScheduleEmail && document.getElementById('schedule-email')) {
+                document.getElementById('schedule-email').value = savedScheduleEmail;
+            }
+            loadSchedules();
             
             // Challenge a Friend: ?challenge=url1,url2
             const challenge = params.get('challenge');

@@ -44,6 +44,10 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    handleSchedulesRequest, processDueSchedules
+} from './schedules.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -66,6 +70,9 @@ export default {
       if (reqOrigin && !allowedOrigins.includes(reqOrigin)) {
         return Response.json({ error: "Forbidden: origin not allowed" }, { status: 403, headers: corsHeaders });
       }
+    }
+    if (url.pathname === "/api/schedules" && ["GET", "POST", "DELETE"].includes(request.method)) {
+      return handleSchedulesRequest(request, env22, corsHeaders);
     }
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
@@ -3388,6 +3395,13 @@ data: ${JSON.stringify(data)}
       return env22.ASSETS.fetch(request);
     }
     return new Response("Not Found", { status: 404 });
+  },
+
+  async scheduled(_controller, env22, ctx) {
+    ctx.waitUntil((async () => {
+      const result = await processDueSchedules(env22);
+      console.log(`Processed ${result.processed.length} due roast schedules`);
+    })());
   }
 
 };
