@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS feedback (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS opt_outs (
+  id TEXT PRIMARY KEY,
+  url TEXT,
+  url_hash TEXT,
+  email TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_opt_outs_url_hash ON opt_outs(url_hash);
+CREATE INDEX IF NOT EXISTS idx_opt_outs_created_at ON opt_outs(created_at);
+
 -- API v1 daily quotas are kept in D1 so increments and limit checks happen
 -- atomically. Old days remain queryable for audits and can be pruned safely.
 CREATE TABLE IF NOT EXISTS api_v1_counters (

@@ -44,6 +44,10 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    OptOutValidationError, processOptOutRequest
+} from './optout.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -766,6 +770,34 @@ data: ${JSON.stringify(data)}
       } catch (error32) {
         safeLogError("Stream roast failed:", error32);
         return Response.json({ error: error32.message || "Analysis failed" }, { status: 500, headers: corsHeaders });
+      }
+    }
+    if (url.pathname === "/api/opt-out" && request.method === "POST") {
+      try {
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return Response.json({ error: "Invalid JSON body" }, { status: 400, headers: corsHeaders });
+        }
+        const optOutIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const optOutIpHash = await hashIp(optOutIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const optOutLimit = await checkOperationRateLimit(env22, optOutIpHash, "optout");
+        if (!optOutLimit.allowed) {
+          return Response.json(
+            { error: "Too many removal requests. Please try again later.", retryAfter: optOutLimit.resetIn },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": optOutLimit.resetIn.toString() } }
+          );
+        }
+        const result = await processOptOutRequest(env22, body);
+        const message = result.deleted > 0 ? "Matching roast data has been removed." : "No matching roast was found. It may have already been removed.";
+        return Response.json({ ...result, message }, { headers: corsHeaders });
+      } catch (error32) {
+        if (error32 instanceof OptOutValidationError) {
+          return Response.json({ error: error32.message }, { status: error32.status, headers: corsHeaders });
+        }
+        console.error("Opt-out error:", error32);
+        return Response.json({ error: "Failed to process removal request" }, { status: 500, headers: corsHeaders });
       }
     }
     if (url.pathname.startsWith("/api/screenshot/")) {
