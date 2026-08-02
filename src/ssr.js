@@ -21,7 +21,7 @@ export function renderRoastPage(params) {
         ogTitle: ogTitleProp, ogDesc: ogDescProp, ogImage: ogImageProp,
         pageUrl: pageUrlProp, createdAt: createdAtProp,
         industrySampleSize: industrySampleSizeProp, heatmap,
-        seoDetailsHtml, perfDetailsHtml
+        seoDetailsHtml, perfDetailsHtml, pageLanguage
     } = params;
 
     // Use passed-in OG/meta values or compute fallbacks
@@ -46,6 +46,13 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const detectedLanguage = pageLanguage || seo?.pageLanguage || null;
+    const languageBadgeHtml = detectedLanguage?.code ? (() => {
+      const languageName = detectedLanguage.name || detectedLanguage.code;
+      const languageCode = detectedLanguage.code ? ` (${detectedLanguage.code})` : "";
+      const source = detectedLanguage.source ? `Detected from ${detectedLanguage.source}` : "Detected page language";
+      return `<span title="${escapeHtml(source)}">Language: ${escapeHtml(languageName)}${escapeHtml(languageCode)}</span>`;
+    })() : "";
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -140,6 +147,7 @@ export function renderRoastPage(params) {
     <div class="inline-flex items-center gap-2 text-xs text-[#6e6e73] bg-white/[0.03] border border-white/[0.06] rounded-full px-4 py-1.5 mb-4">
       <span>Roasted on ${dateStr}</span>
       ${roast.country && roast.country !== "XX" ? `<span>from ${roast.country}</span>` : ""}
+      ${languageBadgeHtml}
     </div>
     <h1 class="text-2xl md:text-3xl font-bold mb-2">${escapeHtml(hostname)}</h1>
     <a href="${escapeHtml(roast.url)}" target="_blank" rel="noopener" class="text-sm text-[#6e6e73] hover:text-[#d1d1d6] transition-colors break-all">${escapeHtml(roast.url)}</a>

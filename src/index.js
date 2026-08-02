@@ -118,7 +118,7 @@ export default {
             const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
             const [_, analysisResult] = await Promise.all([
               env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, { video: pageData.video })
+              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, { video: pageData.video, pageLanguage: pageData.pageLanguage })
             ]);
             console.log(`[${Date.now() - startTime}ms] AI analysis complete`);
             const { analysis, heatmap } = analysisResult;
@@ -173,6 +173,7 @@ export default {
               seo: pageData.seo,
               performance: pageData.performance,
               video: pageData.video || pageData.seo?.video || null,
+              pageLanguage: pageData.pageLanguage,
               heatmap: enhancedHeatmap,
               pageDimensions: pageData.pageDimensions,
               industry,
@@ -271,7 +272,7 @@ export default {
             id1 = generateId();
             if (page1.screenshot.length > CONFIG.MAX_SCREENSHOT_BYTES) throw new Error("Screenshot too large");
             const base64_1 = uint8ArrayToBase64(page1.screenshot);
-            analysis1 = await analyzeWithVisionAndHeatmap(env22, base64_1, url1);
+            analysis1 = await analyzeWithVisionAndHeatmap(env22, base64_1, url1, fullPage, 1, { video: page1.video, pageLanguage: page1.pageLanguage });
             await env22.SCREENSHOTS.put(`screenshots/${id1}.jpg`, page1.screenshot, { httpMetadata: { contentType: "image/jpeg" } });
           }
           if (cached2) {
@@ -281,7 +282,7 @@ export default {
             id2 = generateId();
             if (page2.screenshot.length > CONFIG.MAX_SCREENSHOT_BYTES) throw new Error("Screenshot too large");
             const base64_2 = uint8ArrayToBase64(page2.screenshot);
-            analysis2 = await analyzeWithVisionAndHeatmap(env22, base64_2, url2);
+            analysis2 = await analyzeWithVisionAndHeatmap(env22, base64_2, url2, fullPage, 1, { video: page2.video, pageLanguage: page2.pageLanguage });
             await env22.SCREENSHOTS.put(`screenshots/${id2}.jpg`, page2.screenshot, { httpMetadata: { contentType: "image/jpeg" } });
           }
           const pageData1 = page1 || { seo: cached1?.seo, performance: cached1?.performance, screenshot: null };
@@ -473,6 +474,7 @@ export default {
               sections: analysis1.analysis.sections,
               seo: pageData1.seo,
               performance: pageData1.performance,
+              pageLanguage: pageData1.pageLanguage || pageData1.seo?.pageLanguage || null,
               heatmap: analysis1.heatmap,
               quickWins: analysis1.analysis.quickWins
             },
@@ -485,6 +487,7 @@ export default {
               sections: analysis2.analysis.sections,
               seo: pageData2.seo,
               performance: pageData2.performance,
+              pageLanguage: pageData2.pageLanguage || pageData2.seo?.pageLanguage || null,
               heatmap: analysis2.heatmap,
               quickWins: analysis2.analysis.quickWins
             },
@@ -565,7 +568,7 @@ export default {
             const screenshotKey = `screenshots/${roastId}.jpg`;
             const [_, analysisResult] = await Promise.all([
               env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, { video: pageData.video })
+              analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, { video: pageData.video, pageLanguage: pageData.pageLanguage })
             ]);
             const { analysis, heatmap } = analysisResult;
             const formattedRoast = formatRoast(analysis, targetUrl);
@@ -603,6 +606,7 @@ export default {
               cached: false,
               device,
               seo: { score: pageData.seo.score, issues: pageData.seo.issues },
+              pageLanguage: pageData.pageLanguage,
               performance: { score: pageData.performance.score, loadTime: pageData.performance.loadTime }
             });
             await sleep(1e3);
@@ -693,7 +697,7 @@ data: ${JSON.stringify(data)}
                 await sendEvent("progress", { step: "upload", message: "Saving screenshot...", progress: 40 });
                 await env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } });
                 await sendEvent("progress", { step: "analyze", message: "AI analyzing your page...", progress: 50 });
-                const { analysis, heatmap } = await analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, { video: pageData.video });
+                const { analysis, heatmap } = await analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, fullPage, 1, { video: pageData.video, pageLanguage: pageData.pageLanguage });
                 await sendEvent("progress", { step: "heatmap", message: "Generating attention heatmap...", progress: 75 });
                 const enhancedHeatmap = {
                   ...heatmap,
@@ -745,6 +749,7 @@ data: ${JSON.stringify(data)}
                   seo: pageData.seo,
                   performance: pageData.performance,
                   video: pageData.video || pageData.seo?.video || null,
+                  pageLanguage: pageData.pageLanguage,
                   heatmap: enhancedHeatmap,
                   pageDimensions: pageData.pageDimensions,
                   industry: analysis.industry || "other",
@@ -2630,6 +2635,7 @@ data: ${JSON.stringify(data)}
             industry: cachedResult.industry || "other",
             seo: cachedResult.seo || null,
             performance: cachedResult.performance || null,
+            pageLanguage: cachedResult.pageLanguage || cachedResult.seo?.pageLanguage || null,
             heatmap: cachedResult.heatmap || null,
             screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${cachedResult.id}`,
             shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${cachedResult.id}`,
@@ -2658,7 +2664,7 @@ data: ${JSON.stringify(data)}
         const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
         const [_, analysisResult] = await Promise.all([
           env22.SCREENSHOTS.put(screenshotKey, pageData.screenshot, { httpMetadata: { contentType: "image/jpeg" } }),
-          analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, { video: pageData.video })
+          analyzeWithVisionAndHeatmap(env22, base64Screenshot, targetUrl, false, 1, { video: pageData.video, pageLanguage: pageData.pageLanguage })
         ]);
         const { analysis, heatmap } = analysisResult;
         const formattedRoast = formatRoast(analysis, targetUrl);
@@ -2709,6 +2715,7 @@ data: ${JSON.stringify(data)}
           seo: pageData.seo || null,
           performance: pageData.performance || null,
           video: pageData.video || pageData.seo?.video || null,
+          pageLanguage: pageData.pageLanguage,
           heatmap: enhancedHeatmap,
           screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${roastId}`,
           shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${roastId}`,
@@ -2860,6 +2867,7 @@ data: ${JSON.stringify(data)}
         if (roast.heatmap_data) heatmap = JSON.parse(roast.heatmap_data);
       } catch {
       }
+      const pageLanguage = seo?.pageLanguage || null;
       const roastIndustryKey = resolveIndustry(roast.industry);
       const industryBench = INDUSTRY_BENCHMARKS[roastIndustryKey] || INDUSTRY_BENCHMARKS.other;
       const industryAvgScore = Number(((industryBench.scores.hero + industryBench.scores.cta + industryBench.scores.trust + industryBench.scores.copy + industryBench.scores.design) / 5).toFixed(1));
@@ -3317,7 +3325,7 @@ data: ${JSON.stringify(data)}
           quickWins, seo, performance22, BASE_URL, screenshotUrl, heatmapDotsHtml,
           heatmapSidebarHtml, a11y, a11yDetailsHtml, verdictText, scoreLabel,
           ogTitle, ogDesc, ogImage, pageUrl, createdAt, industrySampleSize, heatmap,
-          seoDetailsHtml, perfDetailsHtml
+          seoDetailsHtml, perfDetailsHtml, pageLanguage
         });
       return new Response(html, {
         headers: {

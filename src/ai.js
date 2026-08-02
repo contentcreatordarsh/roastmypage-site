@@ -1,10 +1,28 @@
 import { CONFIG, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, RUBRIC_CRITERIA } from './config.js';
 import { uint8ArrayToBase64, hashUrl, withTimeout } from './utils.js';
 import { videoPromptNote } from './video.js';
+import { isHighConfidenceLanguage } from './language.js';
 
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
+
+function languagePromptNote(pageLanguage) {
+  if (!isHighConfidenceLanguage(pageLanguage)) return "";
+
+  const languageName = pageLanguage.name || pageLanguage.code;
+  const isEnglish = pageLanguage.code.toLowerCase().startsWith("en");
+  if (isEnglish) {
+    return `\nPage language detected: ${languageName} (${pageLanguage.code}). Write the critique in English.\n`;
+  }
+
+  return `
+Page language detected: ${languageName} (${pageLanguage.code}) with high confidence from ${pageLanguage.source}.
+Write human-facing critique text in ${languageName} when possible.
+Keep all structural markers, JSON keys, category names, score labels, and markdown headings in English so the report parser can read them.
+Required English markers include: overallScore, scores, hero, cta, trust, copy, design, Problem, Fix, Quick Wins, Verdict, Industry.
+Scores must remain numeric values like 7/10.`;
+}
 
 function parseMarkdownResponse(text, isFullPage) {
   try {
@@ -197,6 +215,7 @@ async function analyzeWithVisionAndHeatmap(
       throw new Error("AI vision analysis timed out");
     }
     const videoNote = videoPromptNote(options.video);
+    const pageLanguageNote = languagePromptNote(options.pageLanguage);
     const prompt = `Analyze this landing page screenshot as a conversion optimization expert. Rate each category 1-10 and CALIBRATE carefully using the full range:
 
 - 9-10: Exceptional, best-in-class execution (rare).
@@ -213,6 +232,7 @@ Industry options: saas, ecommerce, agency, fintech, health, education, media, st
 For each category give: score, main problem, suggested fix.
 Also provide: overall score, 3 quick wins, verdict sentence, industry classification.
 ${videoNote}
+${pageLanguageNote}
 
 Respond with your analysis.`;
     let response;

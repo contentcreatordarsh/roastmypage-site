@@ -1430,6 +1430,7 @@
                 <p id="results-url" class="text-[#6e6e73] text-[13px]"></p>
                 <div class="flex justify-center gap-2 mt-3 flex-wrap items-center">
                     <span id="device-badge" class="px-3 py-1 bg-white/[0.05] border border-white/[0.04] rounded-full text-[11px] text-[#a1a1a6]"></span>
+                    <span id="language-badge" class="hidden px-3 py-1 bg-emerald-500/[0.08] border border-emerald-500/20 rounded-full text-[11px] text-emerald-300"></span>
                     <span id="cache-badge" class="hidden px-3 py-1 bg-blue-500/[0.08] border border-blue-500/20 rounded-full text-[11px] text-blue-400">Cached</span>
                     <span id="improvement-badge" class="hidden px-3 py-1 rounded-full text-[11px] font-medium"></span>
                     <span id="video-badge" class="hidden px-3 py-1 bg-orange-500/[0.1] border border-orange-500/25 rounded-full text-[11px] text-orange-300">Video detected</span>
@@ -5543,6 +5544,19 @@ Your landing page is like a first date where you talk about yourself for 45 minu
 
             document.getElementById('results-url').textContent = data.url;
             document.getElementById('device-badge').textContent = (data.device || 'desktop').toUpperCase();
+            const languageBadge = document.getElementById('language-badge');
+            const pageLanguage = data.pageLanguage || data.seo?.pageLanguage;
+            if (languageBadge && pageLanguage?.code) {
+                const languageName = pageLanguage.name || pageLanguage.code;
+                const languageCode = pageLanguage.code ? ` (${pageLanguage.code})` : '';
+                languageBadge.textContent = `Language: ${languageName}${languageCode}`;
+                languageBadge.title = pageLanguage.source ? `Detected from ${pageLanguage.source}` : 'Detected page language';
+                languageBadge.classList.remove('hidden');
+            } else if (languageBadge) {
+                languageBadge.textContent = '';
+                languageBadge.title = '';
+                languageBadge.classList.add('hidden');
+            }
             document.getElementById('cache-badge').classList.toggle('hidden', !isCached);
             renderVideoAnalysis(data.video || data.seo?.video);
 
