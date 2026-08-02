@@ -37,6 +37,8 @@ const CONFIG = {
   // Feedback submissions per hour
   RATE_LIMIT_SUBSCRIBE_MAX: 10,
   // Email subscribe per hour
+  RATE_LIMIT_ANNOTATION_MAX: 60,
+  // Finding annotation writes/deletes per hour
   RATE_LIMIT_THREAT_MAX: 10,
   // Threat scans per hour
   RATE_LIMIT_WINDOW_MINUTES: 60,
