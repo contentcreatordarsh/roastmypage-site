@@ -3,6 +3,7 @@ import { VIEWPORTS, CONFIG } from './config.js';
 import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
+import { analyzeVideoSignals } from './video.js';
 
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;
@@ -117,6 +118,67 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           a11y.score -= Math.min(emptyButtons.length * 5, 15);
         }
         a11y.score = Math.max(0, a11y.score);
+
+        // #63 — collect video / embed signals for conversion + a11y + perf analysis
+        const viewportH = window.innerHeight || 800;
+        const heroCutoff = viewportH * 1.15;
+        const items = [];
+        document.querySelectorAll("video").forEach((v, idx) => {
+          if (idx >= 6) return;
+          const rect = v.getBoundingClientRect();
+          const tracks = Array.from(v.querySelectorAll("track")).map((t) => (t.getAttribute("kind") || "").toLowerCase());
+          const hasCaptions = tracks.some((k) => k === "captions" || k === "subtitles");
+          items.push({
+            kind: "video",
+            provider: "html5",
+            autoplay: v.hasAttribute("autoplay") || v.autoplay === true,
+            muted: v.hasAttribute("muted") || v.muted === true,
+            loop: v.hasAttribute("loop") || v.loop === true,
+            controls: v.hasAttribute("controls") || v.controls === true,
+            playsInline: v.hasAttribute("playsinline") || v.playsInline === true,
+            poster: v.getAttribute("poster") || "",
+            preload: (v.getAttribute("preload") || "metadata").toLowerCase(),
+            hasCaptions,
+            aboveFold: rect.top < heroCutoff && rect.bottom > 0,
+            inHero: rect.top < viewportH * 0.85 && rect.height >= Math.min(180, viewportH * 0.25),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          });
+        });
+        const embedRe = /(youtube\.com|youtube-nocookie\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|wistia\.(com|net)|fast\.wistia|loom\.com\/embed|vidyard\.com|cloudinary\.com\/.*video)/i;
+        document.querySelectorAll("iframe[src]").forEach((frame, idx) => {
+          if (idx >= 8) return;
+          const src = frame.getAttribute("src") || "";
+          if (!embedRe.test(src)) return;
+          const rect = frame.getBoundingClientRect();
+          let provider = "embed";
+          if (/youtube|youtu\.be/i.test(src)) provider = "youtube";
+          else if (/vimeo/i.test(src)) provider = "vimeo";
+          else if (/wistia/i.test(src)) provider = "wistia";
+          else if (/loom/i.test(src)) provider = "loom";
+          else if (/vidyard/i.test(src)) provider = "vidyard";
+          const autoplay = /[?&]autoplay=1/i.test(src) || /autoplay=true/i.test(src);
+          const muted = /[?&]mute=1/i.test(src) || /muted=1/i.test(src) || /mute=true/i.test(src);
+          items.push({
+            kind: "embed",
+            provider,
+            src: src.slice(0, 180),
+            title: frame.getAttribute("title") || "",
+            autoplay,
+            muted: muted || autoplay, // embeds usually need mute for autoplay
+            loop: /loop=1/i.test(src),
+            controls: true,
+            playsInline: true,
+            poster: "",
+            preload: "unknown",
+            hasCaptions: null,
+            aboveFold: rect.top < heroCutoff && rect.bottom > 0,
+            inHero: rect.top < viewportH * 0.85 && rect.height >= Math.min(180, viewportH * 0.25),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          });
+        });
+
         return {
           title: title22,
           metaDescription: metaDesc,
@@ -124,7 +186,8 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           h1Count: h1Elements.length,
           h2Count,
           imgWithoutAlt: imgsWithoutAlt,
-          accessibility: a11y
+          accessibility: a11y,
+          videoRaw: { count: items.length, items }
         };
       });
       let perfData = {
@@ -326,6 +389,34 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         perfScore -= 10;
         perfRecommendations.push("Use WebP/AVIF formats and implement responsive images");
       }
+
+      // #63 — video analysis (conversion / perf / a11y)
+      const video = analyzeVideoSignals(seoData.videoRaw);
+      if (video.present) {
+        if (video.performance.impact) {
+          perfScore -= video.performance.impact;
+          for (const issue of video.performance.issues) perfIssues.push(issue);
+          for (const tip of video.recommendations.slice(0, 2)) {
+            if (!perfRecommendations.includes(tip)) perfRecommendations.push(tip);
+          }
+        }
+        // Fold video a11y findings into accessibility checks
+        if (seoData.accessibility) {
+          for (const check of video.accessibility.checks) {
+            seoData.accessibility.checks.push(check);
+          }
+          for (const issue of video.accessibility.issues) {
+            seoData.accessibility.issues.push(issue);
+          }
+          if (typeof video.accessibility.score === "number") {
+            seoData.accessibility.score = Math.max(
+              0,
+              Math.min(seoData.accessibility.score, video.accessibility.score)
+            );
+          }
+        }
+      }
+
       const radarApiToken = await env22.CONFIG.get("RADAR_API_TOKEN") || env22.RADAR_API_TOKEN;
       const radarInsights = await getRadarInsights(url, radarApiToken || void 0);
       const seo = {
@@ -337,6 +428,9 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         imgWithoutAlt: seoData.imgWithoutAlt,
         issues: seoIssues,
         accessibility: seoData.accessibility,
+        hasVideo: video.present,
+        videoCount: video.count,
+        video,
         radar: {
           ranking: radarInsights.ranking,
           geoDistribution: radarInsights.geoDistribution,
@@ -355,12 +449,14 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         fcp: perfData.fcp,
         ttfb: perfData.ttfb,
         issues: perfIssues,
-        recommendations: perfRecommendations
+        recommendations: perfRecommendations,
+        videoImpact: video.present ? video.performance.impact : 0
       };
       return {
         screenshot,
         seo,
         performance: performance22,
+        video,
         pageDimensions,
         foldLinePercent,
         isFullPage: fullPage

@@ -1,5 +1,6 @@
 import { CONFIG, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, RUBRIC_CRITERIA } from './config.js';
 import { uint8ArrayToBase64, hashUrl, withTimeout } from './utils.js';
+import { videoPromptNote } from './video.js';
 
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
@@ -178,12 +179,15 @@ async function ensureLlamaLicenseAgreed(env22) {
     console.log("Llama license agreement check failed (may already be agreed):", e);
   }
 }
+// `options` stays in the 6th slot (callers pass { video }); `deadline` is threaded
+// last and is only set by the retry recursion, so all existing call sites keep working.
 async function analyzeWithVisionAndHeatmap(
   env22,
   screenshotBase64,
   url,
   isFullPage = false,
   attempt = 1,
+  options = {},
   deadline = Date.now() + CONFIG.AI_TIMEOUT_MS
 ) {
   try {
@@ -192,6 +196,7 @@ async function analyzeWithVisionAndHeatmap(
     if (remainingMs <= 0) {
       throw new Error("AI vision analysis timed out");
     }
+    const videoNote = videoPromptNote(options.video);
     const prompt = `Analyze this landing page screenshot as a conversion optimization expert. Rate each category 1-10 and CALIBRATE carefully using the full range:
 
 - 9-10: Exceptional, best-in-class execution (rare).
@@ -207,6 +212,7 @@ Industry options: saas, ecommerce, agency, fintech, health, education, media, st
 
 For each category give: score, main problem, suggested fix.
 Also provide: overall score, 3 quick wins, verdict sentence, industry classification.
+${videoNote}
 
 Respond with your analysis.`;
     let response;
@@ -216,7 +222,7 @@ Respond with your analysis.`;
         messages: [
           {
             role: "system",
-            content: "You are a landing page conversion rate optimization expert. Analyze the screenshot and provide specific, actionable feedback."
+            content: "You are a landing page conversion rate optimization expert. Analyze the screenshot and provide specific, actionable feedback. When video signals are provided, factor autoplay, captions, and hero-video impact into hero/design/CTA feedback."
           },
           {
             role: "user",
@@ -355,7 +361,8 @@ Respond with your analysis.`;
       if (Date.now() + backoffMs < deadline) {
         console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): ${errMsg} — retrying in ${backoffMs}ms`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1, deadline);
+        // carry BOTH the video options (#63) and the shared deadline (#93) into the retry
+        return analyzeWithVisionAndHeatmap(env22, screenshotBase64, url, isFullPage, attempt + 1, options, deadline);
       }
       console.warn(`AI busy (attempt ${attempt}/${CONFIG.AI_MAX_ATTEMPTS}): retry budget exhausted`);
     }
