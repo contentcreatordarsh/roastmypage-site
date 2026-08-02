@@ -1,4 +1,4 @@
-import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
+import { calculateWeightedOverall, escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
 import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
 
 function generateNotFoundPage(baseUrl) {
@@ -46,6 +46,24 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const rubricScoreKeys = ["hero", "cta", "trust", "copy", "design"];
+    const rubricWeightLabels = { hero: "Hero", cta: "CTA", trust: "Trust", copy: "Copy", design: "Design" };
+    const rubricScores = {
+      hero: Number.parseFloat(roast.hero_score) || 0,
+      cta: Number.parseFloat(roast.cta_score) || 0,
+      trust: Number.parseFloat(roast.trust_score) || 0,
+      copy: Number.parseFloat(roast.copy_score) || 0,
+      design: Number.parseFloat(roast.design_score) || 0
+    };
+    const defaultPersonalizedScore = calculateWeightedOverall(rubricScores);
+    const rubricWeightCategories = categories
+      .filter((category) => rubricScoreKeys.includes(category.key))
+      .map((category) => ({
+        key: category.key,
+        label: rubricWeightLabels[category.key] || category.label,
+        score: Number.parseFloat(category.score) || 0,
+        color: category.color
+      }));
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -204,6 +222,68 @@ export function renderRoastPage(params) {
     </div>`;
       })() : ""}
   </div>
+
+  <!-- Personalized Weighting -->
+  <section class="card p-5 mb-6" id="personalized-weighting-card">
+    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5">
+      <div class="flex-1">
+        <div class="text-xs uppercase tracking-[0.18em] text-[#6e6e73] mb-1">Personalized weighting (local)</div>
+        <h2 class="text-lg font-semibold text-white">Tune the displayed overall score</h2>
+        <p class="text-xs text-[#a1a1a6] mt-1 leading-relaxed">
+          Adjust these weights to recalculate a local personalized overall from the five category scores.
+          This does not change the AI analysis, saved score, benchmark, or shared result.
+        </p>
+      </div>
+      <div class="rounded-2xl px-5 py-4 bg-white/[0.03] border border-white/[0.06] text-center min-w-[150px]">
+        <div class="text-xs text-[#6e6e73] mb-1">Personalized overall</div>
+        <div id="personalized-overall-score" class="text-3xl font-bold" style="color:${scoreColor}">${defaultPersonalizedScore.toFixed(1)}</div>
+        <div class="text-xs text-[#a1a1a6]">/10 local</div>
+        <div class="text-[11px] text-[#6e6e73] mt-2">AI overall remains ${score}/10</div>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-5 gap-3">
+      ${rubricWeightCategories.map((category) => `<label class="block p-3 rounded-xl bg-white/[0.025] border border-white/[0.04]" for="rubric-weight-range-${category.key}">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <span class="text-xs font-semibold text-[#d1d1d6]">${escapeHtml(category.label)}</span>
+          <span class="text-[11px] text-[#6e6e73]">${category.score.toFixed(1)}/10</span>
+        </div>
+        <input
+          id="rubric-weight-range-${category.key}"
+          data-rubric-weight="${category.key}"
+          type="range"
+          min="0"
+          max="5"
+          step="0.1"
+          value="1"
+          class="w-full accent-[#E85D04]"
+          aria-label="${escapeHtml(category.label)} weight slider"
+        >
+        <div class="flex items-center justify-between gap-2 mt-2">
+          <span class="text-[11px] text-[#6e6e73]">Weight</span>
+          <input
+            data-rubric-weight="${category.key}"
+            type="number"
+            min="0"
+            max="5"
+            step="0.1"
+            value="1"
+            class="w-16 rounded-lg bg-black/30 border border-white/[0.08] px-2 py-1 text-xs text-[#d1d1d6]"
+            aria-label="${escapeHtml(category.label)} weight input"
+          >
+        </div>
+      </label>`).join("\n      ")}
+    </div>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-4 border-t border-white/[0.06]">
+      <p id="personalized-weighting-status" class="text-xs text-[#6e6e73]">Default equal weights. Your personalized score is the category average.</p>
+      <button
+        type="button"
+        id="reset-rubric-weights"
+        class="self-start sm:self-auto px-3 py-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-semibold text-[#d1d1d6] transition-colors"
+      >
+        Reset to default
+      </button>
+    </div>
+  </section>
 
   <!-- Industry Benchmark + Tweet Callout -->
   <div class="card p-5 mb-6" style="background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(236,72,153,0.06));border-color:rgba(139,92,246,0.2);">
@@ -598,6 +678,106 @@ function showTab(name) {
   const btn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
   if (btn) btn.classList.add('active');
 }
+const RUBRIC_WEIGHT_STORAGE_KEY = 'roastmypage:rubricWeights:v1';
+const RUBRIC_SCORE_KEYS = ${JSON.stringify(rubricScoreKeys)};
+const RUBRIC_SCORES = ${JSON.stringify(rubricScores)};
+const DEFAULT_RUBRIC_WEIGHTS = { hero: 1, cta: 1, trust: 1, copy: 1, design: 1 };
+function sanitizeRubricWeight(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return 1;
+  return Math.min(5, Math.round(number * 10) / 10);
+}
+function sanitizeRubricWeights(weights) {
+  return RUBRIC_SCORE_KEYS.reduce(function(acc, key) {
+    acc[key] = sanitizeRubricWeight(weights && weights[key] !== undefined ? weights[key] : DEFAULT_RUBRIC_WEIGHTS[key]);
+    return acc;
+  }, {});
+}
+function calculateLocalWeightedOverall(scores, weights) {
+  let weightedScoreTotal = 0;
+  let weightTotal = 0;
+  RUBRIC_SCORE_KEYS.forEach(function(key) {
+    const score = Number(scores[key]);
+    const weight = Number(weights[key]);
+    if (!Number.isFinite(score) || !Number.isFinite(weight) || weight < 0) return;
+    weightedScoreTotal += score * weight;
+    weightTotal += weight;
+  });
+  if (weightTotal <= 0) return null;
+  return Math.round(weightedScoreTotal / weightTotal * 10) / 10;
+}
+function getLocalScoreColor(scoreValue) {
+  if (scoreValue >= 8) return '#34D399';
+  if (scoreValue >= 6) return '#FBBF24';
+  if (scoreValue >= 4) return '#FB923C';
+  return '#F87171';
+}
+function hasDefaultRubricWeights(weights) {
+  return RUBRIC_SCORE_KEYS.every(function(key) {
+    return Math.abs(Number(weights[key]) - DEFAULT_RUBRIC_WEIGHTS[key]) < 0.001;
+  });
+}
+function readStoredRubricWeights() {
+  try {
+    const raw = localStorage.getItem(RUBRIC_WEIGHT_STORAGE_KEY);
+    return sanitizeRubricWeights(raw ? JSON.parse(raw) : DEFAULT_RUBRIC_WEIGHTS);
+  } catch (error) {
+    return sanitizeRubricWeights(DEFAULT_RUBRIC_WEIGHTS);
+  }
+}
+function writeRubricWeights(weights) {
+  try {
+    localStorage.setItem(RUBRIC_WEIGHT_STORAGE_KEY, JSON.stringify(weights));
+  } catch (error) {}
+}
+function updateRubricWeightInputs(weights) {
+  RUBRIC_SCORE_KEYS.forEach(function(key) {
+    document.querySelectorAll('[data-rubric-weight="' + key + '"]').forEach(function(input) {
+      input.value = weights[key].toFixed(1);
+    });
+  });
+}
+function applyRubricWeights(weights, persist) {
+  const cleanWeights = sanitizeRubricWeights(weights);
+  const personalizedScore = calculateLocalWeightedOverall(RUBRIC_SCORES, cleanWeights);
+  const scoreEl = document.getElementById('personalized-overall-score');
+  const statusEl = document.getElementById('personalized-weighting-status');
+  if (scoreEl) {
+    if (personalizedScore === null) {
+      scoreEl.textContent = '--';
+      scoreEl.style.color = '#a1a1a6';
+    } else {
+      scoreEl.textContent = personalizedScore.toFixed(1);
+      scoreEl.style.color = getLocalScoreColor(personalizedScore);
+    }
+  }
+  if (statusEl) {
+    if (personalizedScore === null) {
+      statusEl.textContent = 'Set at least one weight above 0 to calculate a personalized local score.';
+    } else if (hasDefaultRubricWeights(cleanWeights)) {
+      statusEl.textContent = 'Default equal weights. Your personalized score is the category average.';
+    } else {
+      statusEl.textContent = 'Personalized score recalculated locally. AI overall remains ${score}/10.';
+    }
+  }
+  updateRubricWeightInputs(cleanWeights);
+  if (persist) writeRubricWeights(cleanWeights);
+  return cleanWeights;
+}
+let currentRubricWeights = readStoredRubricWeights();
+document.querySelectorAll('[data-rubric-weight]').forEach(function(input) {
+  input.addEventListener('input', function(event) {
+    const key = event.target.getAttribute('data-rubric-weight');
+    currentRubricWeights = applyRubricWeights({ ...currentRubricWeights, [key]: event.target.value }, true);
+  });
+});
+const resetRubricWeightsButton = document.getElementById('reset-rubric-weights');
+if (resetRubricWeightsButton) {
+  resetRubricWeightsButton.addEventListener('click', function() {
+    currentRubricWeights = applyRubricWeights(DEFAULT_RUBRIC_WEIGHTS, true);
+  });
+}
+currentRubricWeights = applyRubricWeights(currentRubricWeights, false);
 function ssrFeedback(vote) {
   var bar = document.getElementById('ssr-feedback-bar');
   fetch('/api/feedback', {
