@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title desc">
+  <title id="title">Roast My Landing Page touch icon</title>
+  <desc id="desc">A warm flame on a dark rounded square background.</desc>
+  <rect width="180" height="180" rx="38" fill="#0A0908"/>
+  <circle cx="90" cy="99" r="55" fill="#1C1917"/>
+  <path fill="#E85D04" d="M89 27c13 22 42 33 42 70 0 31-20 53-44 53s-42-18-42-43c0-17 9-30 19-43 3 15 13 22 27 23-5-22-4-38-2-60Z"/>
+  <path fill="#F59E0B" d="M89 71c9 15 26 22 26 45 0 19-12 33-27 33s-26-11-26-27c0-10 6-18 12-26 2 9 8 14 17 14-3-13-3-24-2-39Z"/>
+  <path fill="#FFF7ED" fill-opacity=".82" d="M89 106c5 8 16 13 16 27 0 11-8 19-17 19s-16-7-16-16c0-6 3-11 7-16 1 6 5 9 10 9-2-8-2-14 0-23Z"/>
+</svg>

@@ -1,0 +1,24 @@
+{
+  "name": "Roast My Landing Page",
+  "short_name": "Roast My Page",
+  "description": "A fast AI landing page analyzer for conversion scores, SEO audits, performance checks, and practical fixes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0A0908",
+  "background_color": "#0A0908",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.svg",
+      "sizes": "180x180",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
