@@ -39,6 +39,16 @@ The application's source code in `src/` is separated into focused modules:
 5. **Persistence**: The resulting screenshot is saved to R2, and the structured roast data is stored in D1.
 6. **Streaming**: As these steps execute, progress updates are streamed back to the client via Server-Sent Events (SSE).
 
+## Share Images
+
+Saved roasts expose social-ready images for sharing:
+
+- `GET /api/card/:roastId` returns a polished 1200x630 report-card image with the total score, category bars, industry benchmark marker, and screenshot preview when available.
+- `GET /api/card/:roastId?download=1` returns the same image with a `Content-Disposition` attachment filename for direct PNG downloads from the results UI.
+- `GET /api/og/:roastId` and `GET /og/:roastId` provide Open Graph images for crawlers and social cards.
+
+The results page surfaces these through the "Download / Share card" button, direct "Open card URL" link, and platform-specific share actions.
+
 ## Local Development
 
 1. Install dependencies: `npm install`

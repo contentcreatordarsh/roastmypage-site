@@ -1273,6 +1273,9 @@ data: ${JSON.stringify(data)}
       } catch {
         hostname = roast.url;
       }
+      const wantsDownload = url.searchParams.get("download") === "1";
+      const filenameHost = hostname.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").substring(0, 48) || "roast";
+      const cardFilename = `roast-card-${filenameHost}-${score.toFixed(1)}.png`;
       const cardIndustry = roast.industry || "other";
       const cardBenchmark = INDUSTRY_BENCHMARKS[cardIndustry] || INDUSTRY_BENCHMARKS.other;
       const scoreColor = score >= 8 ? "#34D399" : score >= 6 ? "#FBBF24" : score >= 4 ? "#FB923C" : "#F87171";
@@ -1440,22 +1443,30 @@ data: ${JSON.stringify(data)}
       </svg>`;
       try {
         const { png } = await renderSvgToPng(env22, cardSvg, `card-${roastId}`);
+        const cardHeaders = {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=2592000",
+          // 30 days
+          ...corsHeaders
+        };
+        if (wantsDownload) {
+          cardHeaders["Content-Disposition"] = `attachment; filename="${cardFilename}"`;
+        }
         return new Response(png, {
-          headers: {
-            "Content-Type": "image/png",
-            "Cache-Control": "public, max-age=2592000",
-            // 30 days
-            ...corsHeaders
-          }
+          headers: cardHeaders
         });
       } catch (err) {
         safeLogError("Card PNG render failed, falling back to SVG", err);
+        const fallbackHeaders = {
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "public, max-age=86400",
+          ...corsHeaders
+        };
+        if (wantsDownload) {
+          fallbackHeaders["Content-Disposition"] = `attachment; filename="${cardFilename.replace(/\.png$/, ".svg")}"`;
+        }
         return new Response(cardSvg, {
-          headers: {
-            "Content-Type": "image/svg+xml",
-            "Cache-Control": "public, max-age=86400",
-            ...corsHeaders
-          }
+          headers: fallbackHeaders
         });
       }
     }
