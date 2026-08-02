@@ -9,8 +9,14 @@
     <meta name="description" content="Free AI landing page analyzer — get conversion scores, SEO audit, performance metrics, attention heatmaps, and industry benchmarks in 30 seconds. No signup, no paywall.">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://roastmypage.site/">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0908'/%3E%3Cpath d='M16 6c2 4 7 6 7 12a7 7 0 1 1-14 0c0-3 2-5 3-7 1 2 2 3 4 3 0-3 0-5 0-8z' fill='%23E85D04'/%3E%3C/svg%3E">
+    <meta name="theme-color" content="#0A0908">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Roast My Landing Page">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg">
     
     <!-- Open Graph / Social Share -->
     <meta property="og:type" content="website">
@@ -9594,6 +9600,65 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             loadFeed();
             if (window.location.hash === '#batch') showTab('batch');
         });
+    </script>
+    <script>
+      (function () {
+        const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+        const canUseServiceWorker = 'serviceWorker' in navigator && (window.location.protocol === 'https:' || isLocalhost);
+        let deferredInstallPrompt = null;
+
+        function showInstallHint() {
+          if (!deferredInstallPrompt || isStandalone || sessionStorage.getItem('rmlp_install_hint_dismissed') === '1') return;
+          if (document.getElementById('pwa-install-hint')) return;
+
+          const hint = document.createElement('div');
+          hint.id = 'pwa-install-hint';
+          hint.className = 'fixed bottom-5 right-5 z-50 max-w-[280px] rounded-2xl border border-white/[0.08] bg-[#14110f]/95 px-4 py-3 text-sm text-cream-100 shadow-2xl backdrop-blur';
+          hint.innerHTML = `
+            <div class="font-display font-semibold tracking-tight">Install Roast My Landing Page</div>
+            <p class="mt-1 text-xs leading-relaxed text-cream-300/55">Open faster from your home screen when you want a quick page roast.</p>
+            <div class="mt-3 flex items-center gap-2">
+              <button type="button" id="pwa-install-button" class="rounded-full bg-accent-orange px-3 py-1.5 text-xs font-bold text-white">Install</button>
+              <button type="button" id="pwa-dismiss-button" class="rounded-full border border-white/[0.08] px-3 py-1.5 text-xs text-cream-300/70 hover:text-cream-100">Not now</button>
+            </div>
+          `;
+          document.body.appendChild(hint);
+
+          document.getElementById('pwa-install-button')?.addEventListener('click', async () => {
+            const promptEvent = deferredInstallPrompt;
+            deferredInstallPrompt = null;
+            hint.remove();
+            promptEvent.prompt();
+            await promptEvent.userChoice.catch(() => null);
+          });
+
+          document.getElementById('pwa-dismiss-button')?.addEventListener('click', () => {
+            sessionStorage.setItem('rmlp_install_hint_dismissed', '1');
+            hint.remove();
+          });
+        }
+
+        window.addEventListener('beforeinstallprompt', (event) => {
+          event.preventDefault();
+          deferredInstallPrompt = event;
+          window.requestIdleCallback ? window.requestIdleCallback(showInstallHint, { timeout: 1500 }) : setTimeout(showInstallHint, 1200);
+        });
+
+        window.addEventListener('appinstalled', () => {
+          deferredInstallPrompt = null;
+          document.getElementById('pwa-install-hint')?.remove();
+          sessionStorage.setItem('rmlp_install_hint_dismissed', '1');
+        });
+
+        if (canUseServiceWorker) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch((error) => {
+              console.info('Service worker registration skipped:', error);
+            });
+          });
+        }
+      })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
