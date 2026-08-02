@@ -161,6 +161,76 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   };
 }
 
+function resolveRetentionDays(env22, days) {
+  const configuredDays = days ?? env22?.RETENTION_DAYS ?? CONFIG.RETENTION_DAYS;
+  const parsedDays = Number(configuredDays);
+  if (!Number.isFinite(parsedDays) || parsedDays <= 0) {
+    throw new Error("Retention days must be a positive number");
+  }
+  return parsedDays;
+}
+
+function formatSqliteDateTime(date) {
+  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+}
+
+async function purgeExpiredRoasts(env22, { days, batchSize = 100 } = {}) {
+  const retentionDays = resolveRetentionDays(env22, days);
+  const normalizedBatchSize = Math.max(1, Math.min(Number(batchSize) || 100, 100));
+  const cutoff = formatSqliteDateTime(new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1e3));
+  const summary = {
+    cutoff,
+    days: retentionDays,
+    scanned: 0,
+    deletedRows: 0,
+    deletedScreenshots: 0,
+    failedScreenshots: 0,
+    batches: 0
+  };
+
+  while (true) {
+    const result = await env22.DB.prepare(`
+      SELECT id, screenshot_key
+      FROM roasts
+      WHERE created_at < ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).bind(cutoff, normalizedBatchSize).all();
+    const rows = result.results || [];
+    if (rows.length === 0) break;
+
+    summary.scanned += rows.length;
+    summary.batches += 1;
+
+    const deletableIds = [];
+    for (const row of rows) {
+      if (row.screenshot_key) {
+        try {
+          await env22.SCREENSHOTS.delete(row.screenshot_key);
+          summary.deletedScreenshots += 1;
+        } catch (error32) {
+          summary.failedScreenshots += 1;
+          console.error(`Failed to delete expired screenshot ${row.screenshot_key}:`, error32);
+          continue;
+        }
+      }
+      deletableIds.push(row.id);
+    }
+
+    if (deletableIds.length === 0) break;
+
+    const placeholders = deletableIds.map(() => "?").join(", ");
+    const deleteResult = await env22.DB.prepare(
+      `DELETE FROM roasts WHERE id IN (${placeholders})`
+    ).bind(...deletableIds).run();
+    summary.deletedRows += Number(deleteResult.meta?.changes || deletableIds.length);
+
+    if (rows.length < normalizedBatchSize) break;
+  }
+
+  return summary;
+}
+
 async function getApiV1Counts(env, ipHash) {
   const dayKey = getApiDayKey();
   const [ipRow, globalRow] = await Promise.all([
@@ -293,4 +363,4 @@ function apiV1RateLimitHeaders(ipCount, globalCount) {
   };
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, purgeExpiredRoasts, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
