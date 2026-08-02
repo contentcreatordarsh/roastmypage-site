@@ -7,7 +7,8 @@ import {
   isValidRoastId,
   sanitizeUrl,
   hashUrl,
-  hashIp
+  hashIp,
+  calculateWeightedOverall
 } from "../src/utils.js";
 
 test("isValidUrl accepts http and https", () => {
@@ -74,4 +75,35 @@ test("hashIp requires a private salt in production", async () => {
   );
   const hash = await hashIp("203.0.113.10", undefined, "development");
   assert.match(hash, /^[a-f0-9]{32}$/);
+});
+
+test("calculateWeightedOverall returns an equal-weight average by default", () => {
+  const score = calculateWeightedOverall({
+    hero: 8,
+    cta: 6,
+    trust: 7,
+    copy: 9,
+    design: 5
+  });
+
+  assert.equal(score, 7);
+});
+
+test("calculateWeightedOverall applies custom rubric weights", () => {
+  const score = calculateWeightedOverall(
+    { hero: 10, cta: 0, trust: 5, copy: 5, design: 5 },
+    { hero: 3, cta: 1, trust: 1, copy: 1, design: 1 }
+  );
+
+  assert.equal(score, 6.4);
+});
+
+test("calculateWeightedOverall ignores invalid inputs and returns null without positive weights", () => {
+  assert.equal(
+    calculateWeightedOverall(
+      { hero: 10, cta: "bad", trust: 4, copy: 6, design: 8 },
+      { hero: -1, cta: 2, trust: "bad", copy: 0, design: 0 }
+    ),
+    null
+  );
 });

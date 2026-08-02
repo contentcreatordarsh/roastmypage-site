@@ -279,5 +279,30 @@ function isUrlSafeForFetching(urlString) {
       const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
       return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
     }
+
+const RUBRIC_SCORE_KEYS = ["hero", "cta", "trust", "copy", "design"];
+const DEFAULT_RUBRIC_WEIGHTS = Object.freeze({
+  hero: 1,
+  cta: 1,
+  trust: 1,
+  copy: 1,
+  design: 1
+});
+
+function calculateWeightedOverall(scores, weights = DEFAULT_RUBRIC_WEIGHTS, keys = RUBRIC_SCORE_KEYS) {
+  let weightedScoreTotal = 0;
+  let weightTotal = 0;
+  for (const key of keys) {
+    const score = Number(scores?.[key]);
+    if (!Number.isFinite(score)) continue;
+    const rawWeight = weights?.[key];
+    const weight = rawWeight === undefined || rawWeight === null || rawWeight === "" ? 1 : Number(rawWeight);
+    if (!Number.isFinite(weight) || weight < 0) continue;
+    weightedScoreTotal += score * weight;
+    weightTotal += weight;
+  }
+  if (weightTotal <= 0) return null;
+  return Number((weightedScoreTotal / weightTotal).toFixed(1));
+}
     
-export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, getSecurityHeaders };
+export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, getSecurityHeaders, RUBRIC_SCORE_KEYS, DEFAULT_RUBRIC_WEIGHTS, calculateWeightedOverall };
