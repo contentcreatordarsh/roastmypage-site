@@ -44,6 +44,11 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    buildApiV1CallbackPayload, callbackStatusNotRequested,
+    postApiV1Callback, validateCallbackUrl
+} from './webhooks.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -2566,6 +2571,15 @@ data: ${JSON.stringify(data)}
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
+        const callbackValidation = validateCallbackUrl(body.callbackUrl);
+        if (!callbackValidation.ok) {
+          return Response.json({
+            success: false,
+            error: "invalid_callback_url",
+            message: callbackValidation.error
+          }, { status: 400, headers: apiV1CorsHeaders });
+        }
+        const callbackUrl = callbackValidation.url;
         if (!rawUrl || typeof rawUrl !== "string") {
           return Response.json({
             success: false,
@@ -2612,18 +2626,32 @@ data: ${JSON.stringify(data)}
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
+          const scores = {
+            overall: cachedResult.overallScore,
+            hero: cachedResult.scores.hero,
+            cta: cachedResult.scores.cta,
+            trust: cachedResult.scores.trust,
+            copy: cachedResult.scores.copy,
+            design: cachedResult.scores.design
+          };
+          const shareUrl = `${PRODUCTION_ORIGINS[0]}/roast/${cachedResult.id}`;
+          const timestamp = cachedResult.createdAt || (/* @__PURE__ */ new Date()).toISOString();
+          const callbackStatus = callbackUrl
+            ? await postApiV1Callback(callbackUrl, buildApiV1CallbackPayload({
+              id: cachedResult.id,
+              url: targetUrl,
+              scores,
+              shareUrl,
+              cached: true,
+              timestamp
+            }))
+            : callbackStatusNotRequested();
           const response = Response.json({
             success: true,
             cached: true,
+            id: cachedResult.id,
             url: targetUrl,
-            scores: {
-              overall: cachedResult.overallScore,
-              hero: cachedResult.scores.hero,
-              cta: cachedResult.scores.cta,
-              trust: cachedResult.scores.trust,
-              copy: cachedResult.scores.copy,
-              design: cachedResult.scores.design
-            },
+            scores,
             verdict: cachedResult.verdict || "",
             roast: cachedResult.roast || "",
             quickWins: cachedResult.quickWins || [],
@@ -2632,8 +2660,9 @@ data: ${JSON.stringify(data)}
             performance: cachedResult.performance || null,
             heatmap: cachedResult.heatmap || null,
             screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${cachedResult.id}`,
-            shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${cachedResult.id}`,
-            timestamp: cachedResult.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+            shareUrl,
+            timestamp,
+            callbackStatus
           }, {
             headers: {
               ...apiV1CorsHeaders,
@@ -2664,6 +2693,16 @@ data: ${JSON.stringify(data)}
         const formattedRoast = formatRoast(analysis, targetUrl);
         const industry = analysis.industry || "other";
         const enhancedHeatmap = { ...heatmap, foldLine: pageData.foldLinePercent || heatmap.foldLine };
+        const scores = {
+          overall: analysis.overallScore,
+          hero: analysis.scores.hero,
+          cta: analysis.scores.cta,
+          trust: analysis.scores.trust,
+          copy: analysis.scores.copy,
+          design: analysis.scores.design
+        };
+        const shareUrl = `${PRODUCTION_ORIGINS[0]}/roast/${roastId}`;
+        const timestamp = (/* @__PURE__ */ new Date()).toISOString();
         ctx.waitUntil(
           env22.DB.prepare(`
             INSERT INTO roasts (id, url, url_hash, screenshot_key, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, country, seo_data, performance_data, heatmap_data, industry)
@@ -2688,18 +2727,22 @@ data: ${JSON.stringify(data)}
             industry
           ).run()
         );
+        const callbackStatus = callbackUrl
+          ? await postApiV1Callback(callbackUrl, buildApiV1CallbackPayload({
+            id: roastId,
+            url: targetUrl,
+            scores,
+            shareUrl,
+            cached: false,
+            timestamp
+          }))
+          : callbackStatusNotRequested();
         const response = Response.json({
           success: true,
           cached: false,
+          id: roastId,
           url: targetUrl,
-          scores: {
-            overall: analysis.overallScore,
-            hero: analysis.scores.hero,
-            cta: analysis.scores.cta,
-            trust: analysis.scores.trust,
-            copy: analysis.scores.copy,
-            design: analysis.scores.design
-          },
+          scores,
           sections: analysis.sections || {},
           verdict: analysis.verdict || "",
           roast: formattedRoast,
@@ -2711,9 +2754,10 @@ data: ${JSON.stringify(data)}
           video: pageData.video || pageData.seo?.video || null,
           heatmap: enhancedHeatmap,
           screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${roastId}`,
-          shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${roastId}`,
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          processingTime: Date.now() - startTime
+          shareUrl,
+          timestamp,
+          processingTime: Date.now() - startTime,
+          callbackStatus
         }, {
           headers: {
             ...apiV1CorsHeaders,
