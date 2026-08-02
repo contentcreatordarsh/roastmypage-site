@@ -1443,6 +1443,10 @@
                 <button onclick="showResultTab('performance')" id="rtab-performance" class="px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6]">Performance</button>
                 <button onclick="showResultTab('heatmap')" id="rtab-heatmap" class="px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6]">Heatmap</button>
                 <button onclick="showResultTab('accessibility')" id="rtab-accessibility" class="px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6]">Accessibility</button>
+                <button onclick="showResultTab('techstack')" id="rtab-techstack" class="px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6] flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                    Tech Stack
+                </button>
                 <button onclick="showResultTab('video')" id="rtab-video" class="hidden px-4 py-2 rounded-xl text-[13px] font-medium text-[#6e6e73] transition-all hover:text-[#a1a1a6] flex items-center gap-1.5">
                     Video
                 </button>
@@ -2231,6 +2235,102 @@
                 <div class="card p-5">
                     <h3 class="text-[15px] font-semibold mb-3">Recommendations</h3>
                     <div id="video-recommendations" class="space-y-2 text-sm text-[#a1a1a6]"></div>
+                </div>
+            </div>
+
+            <!-- Tech Stack Tab -->
+            <div id="result-techstack" class="result-tab hidden">
+                <div class="card p-6 mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h3 class="text-xl font-semibold mb-1">Tech Stack Scanner</h3>
+                            <p class="text-sm text-[#a1a1a6]">Identify frameworks, analytics, CMS, hosting, and frontend tools using Cloudflare URL Scanner.</p>
+                        </div>
+                        <button onclick="runTechStackScan()" id="tech-scan-btn" class="btn-primary px-6 py-3 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 whitespace-nowrap">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                            Scan Tech Stack
+                        </button>
+                    </div>
+                </div>
+
+                <div id="tech-loading" class="hidden">
+                    <div class="card p-12 text-center">
+                        <div class="w-16 h-16 mx-auto mb-4 relative">
+                            <div class="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
+                            <div class="absolute inset-0 border-4 border-transparent border-t-blue-500 rounded-full animate-spin"></div>
+                            <div class="absolute inset-2 border-4 border-transparent border-t-orange-500 rounded-full animate-spin" style="animation-direction: reverse; animation-duration: 1.5s;"></div>
+                        </div>
+                        <h3 class="text-lg font-semibold mb-2">Scanning the page stack...</h3>
+                        <p class="text-sm text-[#6e6e73]">Submitting the URL to Cloudflare and waiting for technology fingerprints.</p>
+                        <div id="tech-scan-status" class="mt-4 text-xs text-[#6e6e73] animate-pulse">Submitting scan...</div>
+                    </div>
+                </div>
+
+                <div id="tech-error" class="hidden card p-6 mb-6 border-amber-500/20 bg-amber-500/5">
+                    <div class="flex items-start gap-3">
+                        <div class="w-9 h-9 bg-amber-500/15 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <span class="text-lg">!</span>
+                        </div>
+                        <div>
+                            <h4 id="tech-error-title" class="font-semibold text-amber-300 mb-1">Tech scan unavailable</h4>
+                            <p id="tech-error-message" class="text-sm text-amber-200/70"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tech-results" class="hidden">
+                    <div class="grid md:grid-cols-4 gap-4 mb-6">
+                        <div class="card p-5 text-center">
+                            <div id="tech-total" class="text-3xl font-bold text-blue-400">0</div>
+                            <div class="text-xs text-[#6e6e73] mt-1">Technologies</div>
+                        </div>
+                        <div class="card p-5 text-center">
+                            <div id="tech-category-count" class="text-3xl font-bold text-cream-100">0</div>
+                            <div class="text-xs text-[#6e6e73] mt-1">Categories</div>
+                        </div>
+                        <div class="card p-5 text-center">
+                            <div id="tech-server" class="text-lg font-bold text-cream-100 truncate">Unknown</div>
+                            <div class="text-xs text-[#6e6e73] mt-1">Server</div>
+                        </div>
+                        <div class="card p-5 text-center">
+                            <div id="tech-rank" class="text-lg font-bold text-cream-100">Unranked</div>
+                            <div class="text-xs text-[#6e6e73] mt-1">Cloudflare Radar</div>
+                        </div>
+                    </div>
+
+                    <div class="grid lg:grid-cols-3 gap-6 mb-6">
+                        <div class="lg:col-span-2 card p-6">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div>
+                                    <h4 class="text-[15px] font-semibold">Detected Technologies</h4>
+                                    <p id="tech-scanned-at" class="text-xs text-[#6e6e73] mt-1"></p>
+                                </div>
+                                <span id="tech-cache-badge" class="hidden px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300">Cached</span>
+                            </div>
+                            <div id="tech-categories" class="space-y-4">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+
+                        <div class="card p-6">
+                            <h4 class="text-[15px] font-semibold mb-1">Hosting Details</h4>
+                            <p class="text-xs text-[#6e6e73] mb-4">Network signals returned by the scanner.</p>
+                            <div id="tech-hosting" class="space-y-3">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tech-empty" class="card p-12 text-center">
+                    <div class="w-14 h-14 bg-white/[0.04] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <span class="text-2xl">&#128736;</span>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2">Scan the current roast URL</h3>
+                    <p class="text-[#6e6e73] max-w-md mx-auto mb-6">
+                        Run a separate Cloudflare URL Scanner pass to reveal the page's frameworks, CMS, analytics tags, and hosting footprint.
+                    </p>
+                    <button onclick="runTechStackScan()" class="btn-secondary px-5 py-2 rounded-xl text-sm font-medium">Start tech scan</button>
                 </div>
             </div>
 
@@ -4466,6 +4566,242 @@
             }
         }
 
+
+        // ===== TECH STACK SCAN FUNCTIONS =====
+        let currentTechScan = null;
+        const TECH_SCAN_POLL_DELAY_MS = 4000;
+        const TECH_SCAN_MAX_POLLS = 9;
+
+        function resetTechStackScan() {
+            currentTechScan = null;
+            setTechScanState('empty');
+            setTechScanButton(false);
+            const statusEl = document.getElementById('tech-scan-status');
+            if (statusEl) statusEl.textContent = 'Submitting scan...';
+        }
+
+        function setTechScanState(state, title = '', message = '') {
+            const loading = document.getElementById('tech-loading');
+            const results = document.getElementById('tech-results');
+            const empty = document.getElementById('tech-empty');
+            const error = document.getElementById('tech-error');
+            loading?.classList.toggle('hidden', state !== 'loading');
+            results?.classList.toggle('hidden', state !== 'results');
+            empty?.classList.toggle('hidden', state !== 'empty');
+            error?.classList.toggle('hidden', state !== 'error');
+            if (state === 'error') {
+                const titleEl = document.getElementById('tech-error-title');
+                const messageEl = document.getElementById('tech-error-message');
+                if (titleEl) titleEl.textContent = title || 'Tech scan unavailable';
+                if (messageEl) messageEl.textContent = message || 'The scanner could not complete this request. Try again in a moment.';
+            }
+        }
+
+        function setTechScanButton(isLoading) {
+            const btn = document.getElementById('tech-scan-btn');
+            if (!btn) return;
+            btn.disabled = isLoading;
+            btn.innerHTML = isLoading
+                ? '<div class="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div> Scanning...'
+                : '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg> Scan Tech Stack';
+        }
+
+        async function readJsonSafe(response) {
+            try {
+                return await response.json();
+            } catch {
+                return {};
+            }
+        }
+
+        function getRetryAfterSeconds(response, data) {
+            const fromHeader = parseInt(response.headers.get('Retry-After') || '', 10);
+            const fromBody = parseInt(data?.retryAfter || '', 10);
+            return Number.isFinite(fromHeader) && fromHeader > 0 ? fromHeader : Number.isFinite(fromBody) && fromBody > 0 ? fromBody : 60;
+        }
+
+        function formatRetryAfter(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        }
+
+        function showTechRateLimit(response, data) {
+            const retryAfter = getRetryAfterSeconds(response, data);
+            const message = data?.error || `Tech scan rate limit reached. Try again in ${formatRetryAfter(retryAfter)}.`;
+            showRateLimitWarning(message, retryAfter);
+            showToast(`Tech scan rate limited. Try again in ${formatRetryAfter(retryAfter)}.`, 'error');
+            setTechScanState('error', 'Tech scan rate limited', `${message} Retry after ${formatRetryAfter(retryAfter)}.`);
+        }
+
+        function safeExternalUrl(value) {
+            if (!value) return '';
+            const raw = String(value).trim();
+            const candidate = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+            try {
+                const parsed = new URL(candidate);
+                return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+            } catch {
+                return '';
+            }
+        }
+
+        async function runTechStackScan() {
+            if (!currentRoast || !currentRoast.url) {
+                showToast('No roast URL to scan', 'error');
+                return;
+            }
+
+            setTechScanState('loading');
+            setTechScanButton(true);
+            const statusEl = document.getElementById('tech-scan-status');
+            if (statusEl) statusEl.textContent = 'Submitting scan to Cloudflare URL Scanner...';
+
+            try {
+                const response = await fetch('/api/tech-scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: currentRoast.url })
+                });
+                const data = await readJsonSafe(response);
+
+                if (response.status === 429) {
+                    showTechRateLimit(response, data);
+                    return;
+                }
+                if (response.status === 503 && /not configured/i.test(data?.error || '')) {
+                    setTechScanState(
+                        'error',
+                        'Cloudflare URL Scanner is not configured',
+                        'Add URL_SCANNER_TOKEN and CF_ACCOUNT_TAG to enable tech stack scans in this environment. The main roast results are still available.'
+                    );
+                    showToast('Tech Stack scanner is not configured yet.', 'info');
+                    return;
+                }
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || 'Failed to submit tech scan');
+                }
+
+                if (data.technologies) {
+                    displayTechStackResults(data);
+                    showToast(data.cached ? 'Loaded cached tech stack.' : 'Tech stack loaded.', 'success');
+                    return;
+                }
+
+                if (!data.scanId) {
+                    throw new Error('Tech scan did not return a scan ID');
+                }
+
+                if (statusEl) statusEl.textContent = data.message || 'Scan submitted. Waiting for scanner results...';
+                const result = await pollTechStackScan(data.scanId);
+                displayTechStackResults(result);
+                showToast('Tech stack scan complete!', 'success');
+            } catch (error) {
+                console.error('Tech stack scan error:', error);
+                setTechScanState('error', 'Tech scan failed', error.message || 'The scanner failed unexpectedly. Try again in a moment.');
+                showToast('Tech scan failed: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                setTechScanButton(false);
+            }
+        }
+
+        async function pollTechStackScan(scanId) {
+            const statusEl = document.getElementById('tech-scan-status');
+            for (let attempt = 1; attempt <= TECH_SCAN_MAX_POLLS; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, TECH_SCAN_POLL_DELAY_MS));
+                if (statusEl) statusEl.textContent = `Checking scanner results... (${attempt}/${TECH_SCAN_MAX_POLLS})`;
+
+                const response = await fetch(`/api/tech-scan/${encodeURIComponent(scanId)}`);
+                const data = await readJsonSafe(response);
+
+                if (response.status === 429) {
+                    showTechRateLimit(response, data);
+                    throw new Error('Tech scan rate limited');
+                }
+                if (response.status === 503 && /not configured/i.test(data?.error || '')) {
+                    throw new Error('Cloudflare URL Scanner is not configured in this environment');
+                }
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || 'Failed to fetch tech scan results');
+                }
+                if (data.technologies) return data;
+
+                if (statusEl) statusEl.textContent = data.message || 'Still processing. Waiting a few more seconds...';
+            }
+
+            throw new Error('The scan is still processing. Please try "Scan Tech Stack" again in a few seconds.');
+        }
+
+        function displayTechStackResults(data) {
+            currentTechScan = data;
+            setTechScanState('results');
+
+            const technologies = data.technologies || {};
+            const byCategory = technologies.byCategory || {};
+            const categoryEntries = Object.entries(byCategory).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+            const allTech = Array.isArray(technologies.all) ? technologies.all : [];
+            const total = technologies.total ?? allTech.length;
+
+            document.getElementById('tech-total').textContent = total;
+            document.getElementById('tech-category-count').textContent = categoryEntries.length;
+            document.getElementById('tech-server').textContent = data.hosting?.server || 'Unknown';
+            document.getElementById('tech-rank').textContent = data.rank?.rank ? `#${data.rank.rank}` : (data.rank?.bucket ? `Top ${data.rank.bucket}` : 'Unranked');
+            document.getElementById('tech-cache-badge')?.classList.toggle('hidden', !data.cached);
+
+            const scannedAtEl = document.getElementById('tech-scanned-at');
+            if (scannedAtEl) {
+                const scannedAt = data.scannedAt ? new Date(data.scannedAt) : null;
+                scannedAtEl.textContent = `${data.url || currentRoast?.url || ''}${scannedAt && !Number.isNaN(scannedAt.getTime()) ? ` - scanned ${scannedAt.toLocaleString()}` : ''}`;
+            }
+
+            const categoriesEl = document.getElementById('tech-categories');
+            if (categoriesEl) {
+                if (categoryEntries.length === 0) {
+                    categoriesEl.innerHTML = '<div class="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.04] text-center text-sm text-[#6e6e73]">No technologies were detected for this page. Some stacks intentionally hide fingerprints, and scanner coverage can vary by site.</div>';
+                } else {
+                    categoriesEl.innerHTML = categoryEntries.map(([category, items]) => `
+                        <div class="rounded-2xl bg-white/[0.025] border border-white/[0.04] p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h5 class="text-sm font-semibold text-[#d1d1d6]">${sanitizeHtml(category)}</h5>
+                                <span class="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.05] text-[#6e6e73]">${items.length}</span>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                ${items.map(tech => {
+                                    const website = safeExternalUrl(tech.website);
+                                    const confidence = Math.round(tech.confidence || 0);
+                                    const chip = `<span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.05] text-sm text-[#f5f5f7]">
+                                        <span>${sanitizeHtml(tech.name || 'Unknown')}</span>
+                                        ${confidence ? `<span class="text-[10px] text-[#6e6e73]">${confidence}%</span>` : ''}
+                                    </span>`;
+                                    return website
+                                        ? `<a href="${website}" target="_blank" rel="noopener noreferrer" class="hover:border-blue-400/30 transition-colors">${chip}</a>`
+                                        : chip;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            }
+
+            const hostingRows = [
+                ['Server', data.hosting?.server || 'Unknown'],
+                ['ASN', data.hosting?.asn || 'Unknown'],
+                ['IP', data.hosting?.ip || 'Unknown'],
+                ['Country', data.hosting?.country || 'Unknown']
+            ];
+            const hostingEl = document.getElementById('tech-hosting');
+            if (hostingEl) {
+                hostingEl.innerHTML = hostingRows.map(([label, value]) => `
+                    <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.04]">
+                        <span class="text-xs text-[#6e6e73]">${label}</span>
+                        <span class="text-sm text-[#d1d1d6] text-right break-all">${sanitizeHtml(String(value))}</span>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // ===== END TECH STACK SCAN FUNCTIONS =====
+
         // ===== THREAT SCAN FUNCTIONS =====
         let currentThreatData = null;
         let lookalikeFilter = 'all';
@@ -5545,6 +5881,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             document.getElementById('device-badge').textContent = (data.device || 'desktop').toUpperCase();
             document.getElementById('cache-badge').classList.toggle('hidden', !isCached);
             renderVideoAnalysis(data.video || data.seo?.video);
+            resetTechStackScan();
 
             // Animate score
             const scoreEl = document.getElementById('overall-score');

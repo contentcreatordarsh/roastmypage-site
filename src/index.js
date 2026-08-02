@@ -2356,7 +2356,10 @@ data: ${JSON.stringify(data)}
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
         if (!rateLimit.allowed) {
-          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
+          return Response.json(
+            { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
+            { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
         }
         const cacheKey = `tech-scan:${await hashUrl(sanitizedUrl)}`;
         const cached = await env22.CONFIG.get(cacheKey);
@@ -2367,7 +2370,7 @@ data: ${JSON.stringify(data)}
             ...JSON.parse(cached)
           }, { headers: corsHeaders });
         }
-        if (!env22.URL_SCANNER_TOKEN) {
+        if (!env22.URL_SCANNER_TOKEN || !env22.CF_ACCOUNT_TAG) {
           return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
         }
         const accountId = env22.CF_ACCOUNT_TAG || "";
@@ -2414,7 +2417,7 @@ data: ${JSON.stringify(data)}
         if (!scanId || scanId.length < 10) {
           return Response.json({ error: "Invalid scan ID" }, { status: 400, headers: corsHeaders });
         }
-        if (!env22.URL_SCANNER_TOKEN) {
+        if (!env22.URL_SCANNER_TOKEN || !env22.CF_ACCOUNT_TAG) {
           return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
         }
         const accountId = env22.CF_ACCOUNT_TAG || "";
