@@ -2299,11 +2299,18 @@ data: ${JSON.stringify(data)}
         ]);
         const registeredLookalikes = typosquats.filter((d) => d.registered);
         const suspiciousCount = registeredLookalikes.filter((d) => d.risk === "high" || d.risk === "medium").length;
-        const imposterCount = socialImposters.filter((i) => i.risk === "high" || i.risk === "medium").length;
+        // #17: only verified social hits affect the numeric threat score.
+        // Heuristic X/Instagram patterns are surfaced in the UI but not scored as confirmed imposters.
+        const verifiedImposters = socialImposters.filter(
+          (i) => i.verificationStatus === "verified" && (i.risk === "high" || i.risk === "medium")
+        );
+        const heuristicImposters = socialImposters.filter(
+          (i) => i.verificationStatus !== "verified" && i.risk !== "low"
+        );
         let threatScore = 100;
         threatScore -= registeredLookalikes.length * 2;
         threatScore -= suspiciousCount * 5;
-        threatScore -= imposterCount * 8;
+        threatScore -= verifiedImposters.length * 8;
         threatScore -= (100 - securityGrade.score) * 0.2;
         threatScore = Math.max(0, Math.min(100, Math.round(threatScore)));
         let riskLevel = "low";
@@ -2324,7 +2331,12 @@ data: ${JSON.stringify(data)}
           security: securityGrade,
           socialMedia: {
             totalChecked: socialImposters.length,
-            impostersFound: socialImposters.filter((i) => i.risk !== "low").length,
+            impostersFound: verifiedImposters.length,
+            heuristicCandidates: heuristicImposters.length,
+            verifiedCount: verifiedImposters.length,
+            unverifiedCount: heuristicImposters.length,
+            method: "heuristic_plus_github_api",
+            disclaimer: "X/Twitter and Instagram results are heuristic handle patterns and are not confirmed to exist. Platforms often block or mislead bot probes. GitHub accounts are checked via the official Users API when available.",
             accounts: socialImposters
           },
           recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters),
