@@ -44,6 +44,10 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    handleAdminApiRequest, renderAdminPage
+} from './admin.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -66,6 +70,12 @@ export default {
       if (reqOrigin && !allowedOrigins.includes(reqOrigin)) {
         return Response.json({ error: "Forbidden: origin not allowed" }, { status: 403, headers: corsHeaders });
       }
+    }
+    if (url.pathname === "/admin" && request.method === "GET") {
+      return renderAdminPage(request, env22, corsHeaders);
+    }
+    if (url.pathname.startsWith("/api/admin/")) {
+      return handleAdminApiRequest(request, env22, corsHeaders);
     }
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
