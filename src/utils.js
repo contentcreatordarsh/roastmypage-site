@@ -89,6 +89,30 @@ function fetchWithTimeout(url, options = {}) {
   const id = setTimeout(() => controller.abort(), timeout2);
   return fetch(url, { ...fetchOptions, signal: controller.signal }).finally(() => clearTimeout(id));
 }
+function parsePaginationParams(searchParams, options = {}) {
+  const {
+    defaultPage = 1,
+    defaultLimit = 24,
+    maxLimit = 50
+  } = options;
+  const parsePositiveInt = (value, fallback) => {
+    const parsed = parseInt(value || "", 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  const parseNonNegativeInt = (value, fallback) => {
+    const parsed = parseInt(value || "", 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  };
+  const requestedPage = parsePositiveInt(searchParams.get("page"), defaultPage);
+  const requestedLimit = parsePositiveInt(searchParams.get("limit"), defaultLimit);
+  const limit = Math.min(requestedLimit, maxLimit);
+  const offsetParam = searchParams.get("offset");
+  const offset = offsetParam !== null
+    ? parseNonNegativeInt(offsetParam, 0)
+    : (requestedPage - 1) * limit;
+  const page = offsetParam !== null ? Math.floor(offset / limit) + 1 : requestedPage;
+  return { page, limit, offset };
+}
 function getTimeAgo(date) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1e3);
   if (seconds < 60) return "just now";
@@ -280,4 +304,4 @@ function isUrlSafeForFetching(urlString) {
       return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
     }
     
-export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, getSecurityHeaders };
+export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, parsePaginationParams, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, getSecurityHeaders };

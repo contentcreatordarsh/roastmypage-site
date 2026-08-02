@@ -7,7 +7,8 @@ import {
   isValidRoastId,
   sanitizeUrl,
   hashUrl,
-  hashIp
+  hashIp,
+  parsePaginationParams
 } from "../src/utils.js";
 
 test("isValidUrl accepts http and https", () => {
@@ -74,4 +75,34 @@ test("hashIp requires a private salt in production", async () => {
   );
   const hash = await hashIp("203.0.113.10", undefined, "development");
   assert.match(hash, /^[a-f0-9]{32}$/);
+});
+
+test("parsePaginationParams defaults invalid page and limit values", () => {
+  const params = new URLSearchParams("page=0&limit=nope");
+
+  assert.deepEqual(parsePaginationParams(params, { defaultLimit: 24, maxLimit: 48 }), {
+    page: 1,
+    limit: 24,
+    offset: 0
+  });
+});
+
+test("parsePaginationParams clamps limit and calculates page offset", () => {
+  const params = new URLSearchParams("page=3&limit=100");
+
+  assert.deepEqual(parsePaginationParams(params, { defaultLimit: 24, maxLimit: 48 }), {
+    page: 3,
+    limit: 48,
+    offset: 96
+  });
+});
+
+test("parsePaginationParams supports explicit offset pagination", () => {
+  const params = new URLSearchParams("offset=32&limit=8");
+
+  assert.deepEqual(parsePaginationParams(params, { defaultLimit: 24, maxLimit: 48 }), {
+    page: 5,
+    limit: 8,
+    offset: 32
+  });
 });
