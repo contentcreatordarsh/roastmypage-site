@@ -13,6 +13,72 @@ var DEV_ORIGINS = [
   "http://127.0.0.1:8787"
 ];
 
+function formatScoreHistoryDate(value) {
+  if (!value) return "";
+  const date = new Date(/Z$/.test(value) ? value : `${value}Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function renderScoreHistorySparkline(history) {
+  const scores = history.map((item) => Number(item.overallScore)).filter(Number.isFinite);
+  if (scores.length === 0) return "";
+  const width = 220;
+  const height = 54;
+  const pad = 4;
+  const points = scores.map((scoreValue, index) => {
+    const x = scores.length === 1 ? width / 2 : pad + index * ((width - pad * 2) / (scores.length - 1));
+    const y = height - pad - (Math.max(0, Math.min(10, scoreValue)) / 10) * (height - pad * 2);
+    return { x, y };
+  });
+  const pointString = points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const first = scores[0];
+  const last = scores[scores.length - 1];
+  const stroke = last > first ? "#22C55E" : last < first ? "#EF4444" : "#FF6B35";
+  return `<svg viewBox="0 0 ${width} ${height}" class="w-full h-16" role="img" aria-label="Score history sparkline">
+    <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" stroke="rgba(245,240,232,0.08)" stroke-width="1" />
+    <polyline fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${pointString}" />
+    ${points.map((point, index) => `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${index === points.length - 1 ? 4 : 3}" fill="${index === points.length - 1 ? stroke : "#F5F0E8"}" opacity="${index === points.length - 1 ? "1" : "0.7"}" />`).join("")}
+  </svg>`;
+}
+
+function renderScoreHistoryCard(history, currentId) {
+  const items = Array.isArray(history) ? history.filter((item) => Number.isFinite(Number(item.overallScore))) : [];
+  if (items.length < 2) return "";
+  const firstScore = Number(items[0].overallScore);
+  const latestScore = Number(items[items.length - 1].overallScore);
+  const change = latestScore - firstScore;
+  const changeColor = change > 0 ? "#22C55E" : change < 0 ? "#EF4444" : "#a1a1a6";
+  const changeLabel = Math.abs(change) < 0.05 ? "No change" : `${change > 0 ? "+" : ""}${change.toFixed(1)} pts`;
+  return `<div class="card p-5 mb-6">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+      <div>
+        <h2 class="text-sm font-semibold text-white">Score history</h2>
+        <p class="text-xs text-[#6e6e73]">${items.length} roasts for this URL, oldest to newest</p>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-[#6e6e73]">Change</div>
+        <div class="text-lg font-bold" style="color:${changeColor}">${changeLabel}</div>
+      </div>
+    </div>
+    <div class="mb-4">${renderScoreHistorySparkline(items)}</div>
+    <div class="grid sm:grid-cols-2 gap-2">
+      ${items.map((item) => {
+        const itemScore = Number(item.overallScore);
+        const isCurrent = item.id === currentId;
+        const itemColor = itemScore >= 8 ? "#22C55E" : itemScore >= 6 ? "#EAB308" : "#EF4444";
+        return `<a href="/roast/${escapeHtml(String(item.id))}" class="flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isCurrent ? "bg-orange-500/10 border-orange-500/25" : "bg-white/[0.03] border-white/[0.05]"} border hover:border-orange-500/30 transition-colors">
+          <div class="min-w-0">
+            <div class="text-xs text-[#d1d1d6]">${formatScoreHistoryDate(item.createdAt) || "Unknown date"}${isCurrent ? " · current" : ""}</div>
+            <div class="text-[11px] text-[#6e6e73] truncate">${escapeHtml(item.device || "unknown")} device</div>
+          </div>
+          <div class="text-sm font-bold" style="color:${itemColor}">${itemScore.toFixed(1)}/10</div>
+        </a>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+
 export function renderRoastPage(params) {
     const {
         roast, hostname, scoreColor, score, emoji, dateStr, categories, sections,
@@ -21,7 +87,7 @@ export function renderRoastPage(params) {
         ogTitle: ogTitleProp, ogDesc: ogDescProp, ogImage: ogImageProp,
         pageUrl: pageUrlProp, createdAt: createdAtProp,
         industrySampleSize: industrySampleSizeProp, heatmap,
-        seoDetailsHtml, perfDetailsHtml
+        seoDetailsHtml, perfDetailsHtml, scoreHistory = []
     } = params;
 
     // Use passed-in OG/meta values or compute fallbacks
@@ -46,6 +112,7 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const scoreHistoryHtml = renderScoreHistoryCard(scoreHistory, roast.id);
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -204,6 +271,8 @@ export function renderRoastPage(params) {
     </div>`;
       })() : ""}
   </div>
+
+  ${scoreHistoryHtml}
 
   <!-- Industry Benchmark + Tweet Callout -->
   <div class="card p-5 mb-6" style="background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(236,72,153,0.06));border-color:rgba(139,92,246,0.2);">
