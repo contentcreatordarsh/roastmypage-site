@@ -1913,25 +1913,48 @@
                         <div class="card p-6">
                             <div class="flex items-center gap-2 mb-4">
                                 <span class="text-xl">⚡</span>
-                                <h3 class="text-lg font-semibold">Core Web Vitals</h3>
+                                <div>
+                                    <h3 class="text-lg font-semibold">Core Web Vitals / timings</h3>
+                                    <p class="text-xs text-[#6e6e73]">Real browser PerformanceTimeline and Navigation Timing data</p>
+                                </div>
                             </div>
                             <div class="space-y-4">
+                                <!-- LCP -->
+                                <div class="p-3 bg-white/[0.05] rounded-xl">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-sm font-medium">Largest Contentful Paint</span>
+                                        <div class="flex items-center gap-2">
+                                            <span id="perf-lcp-status" class="text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.08] text-[#a1a1a6]">-</span>
+                                            <span id="perf-lcp" class="text-sm font-bold">-</span>
+                                        </div>
+                                    </div>
+                                    <div class="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                                        <div id="perf-lcp-bar" class="h-full bg-green-500 rounded-full transition-all duration-700" style="width:0%"></div>
+                                    </div>
+                                    <p class="text-xs text-[#6e6e73] mt-1">Good: &lt;2.5s | Needs work: &lt;4s</p>
+                                </div>
                                 <!-- TTFB -->
                                 <div class="p-3 bg-white/[0.05] rounded-xl">
                                     <div class="flex justify-between items-center mb-1">
                                         <span class="text-sm font-medium">Time to First Byte</span>
-                                        <span id="perf-ttfb" class="text-sm font-bold">-</span>
+                                        <div class="flex items-center gap-2">
+                                            <span id="perf-ttfb-status" class="text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.08] text-[#a1a1a6]">-</span>
+                                            <span id="perf-ttfb" class="text-sm font-bold">-</span>
+                                        </div>
                                     </div>
                                     <div class="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
                                         <div id="perf-ttfb-bar" class="h-full bg-green-500 rounded-full transition-all duration-700" style="width:0%"></div>
                                     </div>
-                                    <p class="text-xs text-[#6e6e73] mt-1">Good: &lt;200ms | Needs work: &lt;600ms</p>
+                                    <p class="text-xs text-[#6e6e73] mt-1">Good: &lt;800ms | Needs work: &lt;1.8s</p>
                                 </div>
                                 <!-- FCP -->
                                 <div class="p-3 bg-white/[0.05] rounded-xl">
                                     <div class="flex justify-between items-center mb-1">
                                         <span class="text-sm font-medium">First Contentful Paint</span>
-                                        <span id="perf-fcp" class="text-sm font-bold">-</span>
+                                        <div class="flex items-center gap-2">
+                                            <span id="perf-fcp-status" class="text-[10px] px-1.5 py-0.5 rounded-full bg-white/[0.08] text-[#a1a1a6]">-</span>
+                                            <span id="perf-fcp" class="text-sm font-bold">-</span>
+                                        </div>
                                     </div>
                                     <div class="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
                                         <div id="perf-fcp-bar" class="h-full bg-green-500 rounded-full transition-all duration-700" style="width:0%"></div>
@@ -1948,6 +1971,20 @@
                                         <div id="perf-load-bar" class="h-full bg-green-500 rounded-full transition-all duration-700" style="width:0%"></div>
                                     </div>
                                     <p class="text-xs text-[#6e6e73] mt-1">Good: &lt;2s | Needs work: &lt;4s</p>
+                                </div>
+                                <div class="grid grid-cols-3 gap-2 pt-1">
+                                    <div class="p-2 bg-white/[0.03] rounded-lg">
+                                        <div class="text-[11px] text-[#6e6e73]">DOMContentLoaded</div>
+                                        <div id="perf-dcl" class="text-sm font-semibold">-</div>
+                                    </div>
+                                    <div class="p-2 bg-white/[0.03] rounded-lg">
+                                        <div class="text-[11px] text-[#6e6e73]">DOM interactive</div>
+                                        <div id="perf-dom-interactive" class="text-sm font-semibold">-</div>
+                                    </div>
+                                    <div class="p-2 bg-white/[0.03] rounded-lg">
+                                        <div class="text-[11px] text-[#6e6e73]">Load event</div>
+                                        <div id="perf-load-event" class="text-sm font-semibold">-</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -5964,40 +6001,71 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     perfBenchLine.classList.remove('hidden');
                 }
                 
-                // Core Web Vitals
-                const loadTimeMs = perf.loadTime;
-                document.getElementById('perf-load-time').textContent = (loadTimeMs / 1000).toFixed(2) + 's';
+                // Core Web Vitals / Navigation Timing
+                const timingText = (value) => typeof value === 'number' && Number.isFinite(value)
+                    ? (value >= 1000 ? (value / 1000).toFixed(2) + 's' : Math.round(value) + 'ms')
+                    : 'N/A';
+                const vitalThresholds = {
+                    lcp: { good: 2500, poor: 4000 },
+                    fcp: { good: 1800, poor: 3000 },
+                    ttfb: { good: 800, poor: 1800 }
+                };
+                const gradeVital = (metric, value) => {
+                    const thresholds = vitalThresholds[metric];
+                    if (!thresholds || typeof value !== 'number' || !Number.isFinite(value)) return 'not-available';
+                    if (value <= thresholds.good) return 'good';
+                    if (value <= thresholds.poor) return 'needs-improvement';
+                    return 'poor';
+                };
+                const ratingLabels = {
+                    good: 'Good',
+                    'needs-improvement': 'Needs improvement',
+                    poor: 'Poor',
+                    'not-available': 'N/A'
+                };
+                const ratingClasses = {
+                    good: { text: 'text-green-400', bar: 'bg-green-500', badge: 'bg-green-500/20 text-green-400' },
+                    'needs-improvement': { text: 'text-yellow-400', bar: 'bg-yellow-500', badge: 'bg-yellow-500/20 text-yellow-400' },
+                    poor: { text: 'text-red-400', bar: 'bg-red-500', badge: 'bg-red-500/20 text-red-400' },
+                    'not-available': { text: 'text-[#a1a1a6]', bar: 'bg-white/[0.12]', badge: 'bg-white/[0.08] text-[#a1a1a6]' }
+                };
+                const setPerfText = (id, text) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = text;
+                };
+                const setVital = (metric, value, maxForBar) => {
+                    const numericValue = typeof value === 'number' && Number.isFinite(value) ? value : null;
+                    const rating = perf.coreWebVitals?.[metric]?.rating || gradeVital(metric, numericValue);
+                    const classes = ratingClasses[rating] || ratingClasses['not-available'];
+                    const valueEl = document.getElementById(`perf-${metric}`);
+                    const statusEl = document.getElementById(`perf-${metric}-status`);
+                    const barEl = document.getElementById(`perf-${metric}-bar`);
+                    if (valueEl) {
+                        valueEl.textContent = timingText(numericValue);
+                        valueEl.className = 'text-sm font-bold ' + classes.text;
+                    }
+                    if (statusEl) {
+                        statusEl.textContent = ratingLabels[rating] || 'N/A';
+                        statusEl.className = 'text-[10px] px-1.5 py-0.5 rounded-full ' + classes.badge;
+                    }
+                    if (barEl) {
+                        barEl.style.width = numericValue === null ? '0%' : Math.min(100, numericValue / maxForBar * 100) + '%';
+                        barEl.className = 'h-full rounded-full transition-all duration-700 ' + classes.bar;
+                    }
+                };
+                const loadTimeMs = perf.loadTime || 0;
+                document.getElementById('perf-load-time').textContent = timingText(loadTimeMs);
                 const loadBar = document.getElementById('perf-load-bar');
                 if (loadBar) {
-                    loadBar.style.width = Math.min(100, (4000 - loadTimeMs) / 40) + '%';
+                    loadBar.style.width = Math.min(100, loadTimeMs / 4000 * 100) + '%';
                     loadBar.className = 'h-full rounded-full transition-all duration-700 ' + (loadTimeMs < 2000 ? 'bg-green-500' : loadTimeMs < 4000 ? 'bg-yellow-500' : 'bg-red-500');
                 }
-                
-                // TTFB
-                const ttfbEl = document.getElementById('perf-ttfb');
-                const ttfbBar = document.getElementById('perf-ttfb-bar');
-                if (ttfbEl && perf.ttfb) {
-                    ttfbEl.textContent = perf.ttfb + 'ms';
-                    ttfbEl.className = 'text-sm font-bold ' + (perf.ttfb < 200 ? 'text-green-400' : perf.ttfb < 600 ? 'text-yellow-400' : 'text-red-400');
-                    if (ttfbBar) {
-                        ttfbBar.style.width = Math.min(100, (800 - perf.ttfb) / 8) + '%';
-                        ttfbBar.className = 'h-full rounded-full transition-all duration-700 ' + (perf.ttfb < 200 ? 'bg-green-500' : perf.ttfb < 600 ? 'bg-yellow-500' : 'bg-red-500');
-                    }
-                }
-                
-                // FCP
-                const fcpEl = document.getElementById('perf-fcp');
-                const fcpBar = document.getElementById('perf-fcp-bar');
-                if (fcpEl && perf.fcp) {
-                    fcpEl.textContent = (perf.fcp / 1000).toFixed(2) + 's';
-                    fcpEl.className = 'text-sm font-bold ' + (perf.fcp < 1800 ? 'text-green-400' : perf.fcp < 3000 ? 'text-yellow-400' : 'text-red-400');
-                    if (fcpBar) {
-                        fcpBar.style.width = Math.min(100, (3000 - perf.fcp) / 30) + '%';
-                        fcpBar.className = 'h-full rounded-full transition-all duration-700 ' + (perf.fcp < 1800 ? 'bg-green-500' : perf.fcp < 3000 ? 'bg-yellow-500' : 'bg-red-500');
-                    }
-                } else if (fcpEl) {
-                    fcpEl.textContent = 'N/A';
-                }
+                setVital('lcp', perf.lcp ?? perf.coreWebVitals?.lcp?.value, 4000);
+                setVital('ttfb', perf.ttfb ?? perf.coreWebVitals?.ttfb?.value, 1800);
+                setVital('fcp', perf.fcp ?? perf.coreWebVitals?.fcp?.value, 3000);
+                setPerfText('perf-dcl', timingText(perf.domContentLoaded));
+                setPerfText('perf-dom-interactive', timingText(perf.domInteractive));
+                setPerfText('perf-load-event', timingText(perf.loadEventEnd));
                 
                 // Resources & Size
                 document.getElementById('perf-resources').textContent = perf.resourceCount;

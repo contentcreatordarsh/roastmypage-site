@@ -25,6 +25,7 @@ import {
 import { capturePageWithMetrics } from './puppeteer.js';
 
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
+import { gradeCoreWebVital } from './performance.js';
 
 import {
     parseMarkdownResponse, ensureLlamaLicenseAgreed, analyzeWithVisionAndHeatmap, 
@@ -2972,40 +2973,69 @@ data: ${JSON.stringify(data)}
         const loadTimeS = (performance22.loadTime / 1e3).toFixed(1);
         const ttfbMs = performance22.ttfb || 0;
         const fcpMs = performance22.fcp || 0;
-        const totalSizeKB = performance22.totalSize ? Math.round(performance22.totalSize / 1024) : null;
+        const lcpMs = performance22.lcp ?? performance22.coreWebVitals?.lcp?.value ?? null;
+        const totalTransferBytes = performance22.totalTransferSize ?? performance22.totalSize ?? 0;
+        const totalSizeKB = totalTransferBytes ? Math.round(totalTransferBytes / 1024) : null;
         const rb = performance22.resourceBreakdown || {};
-        const vitals = [];
-        if (ttfbMs) {
-          const c = ttfbMs < 200 ? "#22C55E" : ttfbMs < 600 ? "#EAB308" : "#EF4444";
-          vitals.push({
-            label: "Time to First Byte (TTFB)",
-            value: `${Math.round(ttfbMs)}ms`,
-            pct: Math.min(100, ttfbMs / 600 * 100),
-            color: c,
-            advice: ttfbMs < 200 ? "Excellent server response time. Your server is responding quickly to requests." : ttfbMs < 600 ? "Your server takes a bit long to respond. Consider using a CDN, optimizing server-side code, or upgrading your hosting." : "Slow server response. This delays everything else. Look into server caching, CDN distribution, database query optimization, or better hosting."
-          });
-        }
-        if (fcpMs) {
-          const c = fcpMs < 1800 ? "#22C55E" : fcpMs < 3e3 ? "#EAB308" : "#EF4444";
-          vitals.push({
-            label: "First Contentful Paint (FCP)",
-            value: `${(fcpMs / 1e3).toFixed(1)}s`,
-            pct: Math.min(100, fcpMs / 3e3 * 100),
-            color: c,
-            advice: fcpMs < 1800 ? "Users see content quickly. This keeps them engaged rather than bouncing." : fcpMs < 3e3 ? "Content takes a moment to appear. Try inlining critical CSS, deferring non-essential scripts, and optimizing web fonts." : "Users wait too long to see any content. Reduce render-blocking resources, inline critical CSS, and lazy-load below-fold assets."
-          });
-        }
-        {
-          const lt = parseFloat(loadTimeS);
-          const c = lt < 2 ? "#22C55E" : lt < 4 ? "#EAB308" : "#EF4444";
-          vitals.push({
-            label: "Page Load Time",
-            value: `${loadTimeS}s`,
-            pct: Math.min(100, lt / 4 * 100),
-            color: c,
-            advice: lt < 2 ? "Fast page load. Users can interact with your page almost immediately." : lt < 4 ? "Page load is acceptable but could be faster. Compress images, minify JS/CSS, and remove unused code." : "Slow page load hurts conversions. Every extra second costs ~7% in conversions. Audit your assets \u2014 compress images, lazy-load, use code splitting."
-          });
-        }
+        const formatTiming = (value) => typeof value === "number" && Number.isFinite(value) ? value >= 1e3 ? `${(value / 1e3).toFixed(1)}s` : `${Math.round(value)}ms` : "N/A";
+        const statusText = {
+          good: "Good",
+          "needs-improvement": "Needs improvement",
+          poor: "Poor",
+          "not-available": "Not available"
+        };
+        const statusStyles = {
+          good: { color: "#22C55E", badge: "bg-green-500/20 text-green-400", panel: "bg-green-500/5 border border-green-500/10" },
+          "needs-improvement": { color: "#EAB308", badge: "bg-yellow-500/20 text-yellow-400", panel: "bg-yellow-500/5 border border-yellow-500/10" },
+          poor: { color: "#EF4444", badge: "bg-red-500/20 text-red-400", panel: "bg-red-500/5 border border-red-500/10" },
+          "not-available": { color: "#6e6e73", badge: "bg-white/[0.08] text-[#a1a1a6]", panel: "bg-white/[0.03] border border-white/[0.06]" }
+        };
+        const vitalAdvice = {
+          lcp: {
+            good: "The largest above-the-fold element renders quickly. Keep hero media optimized and cacheable.",
+            "needs-improvement": "The largest hero element is a bit late. Preload the LCP image, compress hero media, and defer non-critical scripts.",
+            poor: "The largest visible element is slow. Optimize the hero image/video, reduce render-blocking work, and prioritize above-the-fold content.",
+            "not-available": "LCP was not exposed by this browser run, often because the page had no reportable contentful element or the API was unavailable."
+          },
+          fcp: {
+            good: "Users see content quickly. This keeps them engaged rather than bouncing.",
+            "needs-improvement": "Content takes a moment to appear. Inline critical CSS, defer non-essential scripts, and optimize web fonts.",
+            poor: "Users wait too long to see any content. Reduce render-blocking resources, inline critical CSS, and lazy-load below-fold assets.",
+            "not-available": "FCP was not exposed by this browser run."
+          },
+          ttfb: {
+            good: "The server responds quickly, giving the browser a strong start.",
+            "needs-improvement": "The server response is noticeable. Improve caching, origin latency, database work, or CDN routing.",
+            poor: "Slow server response delays every later milestone. Focus on caching, server-side work, and edge delivery.",
+            "not-available": "TTFB was not available from Navigation Timing."
+          }
+        };
+        const vitals = [
+          { key: "lcp", label: "Largest Contentful Paint (LCP)", valueMs: lcpMs, max: 4e3 },
+          { key: "fcp", label: "First Contentful Paint (FCP)", valueMs: fcpMs || null, max: 3e3 },
+          { key: "ttfb", label: "Time to First Byte (TTFB)", valueMs: ttfbMs || null, max: 1800 }
+        ].map((item) => {
+          const valueMs = typeof item.valueMs === "number" && Number.isFinite(item.valueMs) ? item.valueMs : null;
+          const rating = performance22.coreWebVitals?.[item.key]?.rating || gradeCoreWebVital(item.key, valueMs);
+          const styles = statusStyles[rating] || statusStyles["not-available"];
+          return {
+            ...item,
+            value: formatTiming(valueMs),
+            pct: valueMs === null ? 100 : Math.min(100, valueMs / item.max * 100),
+            rating,
+            ratingLabel: statusText[rating] || "Not available",
+            color: styles.color,
+            badgeClass: styles.badge,
+            panelClass: styles.panel,
+            advice: vitalAdvice[item.key][rating] || vitalAdvice[item.key]["not-available"]
+          };
+        });
+        const timingRows = [
+          { label: "Load event", value: performance22.loadEventEnd },
+          { label: "DOMContentLoaded", value: performance22.domContentLoaded },
+          { label: "DOM interactive", value: performance22.domInteractive },
+          { label: "Response end", value: performance22.responseEnd }
+        ].filter((row) => typeof row.value === "number" && Number.isFinite(row.value) && row.value > 0);
         const perfIssueAdvice = {
           "render-blocking": "Move non-critical CSS/JS to load asynchronously. Use defer/async on script tags.",
           "large": "Compress and resize assets. Use WebP for images, minify CSS/JS, enable gzip/brotli.",
@@ -3034,7 +3064,8 @@ data: ${JSON.stringify(data)}
           <div class="grid md:grid-cols-2 gap-4">
             <!-- Core Web Vitals -->
             <div class="card p-5">
-              <h3 class="text-sm font-semibold mb-4">Core Web Vitals</h3>
+              <h3 class="text-sm font-semibold">Core Web Vitals / timings</h3>
+              <p class="text-xs text-[#6e6e73] mt-1 mb-4">Collected from a real browser PerformanceTimeline and Navigation Timing run.</p>
               <div class="space-y-2">
                 ${vitals.map((v) => `<div class="expandable p-3 bg-white/[0.03] rounded-xl" onclick="this.classList.toggle('open')">
                   <div class="flex justify-between items-center mb-1">
@@ -3042,16 +3073,28 @@ data: ${JSON.stringify(data)}
                       <span class="expand-icon">&#9654;</span>
                       <span class="text-xs text-[#a1a1a6]">${v.label}</span>
                     </div>
-                    <span class="text-xs font-bold" style="color:${v.color}">${v.value}</span>
+                    <div class="flex items-center gap-2">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded-full ${v.badgeClass}">${v.ratingLabel}</span>
+                      <span class="text-xs font-bold" style="color:${v.color}">${v.value}</span>
+                    </div>
                   </div>
                   <div class="h-1 bg-white/[0.06] rounded-full overflow-hidden ml-5"><div class="h-full rounded-full" style="width:${v.pct}%;background:${v.color}"></div></div>
                   <div class="expand-detail mt-2 ml-5">
-                    <div class="p-2.5 ${v.color === "#22C55E" ? "bg-green-500/5 border border-green-500/10" : "bg-yellow-500/5 border border-yellow-500/10"} rounded-lg">
+                    <div class="p-2.5 ${v.panelClass} rounded-lg">
                       <p class="text-xs text-[#d1d1d6] leading-relaxed">${v.advice}</p>
                     </div>
                   </div>
                 </div>`).join("\n                ")}
               </div>
+              ${timingRows.length > 0 ? `<div class="mt-4 pt-3 border-t border-white/[0.06]">
+                <h4 class="text-xs font-semibold text-[#d1d1d6] mb-2">Navigation Timing</h4>
+                <div class="grid grid-cols-2 gap-2">
+                  ${timingRows.map((row) => `<div class="p-2 bg-white/[0.03] rounded-lg">
+                    <div class="text-[11px] text-[#6e6e73]">${row.label}</div>
+                    <div class="text-sm font-semibold text-[#f5f5f7]">${formatTiming(row.value)}</div>
+                  </div>`).join("")}
+                </div>
+              </div>` : ""}
             </div>
 
             <!-- Page Weight -->

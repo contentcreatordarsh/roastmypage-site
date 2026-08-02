@@ -4,6 +4,7 @@ import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
 import { analyzeVideoSignals } from './video.js';
+import { buildCoreWebVitals, gradeCoreWebVital } from './performance.js';
 
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;
@@ -35,6 +36,26 @@ async function capturePageWithMetrics(env22, url, options = {}) {
       });
     } catch (e) {
       console.warn("Request interception unavailable; relying on post-navigation URL check:", e?.message || e);
+    }
+    try {
+      await page.evaluateOnNewDocument(() => {
+        window.__rmlpPerformanceTimings = { lcp: null };
+        try {
+          const observer = new PerformanceObserver((entryList) => {
+            const entries = entryList.getEntries();
+            const lastEntry = entries[entries.length - 1];
+            if (lastEntry) {
+              window.__rmlpPerformanceTimings.lcp = lastEntry.startTime;
+            }
+          });
+          observer.observe({ type: "largest-contentful-paint", buffered: true });
+          window.__rmlpPerformanceTimings.lcpObserver = observer;
+        } catch {
+          // LCP is best-effort: older browsers or restricted contexts may not expose it.
+        }
+      });
+    } catch (e) {
+      console.warn("LCP observer injection unavailable:", e?.message || e);
     }
     const startTime = Date.now();
     try {
@@ -193,7 +214,6 @@ async function capturePageWithMetrics(env22, url, options = {}) {
       let perfData = {
         domContentLoaded: 0,
         domInteractive: 0,
-        loadEventEnd: 0,
         resourceCount: 0,
         resourceBreakdown: {
           scripts: { count: 0, size: 0 },
@@ -204,13 +224,20 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         },
         totalTransferSize: 0,
         fcp: null,
-        ttfb: 0
+        lcp: null,
+        ttfb: 0,
+        loadEventEnd: 0,
+        loadEventStart: 0,
+        responseEnd: 0,
+        requestStart: 0,
+        responseStart: 0
       };
       try {
         perfData = await page.evaluate(() => {
           const perf = window.performance.getEntriesByType("navigation")[0];
           const resources = window.performance.getEntriesByType("resource") || [];
           const paint = window.performance.getEntriesByType("paint") || [];
+          const lcpEntries = window.performance.getEntriesByType("largest-contentful-paint") || [];
           const resourceBreakdown = {
             scripts: { count: 0, size: 0 },
             stylesheets: { count: 0, size: 0 },
@@ -239,16 +266,27 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           });
           const fcpEntry = paint.find((p) => p.name === "first-contentful-paint");
           const fcp = fcpEntry ? fcpEntry.startTime : null;
-          const totalTransferSize = resources.reduce((sum, r) => sum + (r.transferSize || 0), 0);
+          const lcpEntry = lcpEntries[lcpEntries.length - 1];
+          const observedLcp = window.__rmlpPerformanceTimings?.lcp;
+          const lcp = typeof observedLcp === "number" ? observedLcp : lcpEntry?.startTime ?? null;
+          const requestStart = perf?.requestStart || 0;
+          const responseStart = perf?.responseStart || 0;
+          const ttfb = responseStart ? Math.max(0, responseStart - (requestStart || 0)) : 0;
+          const totalTransferSize = resources.reduce((sum, r) => sum + (r.transferSize || 0), perf?.transferSize || 0);
           return {
             domContentLoaded: perf?.domContentLoadedEventEnd || 0,
             domInteractive: perf?.domInteractive || 0,
             loadEventEnd: perf?.loadEventEnd || 0,
+            loadEventStart: perf?.loadEventStart || 0,
+            responseEnd: perf?.responseEnd || 0,
+            requestStart,
+            responseStart,
             resourceCount: resources.length,
             resourceBreakdown,
             totalTransferSize,
             fcp,
-            ttfb: perf?.responseStart || 0
+            lcp,
+            ttfb
           };
         });
       } catch (e) {
@@ -343,21 +381,34 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         perfScore -= 5;
       }
       if (perfData.fcp) {
-        if (perfData.fcp > 3e3) {
+        const fcpRating = gradeCoreWebVital("fcp", perfData.fcp);
+        if (fcpRating === "poor") {
           perfIssues.push("Slow First Contentful Paint (> 3s)");
           perfScore -= 15;
           perfRecommendations.push("Reduce server response time and eliminate render-blocking resources");
-        } else if (perfData.fcp > 1800) {
+        } else if (fcpRating === "needs-improvement") {
           perfIssues.push("FCP needs improvement (> 1.8s)");
           perfScore -= 5;
         }
       }
-      if (perfData.ttfb > 800) {
-        perfIssues.push("Slow server response (TTFB > 800ms)");
-        perfScore -= 10;
-        perfRecommendations.push("Optimize server-side processing or use a CDN");
-      } else if (perfData.ttfb > 400) {
-        perfIssues.push("Server response could be faster (TTFB > 400ms)");
+      if (perfData.lcp) {
+        const lcpRating = gradeCoreWebVital("lcp", perfData.lcp);
+        if (lcpRating === "poor") {
+          perfIssues.push("Poor Largest Contentful Paint (> 4s)");
+          perfScore -= 15;
+          perfRecommendations.push("Optimize the hero image, defer non-critical scripts, and preload the LCP asset");
+        } else if (lcpRating === "needs-improvement") {
+          perfIssues.push("LCP needs improvement (> 2.5s)");
+          perfScore -= 7;
+        }
+      }
+      const ttfbRating = gradeCoreWebVital("ttfb", perfData.ttfb);
+      if (ttfbRating === "poor") {
+        perfIssues.push("Poor server response (TTFB > 1.8s)");
+        perfScore -= 15;
+        perfRecommendations.push("Optimize server-side processing, caching, or CDN routing");
+      } else if (ttfbRating === "needs-improvement") {
+        perfIssues.push("Server response needs improvement (TTFB > 800ms)");
         perfScore -= 5;
       }
       if (perfData.resourceCount > 100) {
@@ -447,7 +498,18 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         totalTransferSize: perfData.totalTransferSize,
         resourceBreakdown: perfData.resourceBreakdown,
         fcp: perfData.fcp,
+        lcp: perfData.lcp,
         ttfb: perfData.ttfb,
+        loadEventEnd: perfData.loadEventEnd,
+        loadEventStart: perfData.loadEventStart,
+        responseEnd: perfData.responseEnd,
+        requestStart: perfData.requestStart,
+        responseStart: perfData.responseStart,
+        coreWebVitals: buildCoreWebVitals({
+          lcp: perfData.lcp,
+          fcp: perfData.fcp,
+          ttfb: perfData.ttfb
+        }),
         issues: perfIssues,
         recommendations: perfRecommendations,
         videoImpact: video.present ? video.performance.impact : 0
