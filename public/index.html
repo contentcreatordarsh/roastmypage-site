@@ -1030,6 +1030,13 @@
                     <div id="batch-results" class="hidden space-y-3 pt-2 border-t border-white/[0.06]"></div>
                 </div>
             </div>
+
+            <div id="turnstile-container" class="hidden max-w-xl mx-auto mb-4 flex justify-center">
+                <div class="text-center">
+                    <div id="turnstile-widget"></div>
+                    <p class="mt-2 text-[11px] text-cream-300/30 tracking-wide">Protected by Cloudflare Turnstile</p>
+                </div>
+            </div>
             
             <p class="text-[12px] text-cream-300/30 tracking-wide">~30 seconds · free</p>
             <div id="rate-limit-warning" class="hidden mt-4 p-4 border border-red-500/25 rounded-xl text-red-400/90 text-[13px]">
@@ -4249,6 +4256,13 @@
         let currentTab = 'single';
         let fullPageMode = false;
         const HISTORY_KEY = 'roast_history';
+        let turnstileSiteKey = null;
+        let turnstileWidgetId = null;
+        let turnstileToken = null;
+        let turnstileConfigPromise = null;
+        let turnstileScriptPromise = null;
+        let turnstilePendingResolve = null;
+        let turnstilePendingReject = null;
         
         // Queue state
         let queueCountdown = 0;
@@ -4256,6 +4270,115 @@
         let pendingUrl = null;
         let retryCount = 0;
         const MAX_AUTO_RETRIES = 3;
+
+        function loadTurnstileScript() {
+            if (window.turnstile) return Promise.resolve();
+            if (turnstileScriptPromise) return turnstileScriptPromise;
+
+            turnstileScriptPromise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+                script.async = true;
+                script.defer = true;
+                script.onload = resolve;
+                script.onerror = () => reject(new Error('Bot check failed to load. Please refresh and try again.'));
+                document.head.appendChild(script);
+            });
+
+            return turnstileScriptPromise;
+        }
+
+        function resolvePendingTurnstile(token) {
+            turnstileToken = token;
+            if (turnstilePendingResolve) {
+                turnstilePendingResolve(token);
+                turnstilePendingResolve = null;
+                turnstilePendingReject = null;
+            }
+        }
+
+        function rejectPendingTurnstile(message) {
+            turnstileToken = null;
+            if (turnstilePendingReject) {
+                turnstilePendingReject(new Error(message));
+                turnstilePendingResolve = null;
+                turnstilePendingReject = null;
+            }
+        }
+
+        async function initTurnstile() {
+            try {
+                const response = await fetch('/api/config');
+                if (!response.ok) return;
+                const config = await response.json();
+                turnstileSiteKey = config.turnstileSiteKey || null;
+                if (!turnstileSiteKey) return;
+
+                document.getElementById('turnstile-container')?.classList.remove('hidden');
+                await loadTurnstileScript();
+
+                if (!window.turnstile || turnstileWidgetId !== null) return;
+                turnstileWidgetId = window.turnstile.render('#turnstile-widget', {
+                    sitekey: turnstileSiteKey,
+                    theme: 'dark',
+                    appearance: 'interaction-only',
+                    execution: 'execute',
+                    callback: resolvePendingTurnstile,
+                    'expired-callback': () => { turnstileToken = null; },
+                    'timeout-callback': () => rejectPendingTurnstile('Bot check timed out. Please try again.'),
+                    'error-callback': () => rejectPendingTurnstile('Bot check failed. Please try again.')
+                });
+            } catch (error) {
+                console.warn('Turnstile unavailable:', error);
+            }
+        }
+
+        function ensureTurnstileReady() {
+            if (!turnstileConfigPromise) turnstileConfigPromise = initTurnstile();
+            return turnstileConfigPromise;
+        }
+
+        async function getTurnstileToken() {
+            await ensureTurnstileReady();
+            if (!turnstileSiteKey) return null;
+            if (turnstileToken) return turnstileToken;
+            if (!window.turnstile || turnstileWidgetId === null) {
+                throw new Error('Bot check is still loading. Please try again.');
+            }
+
+            return new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => {
+                    rejectPendingTurnstile('Bot check timed out. Please try again.');
+                }, 30000);
+
+                turnstilePendingResolve = (token) => {
+                    clearTimeout(timeoutId);
+                    resolve(token);
+                };
+                turnstilePendingReject = (error) => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                };
+
+                try {
+                    window.turnstile.execute(turnstileWidgetId);
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    turnstilePendingResolve = null;
+                    turnstilePendingReject = null;
+                    reject(error);
+                }
+            });
+        }
+
+        function resetTurnstile() {
+            turnstileToken = null;
+            turnstilePendingResolve = null;
+            turnstilePendingReject = null;
+            if (window.turnstile && turnstileWidgetId !== null) {
+                window.turnstile.reset(turnstileWidgetId);
+            }
+        }
 
         // Full page toggle
         function setFullPage(enabled) {
@@ -5239,16 +5362,27 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             urlInput.value = url;
             try { new URL(url); } catch { return showToast('Invalid URL', 'error'); }
 
+            let token = null;
+            try {
+                token = await getTurnstileToken();
+            } catch (error) {
+                resetTurnstile();
+                showToast(error.message || 'Bot check failed. Please try again.', 'error');
+                return;
+            }
+
             // Show simple loading modal
             showLoadingModal();
             document.getElementById('roast-btn').disabled = true;
             document.getElementById('btn-text').textContent = 'Analyzing...';
 
             try {
+                const payload = { url, device: currentDevice, fullPage: fullPageMode };
+                if (token) payload.turnstileToken = token;
                 const response = await fetch('/api/roast-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url, device: currentDevice, fullPage: fullPageMode })
+                    body: JSON.stringify(payload)
                 });
 
                 if (response.status === 429) {
@@ -5318,6 +5452,8 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 } else {
                     showToast(error.message, 'error');
                 }
+            } finally {
+                resetTurnstile();
             }
         }
 
@@ -5433,10 +5569,13 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 const setBar = (sel, pct) => { const el = document.getElementById(sel); if (el) el.style.width = `${Math.max(0, Math.min(100, pct))}%`; };
                 try {
                     set(`batch-status-${i}`, 'Starting...');
+                    const token = await getTurnstileToken();
+                    const payload = { url: u, device: currentDevice, fullPage: false };
+                    if (token) payload.turnstileToken = token;
                     const resp = await fetch('/api/roast-stream', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: u, device: currentDevice, fullPage: false })
+                        body: JSON.stringify(payload)
                     });
                     if (resp.status === 429) {
                         const d = await resp.json();
@@ -5502,6 +5641,8 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     set(`batch-status-${i}`, (e && e.message) || 'Failed');
                     setBar(`batch-progress-${i}`, 0);
                     return null;
+                } finally {
+                    resetTurnstile();
                 }
             }
 
@@ -9588,6 +9729,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
 
         // Initialize leaderboard, wall of shame, and feed on load
         window.addEventListener('load', () => {
+            ensureTurnstileReady();
             applyAppRoute();
             loadLeaderboard('weekly');
             loadWallOfShame();
