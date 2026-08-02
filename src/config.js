@@ -37,6 +37,8 @@ const CONFIG = {
   // Feedback submissions per hour
   RATE_LIMIT_SUBSCRIBE_MAX: 10,
   // Email subscribe per hour
+  RATE_LIMIT_EXPORT_MAX: 5,
+  // GDPR data exports per hour
   RATE_LIMIT_THREAT_MAX: 10,
   // Threat scans per hour
   RATE_LIMIT_WINDOW_MINUTES: 60,

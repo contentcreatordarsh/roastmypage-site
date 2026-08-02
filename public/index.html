@@ -3303,6 +3303,55 @@
         </div>
     </div>
 
+    <!-- Privacy Modal -->
+    <div id="privacy-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6" onclick="if(event.target===this)hidePrivacyModal()">
+        <div class="card max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center p-6 border-b border-white/[0.04]">
+                <div>
+                    <h3 class="text-xl font-bold">Privacy at Roast My Landing Page</h3>
+                    <p class="text-xs text-[#6e6e73] mt-1">Short version for visitors and people who request a roast.</p>
+                </div>
+                <button onclick="hidePrivacyModal()" class="text-[#a1a1a6] hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1 space-y-4 text-sm text-[#a1a1a6] leading-relaxed">
+                <p>Roasts are public by design. A generated report can be opened by anyone with its link and may appear in public areas such as the gallery, leaderboard, feed, or social previews.</p>
+                <p>We hash requester IP addresses before storing rate-limit and feedback records. Data exports intentionally do not return IP hashes.</p>
+                <p>Screenshots, roast text, scores, audit data, feedback, and optional subscriber emails are stored so reports can be viewed, shared, improved, and protected from abuse.</p>
+                <p>Public roast data and screenshots are retained while they are useful for the service and public report links. Feedback and subscriber records are retained for product support and updates unless removal is requested.</p>
+                <p>Want a roast or related data removed? Email <a href="mailto:contentcreatordarsh@gmail.com?subject=Roast%20My%20Page%20privacy%20request" class="text-orange-400 hover:text-orange-300">contentcreatordarsh@gmail.com</a> with the roast link or ID. A self-serve opt-out / remove-my-roast flow is coming.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Export Modal -->
+    <div id="data-export-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6" onclick="if(event.target===this)hideDataExportModal()">
+        <div class="card max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center p-6 border-b border-white/[0.04]">
+                <div>
+                    <h3 class="text-xl font-bold">Export my data</h3>
+                    <p class="text-xs text-[#6e6e73] mt-1">Download subscriber and feedback records tied to your email.</p>
+                </div>
+                <button onclick="hideDataExportModal()" class="text-[#a1a1a6] hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1 space-y-5">
+                <div>
+                    <label for="data-export-email" class="text-sm text-[#a1a1a6] mb-2 block">Email address</label>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="email" id="data-export-email" placeholder="you@company.com" class="input-dark flex-1 px-4 py-3 rounded-xl text-sm">
+                        <button onclick="requestDataExport()" id="data-export-btn" class="btn-primary px-5 py-3 rounded-xl text-sm font-semibold">Export JSON</button>
+                    </div>
+                    <div id="data-export-message" class="hidden mt-3 text-sm"></div>
+                </div>
+                <div class="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                    <div class="text-sm font-semibold mb-1">Include roast history from this browser</div>
+                    <p class="text-xs text-[#6e6e73] mb-3">If you have generated roasts on this device, you can also download public roast JSON for IDs saved in local history.</p>
+                    <button onclick="exportLocalRoastHistory()" id="local-history-export-btn" class="px-4 py-2 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] text-sm text-[#d1d1d6] transition-colors">Download local roast history JSON</button>
+                    <div id="local-history-export-message" class="hidden mt-3 text-xs"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Changelog Modal -->
     <div id="changelog-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
             <div class="card max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col">
@@ -4118,6 +4167,8 @@
                         <li><span class="text-[13px] text-[#6e6e73]">100% Free</span></li>
                         <li><span class="text-[13px] text-[#6e6e73]">No Signup Required</span></li>
                         <li><span class="text-[13px] text-[#6e6e73]">Open Analysis</span></li>
+                        <li><a href="#privacy" onclick="showPrivacyModal()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Privacy</a></li>
+                        <li><a href="#export-data" onclick="showDataExportModal()" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Export my data</a></li>
                         <li><a href="/roast/self-roast-01" class="text-[13px] text-[#6e6e73] hover:text-[#d1d1d6] transition-colors">Our Own Roast</a></li>
                     </ul>
                     <h4 class="text-[12px] font-semibold text-[#a1a1a6] uppercase tracking-[0.08em] mb-3 mt-5">Contact</h4>
@@ -4209,6 +4260,22 @@
         </div>
     </div>
 
+    <!-- Consent Banner -->
+    <div id="consent-banner" class="hidden fixed inset-x-0 bottom-0 z-50 p-4 sm:p-6">
+        <div class="max-w-5xl mx-auto card bg-[#12100E]/95 border-white/[0.12] shadow-2xl p-4 sm:p-5">
+            <div class="flex flex-col md:flex-row md:items-center gap-4">
+                <div class="flex-1">
+                    <div class="text-sm font-semibold mb-1">Privacy and consent</div>
+                    <p class="text-xs sm:text-sm text-[#a1a1a6] leading-relaxed">We store public roast reports, screenshots, hashed IP signals for abuse prevention, and optional emails for exports or updates. Review the short privacy note anytime.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="showPrivacyModal()" class="px-4 py-2 rounded-lg border border-white/[0.1] text-sm text-[#d1d1d6] hover:border-white/[0.2] transition-colors">Privacy</button>
+                    <button onclick="acceptConsent()" class="btn-primary px-5 py-2 rounded-lg text-sm font-semibold">Got it</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // ===== SECURITY: XSS Prevention =====
         // Sanitize strings to prevent XSS attacks
@@ -4249,6 +4316,153 @@
         let currentTab = 'single';
         let fullPageMode = false;
         const HISTORY_KEY = 'roast_history';
+        const CONSENT_KEY = 'rmlp_consent';
+        const CONSENT_VERSION = '2026-08-02';
+        
+        function getStoredConsent() {
+            try {
+                return JSON.parse(localStorage.getItem(CONSENT_KEY) || 'null');
+            } catch {
+                return null;
+            }
+        }
+        
+        function maybeShowConsentBanner() {
+            const consent = getStoredConsent();
+            const banner = document.getElementById('consent-banner');
+            if (banner && (!consent || consent.version !== CONSENT_VERSION)) {
+                banner.classList.remove('hidden');
+            }
+        }
+        
+        function acceptConsent() {
+            localStorage.setItem(CONSENT_KEY, JSON.stringify({
+                version: CONSENT_VERSION,
+                timestamp: new Date().toISOString()
+            }));
+            document.getElementById('consent-banner')?.classList.add('hidden');
+        }
+        
+        function showPrivacyModal() {
+            document.getElementById('privacy-modal')?.classList.remove('hidden');
+        }
+        
+        function hidePrivacyModal() {
+            document.getElementById('privacy-modal')?.classList.add('hidden');
+            if (location.hash === '#privacy') history.replaceState(null, '', location.pathname + location.search);
+        }
+        
+        function showDataExportModal() {
+            const modal = document.getElementById('data-export-modal');
+            const input = document.getElementById('data-export-email');
+            if (input && !input.value) input.value = localStorage.getItem('userEmail') || '';
+            modal?.classList.remove('hidden');
+        }
+        
+        function hideDataExportModal() {
+            document.getElementById('data-export-modal')?.classList.add('hidden');
+            if (location.hash === '#export-data') history.replaceState(null, '', location.pathname + location.search);
+        }
+        
+        function downloadJson(filename, data) {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+        
+        function setExportMessage(id, message, type = 'info') {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const colors = {
+                success: 'text-green-400',
+                error: 'text-red-400',
+                info: 'text-[#a1a1a6]'
+            };
+            el.textContent = message;
+            el.className = `mt-3 ${id === 'local-history-export-message' ? 'text-xs' : 'text-sm'} ${colors[type] || colors.info}`;
+            el.classList.remove('hidden');
+        }
+        
+        async function requestDataExport() {
+            const input = document.getElementById('data-export-email');
+            const btn = document.getElementById('data-export-btn');
+            const email = input?.value.trim() || '';
+            if (!email || !email.includes('@')) {
+                setExportMessage('data-export-message', 'Please enter a valid email address.', 'error');
+                return;
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Exporting...';
+            }
+            try {
+                const res = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Export failed');
+                localStorage.setItem('userEmail', data.email);
+                downloadJson(`roastmypage-data-export-${data.email.replace(/[^a-z0-9]+/gi, '-')}.json`, data);
+                setExportMessage('data-export-message', `Export ready: ${data.emailSubscribers.length} subscriber record(s), ${data.feedback.length} feedback record(s).`, 'success');
+            } catch (err) {
+                setExportMessage('data-export-message', err.message || 'Export failed. Please try again.', 'error');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Export JSON';
+                }
+            }
+        }
+        
+        async function exportLocalRoastHistory() {
+            const btn = document.getElementById('local-history-export-btn');
+            const historyItems = getHistory();
+            const ids = [...new Set(historyItems.map((item) => item.id).filter((id) => /^[a-z0-9][\w-]{1,30}$/i.test(id)))];
+            if (ids.length === 0) {
+                setExportMessage('local-history-export-message', 'No local roast history found in this browser.', 'error');
+                return;
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Downloading...';
+            }
+            const roasts = [];
+            const errors = [];
+            await Promise.all(ids.map(async (id) => {
+                try {
+                    const res = await fetch(`/api/roast/${encodeURIComponent(id)}`);
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Not available');
+                    roasts.push(data);
+                } catch (err) {
+                    errors.push({ id, error: err.message || 'Failed to load roast' });
+                }
+            }));
+            downloadJson('roastmypage-local-roast-history.json', {
+                generatedAt: new Date().toISOString(),
+                source: 'localStorage roast_history',
+                roastIds: ids,
+                roasts,
+                errors
+            });
+            setExportMessage('local-history-export-message', `Downloaded ${roasts.length} roast(s)${errors.length ? `; ${errors.length} unavailable.` : '.'}`, errors.length && !roasts.length ? 'error' : 'success');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Download local roast history JSON';
+            }
+        }
+        
+        maybeShowConsentBanner();
+        if (location.hash === '#privacy') showPrivacyModal();
+        if (location.hash === '#export-data') showDataExportModal();
         
         // Queue state
         let queueCountdown = 0;
