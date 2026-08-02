@@ -4,6 +4,7 @@ import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
 import { analyzeVideoSignals } from './video.js';
+import { detectPageLanguage } from './language.js';
 
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;
@@ -49,6 +50,21 @@ async function capturePageWithMetrics(env22, url, options = {}) {
       const seoData = await page.evaluate(() => {
         const title22 = document.title || "";
         const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
+        const languageHints = {
+          htmlLang: document.documentElement.getAttribute("lang") || "",
+          metaLanguage: "",
+          contentLanguage: "",
+          ogLocale: ""
+        };
+        Array.from(document.querySelectorAll("meta")).forEach((meta) => {
+          const name = (meta.getAttribute("name") || "").toLowerCase();
+          const property = (meta.getAttribute("property") || "").toLowerCase();
+          const httpEquiv = (meta.getAttribute("http-equiv") || "").toLowerCase();
+          const content = meta.getAttribute("content") || "";
+          if (!languageHints.metaLanguage && name === "language") languageHints.metaLanguage = content;
+          if (!languageHints.contentLanguage && httpEquiv === "content-language") languageHints.contentLanguage = content;
+          if (!languageHints.ogLocale && property === "og:locale") languageHints.ogLocale = content;
+        });
         const h1Elements = document.querySelectorAll("h1");
         const h2Count = document.querySelectorAll("h2").length;
         const imgsWithoutAlt = document.querySelectorAll("img:not([alt]), img[alt='']").length;
@@ -187,9 +203,11 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           h2Count,
           imgWithoutAlt: imgsWithoutAlt,
           accessibility: a11y,
+          languageHints,
           videoRaw: { count: items.length, items }
         };
       });
+      const pageLanguage = detectPageLanguage(seoData.languageHints);
       let perfData = {
         domContentLoaded: 0,
         domInteractive: 0,
@@ -428,6 +446,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         imgWithoutAlt: seoData.imgWithoutAlt,
         issues: seoIssues,
         accessibility: seoData.accessibility,
+        pageLanguage,
         hasVideo: video.present,
         videoCount: video.count,
         video,
@@ -457,6 +476,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         seo,
         performance: performance22,
         video,
+        pageLanguage,
         pageDimensions,
         foldLinePercent,
         isFullPage: fullPage
