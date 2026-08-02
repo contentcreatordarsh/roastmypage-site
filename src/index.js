@@ -44,6 +44,10 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 
+import {
+    sendEmail, sendRoastReportEmail, welcomeTipsHtml, weeklyTipsHtml, isValidEmail
+} from './mail.js';
+
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
@@ -940,8 +944,7 @@ data: ${JSON.stringify(data)}
         const body = await request.json();
         const rawEmail = body.email;
         const roastId = body.roastId;
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!rawEmail || rawEmail.length > 254 || !emailRegex.test(rawEmail)) {
+        if (!isValidEmail(rawEmail)) {
           return Response.json({ error: "Please provide a valid email address" }, { status: 400, headers: corsHeaders });
         }
         const subIp = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -954,9 +957,67 @@ data: ${JSON.stringify(data)}
         const validRoastId = isValidRoastIdLoose(roastId) ? roastId : null;
         const id = generateId();
         await env22.DB.prepare(`INSERT OR IGNORE INTO email_subscribers (id, email, roast_id) VALUES (?, ?, ?)`).bind(id, email, validRoastId).run();
-        return Response.json({ success: true, message: "Subscribed successfully!" }, { headers: corsHeaders });
+        const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
+        // #47 — send welcome tips + roast report via Cloudflare Email Workers
+        const emailJobs = [
+          sendEmail(env22, {
+            to: email,
+            subject: "Landing page tips from Roast My Landing Page",
+            html: welcomeTipsHtml({ email, baseUrl: base }),
+            text: `Thanks for subscribing. Roast another page at ${base}`
+          })
+        ];
+        if (validRoastId) {
+          emailJobs.push(sendRoastReportEmail(env22, { to: email, roastId: validRoastId, baseUrl: base }));
+        }
+        ctx.waitUntil(Promise.all(emailJobs));
+        return Response.json({
+          success: true,
+          message: "Subscribed successfully!",
+          emailQueued: !!env22.EMAIL
+        }, { headers: corsHeaders });
       } catch (error32) {
         return Response.json({ error: "Failed to subscribe" }, { status: 500, headers: corsHeaders });
+      }
+    }
+    // #47 — email a roast report on demand
+    if (url.pathname === "/api/email-report" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const email = String(body.email || "").toLowerCase().trim();
+        const roastId = body.roastId;
+        if (!isValidEmail(email)) {
+          return Response.json({ error: "Valid email required" }, { status: 400, headers: corsHeaders });
+        }
+        if (!isValidRoastIdLoose(roastId)) {
+          return Response.json({ error: "Valid roastId required" }, { status: 400, headers: corsHeaders });
+        }
+        if (!env22.EMAIL) {
+          return Response.json({
+            error: "Email delivery is not configured. Add a Cloudflare send_email binding named EMAIL."
+          }, { status: 503, headers: corsHeaders });
+        }
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "subscribe");
+        if (!rateLimit.allowed) {
+          return Response.json({ error: "Too many email requests. Try again later." }, { status: 429, headers: corsHeaders });
+        }
+        const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
+        // Also record as subscriber for tips digests
+        ctx.waitUntil(
+          env22.DB.prepare(`INSERT OR IGNORE INTO email_subscribers (id, email, roast_id) VALUES (?, ?, ?)`)
+            .bind(generateId(), email, roastId).run()
+        );
+        const result = await sendRoastReportEmail(env22, { to: email, roastId, baseUrl: base });
+        return Response.json({
+          success: result.sent,
+          messageId: result.messageId || null,
+          error: result.sent ? null : result.reason
+        }, { status: result.sent ? 200 : 502, headers: corsHeaders });
+      } catch (error32) {
+        safeLogError("Email report failed:", error32);
+        return Response.json({ error: "Failed to send email report" }, { status: 500, headers: corsHeaders });
       }
     }
     if (url.pathname.startsWith("/api/badge/") && request.method === "GET" && !url.pathname.includes("/html")) {
@@ -3384,6 +3445,40 @@ data: ${JSON.stringify(data)}
       return env22.ASSETS.fetch(request);
     }
     return new Response("Not Found", { status: 404 });
+  },
+
+  // #47 — weekly tips digest via Cloudflare Email Workers
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        if (!env.EMAIL) {
+          console.log("[email-digest] EMAIL binding missing — skip");
+          return;
+        }
+        const base = env.BASE_URL || PRODUCTION_ORIGINS[0];
+        const stats = await env.DB.prepare(
+          "SELECT COUNT(*) as c, AVG(overall_score) as avg FROM roasts WHERE created_at > datetime('now','-7 day')"
+        ).first();
+        const subs = await env.DB.prepare(
+          "SELECT email FROM email_subscribers ORDER BY created_at DESC LIMIT 100"
+        ).all();
+        const avg = Number(stats?.avg || 0).toFixed(1);
+        const count = Number(stats?.c || 0);
+        const html = weeklyTipsHtml({ avgScore: avg, roastCount: count, baseUrl: base });
+        for (const row of subs.results || []) {
+          if (!isValidEmail(row.email)) continue;
+          await sendEmail(env, {
+            to: row.email,
+            subject: "Weekly landing page tips",
+            html,
+            text: `This week: ${count} roasts, avg ${avg}/10. Roast another page at ${base}`
+          });
+        }
+        console.log(`[email-digest] attempted ${(subs.results || []).length} sends`);
+      } catch (err) {
+        console.error("[email-digest] failed", err);
+      }
+    })());
   }
 
 };

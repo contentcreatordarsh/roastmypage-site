@@ -36,8 +36,19 @@ id = "a278379c19e0426298741337ed23a315"
 [vars]
 ENVIRONMENT = "development"
 BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
+EMAIL_FROM = "Roast My Landing Page <noreply@roastmypage.site>"
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
+
+# #47 — Cloudflare Email Workers / Email Service outbound binding.
+# Onboard the sending domain in Cloudflare Dashboard → Email Service,
+# then deploy. Locally, wrangler simulates sends (or use remote = true).
+[[send_email]]
+name = "EMAIL"
+
+# Weekly tips digest for subscribers (Mon 15:00 UTC)
+[triggers]
+crons = ["0 15 * * 1"]
 
 # ============================================================================
 # PRODUCTION ENVIRONMENT  (deploy via:  npx wrangler deploy --env production)
@@ -75,5 +86,12 @@ id = "a0e0cee4c5e54235a12ee8dcc262f41a"
 [env.production.vars]
 ENVIRONMENT = "production"
 BASE_URL = "https://roastmypage.site"
+EMAIL_FROM = "Roast My Landing Page <noreply@roastmypage.site>"
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
+
+[[env.production.send_email]]
+name = "EMAIL"
+
+[env.production.triggers]
+crons = ["0 15 * * 1"]
