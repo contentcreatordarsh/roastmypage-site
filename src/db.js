@@ -1,6 +1,34 @@
 import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './config.js';
-import { getApiDayKey } from './utils.js';
+import { generateId, getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
+
+const ANNOTATION_STATUSES = new Set(["fixed", "wontfix"]);
+
+function normalizeAnnotationStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return ANNOTATION_STATUSES.has(normalized) ? normalized : null;
+}
+
+function isValidOwnerKey(ownerKey) {
+  return typeof ownerKey === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(ownerKey);
+}
+
+function normalizeFindingKey(findingKey) {
+  const normalized = String(findingKey || "").trim().slice(0, 100);
+  return /^[a-z0-9][a-z0-9_-]{1,99}$/i.test(normalized) ? normalized : null;
+}
+
+function mapAnnotation(row) {
+  return {
+    id: row.id,
+    roastId: row.roast_id,
+    findingKey: row.finding_key,
+    status: row.status,
+    note: row.note || "",
+    ownerKey: row.owner_key,
+    createdAt: row.created_at
+  };
+}
 
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();
@@ -55,6 +83,7 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
     batch: CONFIG.RATE_LIMIT_BATCH_MAX,
     feedback: CONFIG.RATE_LIMIT_FEEDBACK_MAX,
     subscribe: CONFIG.RATE_LIMIT_SUBSCRIBE_MAX,
+    annotation: CONFIG.RATE_LIMIT_ANNOTATION_MAX,
     threat: CONFIG.RATE_LIMIT_THREAT_MAX
   };
   const maxRequests = limits2[operation];
@@ -293,4 +322,47 @@ function apiV1RateLimitHeaders(ipCount, globalCount) {
   };
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
+async function listAnnotations(env, roastId, ownerKey) {
+  const result = await env.DB.prepare(`
+    SELECT id, roast_id, finding_key, status, note, owner_key, created_at
+    FROM annotations
+    WHERE roast_id = ? AND owner_key = ?
+    ORDER BY created_at DESC
+  `).bind(roastId, ownerKey).all();
+  return (result.results || []).map(mapAnnotation);
+}
+
+async function saveAnnotation(env, { roastId, findingKey, status, note = "", ownerKey }) {
+  const normalizedStatus = normalizeAnnotationStatus(status);
+  const normalizedFindingKey = normalizeFindingKey(findingKey);
+  if (!normalizedStatus || !normalizedFindingKey || !isValidOwnerKey(ownerKey)) return null;
+  const trimmedNote = String(note || "").trim().slice(0, 500);
+  const row = await env.DB.prepare(`
+    INSERT INTO annotations (id, roast_id, finding_key, status, note, owner_key)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(roast_id, owner_key, finding_key) DO UPDATE SET
+      status = excluded.status,
+      note = excluded.note
+    RETURNING id, roast_id, finding_key, status, note, owner_key, created_at
+  `).bind(
+    generateId(),
+    roastId,
+    normalizedFindingKey,
+    normalizedStatus,
+    trimmedNote || null,
+    ownerKey
+  ).first();
+  return row ? mapAnnotation(row) : null;
+}
+
+async function deleteAnnotation(env, { roastId, findingKey, ownerKey }) {
+  const normalizedFindingKey = normalizeFindingKey(findingKey);
+  if (!normalizedFindingKey || !isValidOwnerKey(ownerKey)) return false;
+  const result = await env.DB.prepare(`
+    DELETE FROM annotations
+    WHERE roast_id = ? AND owner_key = ? AND finding_key = ?
+  `).bind(roastId, ownerKey, normalizedFindingKey).run();
+  return Number(result.meta?.changes || 0) > 0;
+}
+
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders, normalizeAnnotationStatus, isValidOwnerKey, normalizeFindingKey, listAnnotations, saveAnnotation, deleteAnnotation };

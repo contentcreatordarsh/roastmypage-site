@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import {
+  checkGlobalRateLimit,
+  getCachedRoast,
+  normalizeAnnotationStatus,
+  saveAnnotation,
+  releaseApiV1Quota
+} from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -81,6 +87,33 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
   assert.equal(cached.id, "legacy-1");
   assert.equal(cached.seo, null);
   assert.equal(cached.performance, null);
+});
+
+test("normalizeAnnotationStatus accepts only fixed and wontfix", () => {
+  assert.equal(normalizeAnnotationStatus("fixed"), "fixed");
+  assert.equal(normalizeAnnotationStatus(" WONTFIX "), "wontfix");
+  assert.equal(normalizeAnnotationStatus("wont-fix"), null);
+  assert.equal(normalizeAnnotationStatus("todo"), null);
+  assert.equal(normalizeAnnotationStatus(""), null);
+});
+
+test("saveAnnotation rejects invalid status before writing", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        throw new Error("DB should not be touched for invalid status");
+      }
+    }
+  };
+
+  const result = await saveAnnotation(env, {
+    roastId: "abc12345",
+    findingKey: "quick-win-0",
+    status: "todo",
+    ownerKey: "123e4567-e89b-12d3-a456-426614174000"
+  });
+
+  assert.equal(result, null);
 });
 
 test("releaseApiV1Quota atomically restores a reserved daily quota", async () => {

@@ -46,6 +46,11 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const annotationControls = (findingKey) => `<div class="annotation-controls mt-3 flex flex-wrap items-center gap-2" data-finding-key="${escapeHtml(findingKey)}">
+                  <button type="button" data-status="fixed" onclick="event.stopPropagation();toggleAnnotation(this,'fixed')" class="annotation-btn px-2.5 py-1 rounded-lg text-xs font-semibold border border-white/[0.08] bg-white/[0.03] text-[#a1a1a6] hover:text-green-400 hover:border-green-500/30 transition-all">Fixed</button>
+                  <button type="button" data-status="wontfix" onclick="event.stopPropagation();toggleAnnotation(this,'wontfix')" class="annotation-btn px-2.5 py-1 rounded-lg text-xs font-semibold border border-white/[0.08] bg-white/[0.03] text-[#a1a1a6] hover:text-yellow-400 hover:border-yellow-500/30 transition-all">Won't fix</button>
+                  <span class="annotation-status text-xs text-[#6e6e73]"></span>
+                </div>`;
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -114,6 +119,10 @@ export function renderRoastPage(params) {
   .expandable.open .expand-icon { transform: rotate(90deg); }
   .expand-detail { max-height: 0; overflow: hidden; transition: max-height 0.3s ease, opacity 0.2s ease; opacity: 0; }
   .expandable.open .expand-detail { max-height: 500px; opacity: 1; }
+  .annotatable-finding[data-annotation-state="fixed"] { border-color: rgba(34,197,94,0.32); background: rgba(34,197,94,0.05); }
+  .annotatable-finding[data-annotation-state="wontfix"] { border-color: rgba(234,179,8,0.32); background: rgba(234,179,8,0.05); }
+  .annotation-btn.active[data-status="fixed"] { color: #22C55E; border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.12); }
+  .annotation-btn.active[data-status="wontfix"] { color: #EAB308; border-color: rgba(234,179,8,0.45); background: rgba(234,179,8,0.12); }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
 </style>
 </head>
@@ -290,7 +299,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
         ${categories.map((c) => {
         const catScoreColor = c.score >= 8 ? "#22C55E" : c.score >= 6 ? "#EAB308" : "#EF4444";
         const sec = sections[c.key];
-        return `<div class="expandable p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04]" onclick="this.classList.toggle('open')">
+        return `<div class="expandable annotatable-finding p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04]" onclick="this.classList.toggle('open')">
             <div class="flex items-center gap-4">
               <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/[0.05]">
                 <span class="text-sm">${c.emoji}</span>
@@ -329,6 +338,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
                   <div class="text-xs text-[#6e6e73] mb-1">\u{1F4A1} Recommendation</div>
                   <p class="text-sm text-blue-400/80">${escapeHtml(sec.fix)}</p>
                 </div>` : ""}
+                ${annotationControls(`finding-${c.key}`)}
               </div>
             </div>
           </div>`;
@@ -349,7 +359,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
         ${quickWins.map((w, i) => {
         const wl = w.toLowerCase();
         const tip = wl.includes("cta") || wl.includes("call-to-action") || wl.includes("button") ? 'A clear, prominent CTA is the single biggest driver of conversions. Use contrasting colors, action verbs ("Get started", "Try free"), and place it above the fold.' : wl.includes("social proof") || wl.includes("testimonial") || wl.includes("review") || wl.includes("trust") ? "Social proof reduces buying anxiety. Even one testimonial or a row of client logos can increase conversion rates by 15-30%." : wl.includes("headline") || wl.includes("heading") || wl.includes("hero") ? "Your headline has about 5 seconds to hook visitors. Lead with the benefit, not the feature. Make it specific and outcome-focused." : wl.includes("copy") || wl.includes("text") || wl.includes("clarity") || wl.includes("message") ? "Clear, scannable copy converts better than clever copy. Use short paragraphs, bullet points, and focus on what the reader gets \u2014 not what you do." : wl.includes("image") || wl.includes("visual") || wl.includes("design") || wl.includes("color") ? "Visual hierarchy guides the eye to what matters. Use whitespace, contrast, and size to make your key message and CTA impossible to miss." : wl.includes("speed") || wl.includes("load") || wl.includes("performance") || wl.includes("fast") ? "Every extra second of load time costs ~7% in conversions. Compress images, defer scripts, and use a CDN for faster delivery." : "Small improvements compound. Fixing the easiest issues first gives you the biggest return on effort.";
-        return `<div class="expandable flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl" onclick="this.classList.toggle('open')">
+        return `<div class="expandable annotatable-finding flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl" onclick="this.classList.toggle('open')">
           <span class="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-500/10 text-yellow-400 flex items-center justify-center text-xs font-bold mt-0.5">${i + 1}</span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
@@ -362,6 +372,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
                 <p class="text-xs text-[#d1d1d6] leading-relaxed">${tip}</p>
               </div>
             </div>
+            ${annotationControls(`quick-win-${i}`)}
           </div>
         </div>`;
       }).join("\n        ")}
@@ -451,7 +462,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
         ${categories.map((c) => {
           const catScoreColor = c.score >= 8 ? "#22C55E" : c.score >= 6 ? "#EAB308" : "#EF4444";
           const sec = sections[c.key];
-          return `<div class="expandable p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04]" onclick="this.classList.toggle('open')">
+          return `<div class="expandable annotatable-finding p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04]" onclick="this.classList.toggle('open')">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/[0.05]">
                 <span class="text-sm">${c.emoji}</span>
@@ -486,6 +497,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
                   <div class="text-xs text-[#6e6e73] mb-1">\u{1F4A1} Recommendation</div>
                   <div class="text-sm text-blue-400/80">${escapeHtml(sec.fix)}</div>
                 </div>` : ""}
+                ${annotationControls(`finding-${c.key}`)}
               </div>
             </div>
           </div>`;
@@ -506,7 +518,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
         ${quickWins.map((w, i) => {
           const wl = w.toLowerCase();
           const tip = wl.includes("cta") || wl.includes("call-to-action") || wl.includes("button") ? "A clear, prominent CTA is the single biggest driver of conversions. Use contrasting colors, action verbs, and place it above the fold." : wl.includes("social proof") || wl.includes("testimonial") || wl.includes("review") || wl.includes("trust") ? "Social proof reduces buying anxiety. Even one testimonial or a row of client logos can increase conversion rates by 15-30%." : wl.includes("headline") || wl.includes("heading") || wl.includes("hero") ? "Your headline has about 5 seconds to hook visitors. Lead with the benefit, not the feature." : wl.includes("copy") || wl.includes("text") || wl.includes("clarity") || wl.includes("message") ? "Clear, scannable copy converts better than clever copy. Use short paragraphs and focus on what the reader gets." : wl.includes("image") || wl.includes("visual") || wl.includes("design") || wl.includes("color") ? "Visual hierarchy guides the eye to what matters. Use whitespace, contrast, and size to make your CTA impossible to miss." : wl.includes("speed") || wl.includes("load") || wl.includes("performance") || wl.includes("fast") ? "Every extra second of load time costs ~7% in conversions. Compress images, defer scripts, and use a CDN." : "Small improvements compound. Fixing the easiest issues first gives you the biggest return on effort.";
-          return `<div class="expandable flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl" onclick="this.classList.toggle('open')">
+          return `<div class="expandable annotatable-finding flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl" onclick="this.classList.toggle('open')">
           <span class="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-500/10 text-yellow-400 flex items-center justify-center text-xs font-bold mt-0.5">${i + 1}</span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
@@ -519,6 +531,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
                 <p class="text-xs text-[#d1d1d6] leading-relaxed">${tip}</p>
               </div>
             </div>
+            ${annotationControls(`quick-win-${i}`)}
           </div>
         </div>`;
         }).join("\n        ")}
@@ -598,6 +611,104 @@ function showTab(name) {
   const btn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
   if (btn) btn.classList.add('active');
 }
+var annotationState = {};
+var ANNOTATION_ROAST_ID = '${escapeHtml(roast.id)}';
+var annotationOwnerKey = '';
+function fallbackAnnotationUuid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    var v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+function getAnnotationOwnerKey() {
+  var key = annotationOwnerKey;
+  if (key) return key;
+  try {
+    key = localStorage.getItem('roastAnnotationOwnerKey') || '';
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(key)) {
+      key = window.crypto && crypto.randomUUID ? crypto.randomUUID() : fallbackAnnotationUuid();
+      localStorage.setItem('roastAnnotationOwnerKey', key);
+    }
+  } catch (err) {
+    key = fallbackAnnotationUuid();
+  }
+  annotationOwnerKey = key;
+  return key;
+}
+function updateAnnotationControl(control, status) {
+  control.querySelectorAll('.annotation-btn').forEach(function(btn) {
+    btn.classList.toggle('active', !!status && btn.dataset.status === status);
+  });
+  var statusEl = control.querySelector('.annotation-status');
+  if (statusEl) {
+    statusEl.textContent = status === 'fixed' ? 'Marked fixed' : status === 'wontfix' ? "Marked won't fix" : '';
+  }
+  var card = control.closest('.annotatable-finding');
+  if (card) {
+    if (status) {
+      card.dataset.annotationState = status;
+    } else {
+      delete card.dataset.annotationState;
+    }
+  }
+}
+function applyAnnotationState(findingKey, status) {
+  document.querySelectorAll('.annotation-controls[data-finding-key="' + findingKey + '"]').forEach(function(control) {
+    updateAnnotationControl(control, status);
+  });
+}
+function setAnnotationBusy(findingKey, busy) {
+  document.querySelectorAll('.annotation-controls[data-finding-key="' + findingKey + '"] .annotation-btn').forEach(function(btn) {
+    btn.disabled = busy;
+    btn.style.opacity = busy ? '0.6' : '';
+  });
+}
+function loadAnnotations() {
+  var ownerKey = getAnnotationOwnerKey();
+  fetch('/api/annotations?roastId=' + encodeURIComponent(ANNOTATION_ROAST_ID) + '&ownerKey=' + encodeURIComponent(ownerKey))
+    .then(function(res) { return res.ok ? res.json() : { annotations: [] }; })
+    .then(function(data) {
+      annotationState = {};
+      (data.annotations || []).forEach(function(annotation) {
+        annotationState[annotation.findingKey] = annotation.status;
+      });
+      document.querySelectorAll('.annotation-controls').forEach(function(control) {
+        updateAnnotationControl(control, annotationState[control.dataset.findingKey]);
+      });
+    })
+    .catch(function() {});
+}
+function toggleAnnotation(button, status) {
+  var control = button.closest('.annotation-controls');
+  if (!control) return;
+  var findingKey = control.dataset.findingKey;
+  var ownerKey = getAnnotationOwnerKey();
+  var shouldClear = annotationState[findingKey] === status;
+  setAnnotationBusy(findingKey, true);
+  var request = shouldClear
+    ? fetch('/api/annotations?roastId=' + encodeURIComponent(ANNOTATION_ROAST_ID) + '&ownerKey=' + encodeURIComponent(ownerKey) + '&findingKey=' + encodeURIComponent(findingKey), { method: 'DELETE' })
+    : fetch('/api/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roastId: ANNOTATION_ROAST_ID, ownerKey: ownerKey, findingKey: findingKey, status: status })
+      });
+  request.then(function(res) {
+    if (!res.ok) throw new Error('Annotation failed');
+    if (shouldClear) {
+      delete annotationState[findingKey];
+    } else {
+      annotationState[findingKey] = status;
+    }
+    applyAnnotationState(findingKey, annotationState[findingKey]);
+  }).catch(function() {
+    var statusEl = control.querySelector('.annotation-status');
+    if (statusEl) statusEl.textContent = 'Could not save';
+  }).finally(function() {
+    setAnnotationBusy(findingKey, false);
+  });
+}
+loadAnnotations();
 function ssrFeedback(vote) {
   var bar = document.getElementById('ssr-feedback-bar');
   fetch('/api/feedback', {

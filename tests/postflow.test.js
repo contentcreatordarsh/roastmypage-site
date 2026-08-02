@@ -47,6 +47,12 @@ test("checkOperationRateLimit applies the tighter batch limit for the batch oper
   assert.equal(blocked.allowed, false);
 });
 
+test("checkOperationRateLimit applies the annotation operation limit", async () => {
+  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_ANNOTATION_MAX + 1, window_start: new Date().toISOString() }) };
+  const blocked = await checkOperationRateLimit(env, "ip-hash", "annotation");
+  assert.equal(blocked.allowed, false);
+});
+
 // --- getCachedRoast: self-heal (#89) — never serve an incomplete cached roast ---
 
 test("getCachedRoast treats a row missing SEO data as a cache miss", async () => {

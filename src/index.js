@@ -19,7 +19,9 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders,
+    normalizeAnnotationStatus, isValidOwnerKey, normalizeFindingKey,
+    listAnnotations, saveAnnotation, deleteAnnotation
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -60,7 +62,7 @@ export default {
       return new Response(null, { headers: securityHeaders });
     }
     const corsHeaders = securityHeaders;
-    if (request.method === "POST" && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/v1/")) {
+    if ((request.method === "POST" || request.method === "DELETE") && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/v1/")) {
       const reqOrigin = request.headers.get("Origin");
       const allowedOrigins = getAllowedOrigins(env22.ENVIRONMENT);
       if (reqOrigin && !allowedOrigins.includes(reqOrigin)) {
@@ -798,6 +800,83 @@ data: ${JSON.stringify(data)}
       }
       const roastIndustry = roast.industry || "other";
       return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
+    }
+    if (url.pathname === "/api/annotations" && request.method === "GET") {
+      const roastId = url.searchParams.get("roastId");
+      const ownerKey = url.searchParams.get("ownerKey");
+      if (!isValidRoastIdLoose(roastId)) {
+        return Response.json({ error: "Invalid roast ID" }, { status: 400, headers: corsHeaders });
+      }
+      if (!isValidOwnerKey(ownerKey)) {
+        return Response.json({ error: "Invalid owner key" }, { status: 400, headers: corsHeaders });
+      }
+      const annotations = await listAnnotations(env22, roastId, ownerKey);
+      return Response.json({ annotations }, { headers: corsHeaders });
+    }
+    if (url.pathname === "/api/annotations" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const roastId = body.roastId;
+        const ownerKey = body.ownerKey;
+        const findingKey = normalizeFindingKey(body.findingKey);
+        const status = normalizeAnnotationStatus(body.status);
+        if (!isValidRoastIdLoose(roastId)) {
+          return Response.json({ error: "Invalid roast ID" }, { status: 400, headers: corsHeaders });
+        }
+        if (!isValidOwnerKey(ownerKey)) {
+          return Response.json({ error: "Invalid owner key" }, { status: 400, headers: corsHeaders });
+        }
+        if (!findingKey) {
+          return Response.json({ error: "Invalid finding key" }, { status: 400, headers: corsHeaders });
+        }
+        if (!status) {
+          return Response.json({ error: "Invalid annotation status" }, { status: 400, headers: corsHeaders });
+        }
+        const annIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const annIpHash = await hashIp(annIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const annLimit = await checkOperationRateLimit(env22, annIpHash, "annotation");
+        if (!annLimit.allowed) {
+          return Response.json({ error: "Too many annotation updates. Please try again later." }, { status: 429, headers: corsHeaders });
+        }
+        const annotation = await saveAnnotation(env22, {
+          roastId,
+          ownerKey,
+          findingKey,
+          status,
+          note: body.note
+        });
+        return Response.json({ annotation }, { headers: corsHeaders });
+      } catch (error32) {
+        console.error("Annotation save error:", error32);
+        return Response.json({ error: "Failed to save annotation" }, { status: 500, headers: corsHeaders });
+      }
+    }
+    if (url.pathname === "/api/annotations" && request.method === "DELETE") {
+      try {
+        const roastId = url.searchParams.get("roastId");
+        const ownerKey = url.searchParams.get("ownerKey");
+        const findingKey = normalizeFindingKey(url.searchParams.get("findingKey"));
+        if (!isValidRoastIdLoose(roastId)) {
+          return Response.json({ error: "Invalid roast ID" }, { status: 400, headers: corsHeaders });
+        }
+        if (!isValidOwnerKey(ownerKey)) {
+          return Response.json({ error: "Invalid owner key" }, { status: 400, headers: corsHeaders });
+        }
+        if (!findingKey) {
+          return Response.json({ error: "Invalid finding key" }, { status: 400, headers: corsHeaders });
+        }
+        const annIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const annIpHash = await hashIp(annIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const annLimit = await checkOperationRateLimit(env22, annIpHash, "annotation");
+        if (!annLimit.allowed) {
+          return Response.json({ error: "Too many annotation updates. Please try again later." }, { status: 429, headers: corsHeaders });
+        }
+        await deleteAnnotation(env22, { roastId, ownerKey, findingKey });
+        return Response.json({ success: true }, { headers: corsHeaders });
+      } catch (error32) {
+        console.error("Annotation delete error:", error32);
+        return Response.json({ error: "Failed to delete annotation" }, { status: 500, headers: corsHeaders });
+      }
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
