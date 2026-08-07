@@ -162,7 +162,6 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           items.push({
             kind: "embed",
             provider,
-            src: src.slice(0, 180),
             title: frame.getAttribute("title") || "",
             autoplay,
             muted: muted || autoplay, // embeds usually need mute for autoplay
