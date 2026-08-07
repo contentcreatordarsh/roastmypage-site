@@ -68,3 +68,24 @@ test("videoPromptNote summarizes detected signals", () => {
   assert.match(note, /muted autoplay/);
   assert.match(note, /youtube/);
 });
+
+test("analyzeVideoSignals strips embed URLs from persisted analysis", () => {
+  const result = analyzeVideoSignals({
+    count: 1,
+    items: [{
+      kind: "embed",
+      provider: "video-host",
+      src: "https://video.example/embed/123?token=signed-value",
+      autoplay: false,
+      muted: false,
+      aboveFold: true,
+      inHero: true
+    }]
+  });
+
+  assert.equal(result.present, true);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].provider, "video-host");
+  assert.equal("src" in result.items[0], false);
+  assert.doesNotMatch(JSON.stringify(result), /signed-value/);
+});

@@ -198,7 +198,10 @@ export function analyzeVideoSignals(raw) {
       issues: a11yIssues,
       checks: a11yChecks
     },
-    items: items.slice(0, 8),
+    // Embed URLs can carry signed query parameters or access tokens. The URL is
+    // only needed while collecting provider/autoplay signals, never in persisted
+    // or client-visible analysis data.
+    items: items.slice(0, 8).map(({ src: _src, ...item }) => item),
     recommendations: recommendations.slice(0, 6)
   };
 }
