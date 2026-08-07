@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeVideoSignals, videoPromptNote } from "../src/video.js";
+import { analyzeVideoSignals, videoPromptNote, redactVideoItemUrls } from "../src/video.js";
 
 test("analyzeVideoSignals returns empty shape when no videos", () => {
   const result = analyzeVideoSignals({ count: 0, items: [] });
@@ -88,4 +88,19 @@ test("analyzeVideoSignals strips embed URLs from persisted analysis", () => {
   assert.equal(result.items[0].provider, "video-host");
   assert.equal("src" in result.items[0], false);
   assert.doesNotMatch(JSON.stringify(result), /signed-value/);
+});
+
+test("redactVideoItemUrls sanitizes historical stored analysis", () => {
+  const sanitized = redactVideoItemUrls({
+    present: true,
+    items: [{
+      kind: "embed",
+      provider: "video-host",
+      src: "https://video.example/embed/old?signature=historical-value"
+    }]
+  });
+
+  assert.equal(sanitized.items[0].provider, "video-host");
+  assert.equal("src" in sanitized.items[0], false);
+  assert.doesNotMatch(JSON.stringify(sanitized), /historical-value/);
 });

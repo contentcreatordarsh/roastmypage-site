@@ -43,6 +43,7 @@ import {
 import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
+import { redactVideoItemUrls } from './video.js';
 
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
@@ -795,6 +796,16 @@ data: ${JSON.stringify(data)}
       const roast = await env22.DB.prepare("SELECT * FROM roasts WHERE id = ?").bind(roastId).first();
       if (!roast) {
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
+      }
+      if (roast.seo_data) {
+        try {
+          const seo = JSON.parse(roast.seo_data);
+          if (seo?.video) {
+            seo.video = redactVideoItemUrls(seo.video);
+            roast.seo_data = JSON.stringify(seo);
+          }
+        } catch {
+        }
       }
       const roastIndustry = roast.industry || "other";
       return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
