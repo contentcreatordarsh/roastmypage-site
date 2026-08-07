@@ -2655,6 +2655,11 @@ data: ${JSON.stringify(data)}
           quotaReservationIpHash = null;
           return response;
         }
+        // A cache miss is about to consume Browser Rendering capacity. From this
+        // point the reservation counts as an attempted roast even if the target
+        // page times out or produces an oversized screenshot; otherwise callers
+        // can intentionally fail captures forever without using per-IP quota.
+        quotaReservationIpHash = null;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
         const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
