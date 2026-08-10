@@ -46,6 +46,22 @@ export function renderRoastPage(params) {
 
     // a11y score from seo.accessibility or standalone a11y object
     const a11yScore = a11y?.score ?? seo?.accessibility?.score ?? null;
+    const video = seo?.video?.present ? seo.video : null;
+    const videoScore = Number.isFinite(Number(video?.score))
+      ? Math.max(0, Math.min(100, Number(video.score)))
+      : null;
+    const videoScoreColor = videoScore === null
+      ? "#A1A1A6"
+      : videoScore >= 80 ? "#22C55E" : videoScore >= 50 ? "#EAB308" : "#EF4444";
+    const formatVideoScore = (value) => Number.isFinite(Number(value))
+      ? String(Math.max(0, Math.min(100, Number(value))))
+      : "-";
+    const renderVideoList = (items, emptyMessage) => {
+      const list = Array.isArray(items) ? items.filter(Boolean) : [];
+      return list.length > 0
+        ? `<div class="space-y-2">${list.map((item) => `<div class="p-3 bg-white/[0.03] border border-white/[0.04] rounded-xl text-xs text-[#d1d1d6]">${escapeHtml(String(item))}</div>`).join("")}</div>`
+        : `<div class="p-3 bg-green-500/10 rounded-xl text-xs text-green-400">${emptyMessage}</div>`;
+    };
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -188,6 +204,17 @@ export function renderRoastPage(params) {
       <div class="text-xs text-[#6e6e73]">${(performance22.loadTime / 1e3).toFixed(1)}s load time</div>
     </div>`;
       })() : ""}
+    <!-- Video Score -->
+    ${video ? `<div class="card p-5 text-center cursor-pointer hover:border-white/[0.12] transition-colors" onclick="showTab('video')">
+      <div class="flex justify-center mb-2">
+        <div class="score-ring" style="width:100px;height:100px;border-width:6px;border-color:${videoScoreColor}">
+          <span class="text-2xl font-bold" style="color:${videoScoreColor}">${videoScore === null ? "-" : (videoScore / 10).toFixed(1)}</span>
+          <span class="text-xs text-[#a1a1a6]">/10</span>
+        </div>
+      </div>
+      <div class="text-sm font-semibold" style="color:${videoScoreColor}">\u{1F3AC} Video</div>
+      <div class="text-xs text-[#6e6e73]">${Number.isFinite(Number(video.count)) ? Number(video.count) : 0} detected</div>
+    </div>` : ""}
     <!-- Accessibility Score -->
     ${a11yScore !== null ? (() => {
         const a11yNorm = (a11yScore / 10).toFixed(1);
@@ -270,6 +297,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
     <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Overview</button>
     ${seo ? `<button class="tab-btn" data-tab="seo" onclick="showTab('seo')">SEO</button>` : ""}
     ${performance22 ? `<button class="tab-btn" data-tab="performance" onclick="showTab('performance')">Performance</button>` : ""}
+    ${video ? `<button class="tab-btn" data-tab="video" onclick="showTab('video')">Video</button>` : ""}
     ${heatmap ? `<button class="tab-btn" data-tab="heatmap" onclick="showTab('heatmap')">Heatmap</button>` : ""}
     ${a11y ? `<button class="tab-btn" data-tab="accessibility" onclick="showTab('accessibility')">Accessibility</button>` : ""}
     ${roast.roast_response ? `<button class="tab-btn" data-tab="report" onclick="showTab('report')">Full Report</button>` : ""}
@@ -374,6 +402,62 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
 
   <!-- Performance Tab -->
   ${performance22 ? `<div id="tab-performance" class="tab-content">${perfDetailsHtml}</div>` : ""}
+
+  <!-- Video Tab -->
+  ${video ? `<div id="tab-video" class="tab-content">
+    <div class="space-y-4">
+      <div class="card p-5">
+        <div class="flex items-center gap-4">
+          <div class="score-ring" style="width:80px;height:80px;border-width:5px;border-color:${videoScoreColor};flex-shrink:0;">
+            <span class="text-xl font-bold" style="color:${videoScoreColor}">${videoScore === null ? "-" : (videoScore / 10).toFixed(1)}</span>
+            <span class="text-xs text-[#a1a1a6]">/10</span>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold text-white">Video Analysis</h2>
+            <p class="text-xs text-[#6e6e73] mt-1">${Number.isFinite(Number(video.count)) ? Number(video.count) : 0} video${Number(video.count) === 1 ? "" : "s"} detected${video.hasHeroVideo ? " — including hero or above-fold video" : ""}.</p>
+            <div class="text-xs mt-2" style="color:${videoScoreColor}">${video.hasAutoplay ? (video.hasUnmutedAutoplay ? "Autoplay with sound needs attention" : "Muted autoplay detected") : "No autoplay detected"}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-4">
+        <div class="card p-5">
+          <div class="text-xs text-[#6e6e73] mb-1">Conversion</div>
+          <div class="text-2xl font-bold text-white">${formatVideoScore(video.conversion?.score)}<span class="text-xs text-[#6e6e73]">/100</span></div>
+        </div>
+        <div class="card p-5">
+          <div class="text-xs text-[#6e6e73] mb-1">Performance</div>
+          <div class="text-2xl font-bold text-white">${formatVideoScore(video.performance?.score)}<span class="text-xs text-[#6e6e73]">/100</span></div>
+        </div>
+        <div class="card p-5">
+          <div class="text-xs text-[#6e6e73] mb-1">Accessibility</div>
+          <div class="text-2xl font-bold text-white">${formatVideoScore(video.accessibility?.score)}<span class="text-xs text-[#6e6e73]">/100</span></div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="card p-5">
+          <h3 class="text-sm font-semibold mb-3">Conversion Findings</h3>
+          ${renderVideoList([
+            ...(Array.isArray(video.conversion?.issues) ? video.conversion.issues : []),
+            ...(Array.isArray(video.conversion?.notes) ? video.conversion.notes : [])
+          ], "No video conversion concerns detected")}
+        </div>
+        <div class="card p-5">
+          <h3 class="text-sm font-semibold mb-3">Performance Findings</h3>
+          ${renderVideoList(video.performance?.issues, "No video performance concerns detected")}
+        </div>
+        <div class="card p-5">
+          <h3 class="text-sm font-semibold mb-3">Accessibility Findings</h3>
+          ${renderVideoList(video.accessibility?.issues, "No video accessibility concerns detected")}
+        </div>
+        <div class="card p-5">
+          <h3 class="text-sm font-semibold mb-3">Recommendations</h3>
+          ${renderVideoList(video.recommendations, "No additional video recommendations")}
+        </div>
+      </div>
+    </div>
+  </div>` : ""}
 
   <!-- Heatmap Tab -->
   ${heatmap ? `<div id="tab-heatmap" class="tab-content">
