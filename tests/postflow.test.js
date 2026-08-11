@@ -61,6 +61,38 @@ test("getCachedRoast treats a row missing performance data as a cache miss", asy
   assert.equal(result, null);
 });
 
+test("getCachedRoast treats a pre-video audit row as a cache miss", async () => {
+  const env = {
+    DB: mockDb({
+      id: "legacy-video",
+      url: "https://example.com",
+      url_hash: "h",
+      overall_score: 7,
+      seo_data: '{"score":80}',
+      performance_data: '{"loadTime":1000}'
+    })
+  };
+  const result = await getCachedRoast(env, "h", "https://example.com");
+  assert.equal(result, null);
+});
+
+test("getCachedRoast accepts a current audit with no detected video", async () => {
+  const video = { present: false, count: 0 };
+  const env = {
+    DB: mockDb({
+      id: "current-video",
+      url: "https://example.com",
+      url_hash: "h",
+      overall_score: 7,
+      seo_data: JSON.stringify({ score: 80, video }),
+      performance_data: '{"loadTime":1000}'
+    })
+  };
+  const result = await getCachedRoast(env, "h", "https://example.com");
+  assert.equal(result.id, "current-video");
+  assert.deepEqual(result.video, video);
+});
+
 test("getCachedRoast returns null on a genuine cache miss", async () => {
   const env = { DB: mockDb(null) };
   const result = await getCachedRoast(env, "h", "https://example.com");
