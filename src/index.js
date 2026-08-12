@@ -2630,6 +2630,7 @@ data: ${JSON.stringify(data)}
             industry: cachedResult.industry || "other",
             seo: cachedResult.seo || null,
             performance: cachedResult.performance || null,
+            video: cachedResult.video || cachedResult.seo?.video || null,
             heatmap: cachedResult.heatmap || null,
             screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${cachedResult.id}`,
             shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${cachedResult.id}`,
