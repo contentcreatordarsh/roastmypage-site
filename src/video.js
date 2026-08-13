@@ -27,7 +27,12 @@ export function analyzeVideoSignals(raw) {
     };
   }
 
-  const items = Array.isArray(raw.items) ? raw.items : [];
+  // Poster URLs are not needed after presence detection. Normalize them to a
+  // boolean so callers cannot accidentally persist signed or unbounded data
+  // URLs supplied by the page.
+  const items = Array.isArray(raw.items)
+    ? raw.items.map((item) => ({ ...item, poster: bool(item?.poster) }))
+    : [];
   const hasHeroVideo = items.some((i) => i.inHero || i.aboveFold);
   const hasAutoplay = items.some((i) => i.autoplay);
   const hasUnmutedAutoplay = items.some((i) => i.autoplay && !i.muted);

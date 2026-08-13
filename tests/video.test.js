@@ -55,6 +55,25 @@ test("analyzeVideoSignals rewards muted autoplay with captions", () => {
   assert.equal(good.accessibility.issues.length, 0);
 });
 
+test("analyzeVideoSignals bounds attacker-controlled poster attributes", () => {
+  const oversizedPoster = `data:image/jpeg;base64,${"a".repeat(1_000_000)}`;
+  const result = analyzeVideoSignals({
+    count: 1,
+    items: [{
+      kind: "video",
+      provider: "html5",
+      poster: oversizedPoster,
+      aboveFold: true,
+      inHero: true
+    }]
+  });
+
+  assert.equal(result.items[0].poster, true);
+  assert.equal(typeof result.items[0].poster, "boolean");
+  assert.ok(JSON.stringify(result).length < 2_000);
+  assert.equal(JSON.stringify(result).includes(oversizedPoster), false);
+});
+
 test("videoPromptNote summarizes detected signals", () => {
   const note = videoPromptNote({
     present: true,

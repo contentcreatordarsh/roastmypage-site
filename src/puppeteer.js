@@ -136,7 +136,10 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             loop: v.hasAttribute("loop") || v.loop === true,
             controls: v.hasAttribute("controls") || v.controls === true,
             playsInline: v.hasAttribute("playsinline") || v.playsInline === true,
-            poster: v.getAttribute("poster") || "",
+            // Only poster presence is used by the analysis. Returning the raw
+            // attribute can copy an attacker-controlled multi-megabyte data URL
+            // from Browser Rendering into Worker memory and persisted JSON.
+            poster: v.hasAttribute("poster") && !!v.getAttribute("poster"),
             preload: (v.getAttribute("preload") || "metadata").toLowerCase(),
             hasCaptions,
             aboveFold: rect.top < heroCutoff && rect.bottom > 0,
