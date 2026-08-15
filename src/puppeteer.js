@@ -128,6 +128,10 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           const rect = v.getBoundingClientRect();
           const tracks = Array.from(v.querySelectorAll("track")).map((t) => (t.getAttribute("kind") || "").toLowerCase());
           const hasCaptions = tracks.some((k) => k === "captions" || k === "subtitles");
+          const rawPreload = v.getAttribute("preload") || "";
+          const preload = rawPreload.length <= 8 && /^(auto|metadata|none)$/i.test(rawPreload)
+            ? rawPreload.toLowerCase()
+            : "metadata";
           items.push({
             kind: "video",
             provider: "html5",
@@ -137,7 +141,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             controls: v.hasAttribute("controls") || v.controls === true,
             playsInline: v.hasAttribute("playsinline") || v.playsInline === true,
             poster: v.getAttribute("poster") || "",
-            preload: (v.getAttribute("preload") || "metadata").toLowerCase(),
+            preload,
             hasCaptions,
             aboveFold: rect.top < heroCutoff && rect.bottom > 0,
             inHero: rect.top < viewportH * 0.85 && rect.height >= Math.min(180, viewportH * 0.25),
@@ -159,11 +163,12 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           else if (/vidyard/i.test(src)) provider = "vidyard";
           const autoplay = /[?&]autoplay=1/i.test(src) || /autoplay=true/i.test(src);
           const muted = /[?&]mute=1/i.test(src) || /muted=1/i.test(src) || /mute=true/i.test(src);
+          const hasTitle = !!frame.getAttribute("title");
           items.push({
             kind: "embed",
             provider,
             src: src.slice(0, 180),
-            title: frame.getAttribute("title") || "",
+            title: hasTitle,
             autoplay,
             muted: muted || autoplay, // embeds usually need mute for autoplay
             loop: /loop=1/i.test(src),

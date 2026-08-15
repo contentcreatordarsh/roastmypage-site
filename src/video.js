@@ -7,6 +7,23 @@ function bool(v) {
   return !!v;
 }
 
+function compactPageControlledSignals(item) {
+  if (!item || typeof item !== "object") return item;
+  const compact = { ...item };
+  if (compact.kind === "embed") {
+    compact.title = bool(compact.title);
+  }
+  if (
+    compact.kind === "video" &&
+    compact.preload !== "auto" &&
+    compact.preload !== "metadata" &&
+    compact.preload !== "none"
+  ) {
+    compact.preload = "metadata";
+  }
+  return compact;
+}
+
 /**
  * Analyze raw DOM video signals collected in the browser.
  * @param {object|null} raw
@@ -27,7 +44,9 @@ export function analyzeVideoSignals(raw) {
     };
   }
 
-  const items = Array.isArray(raw.items) ? raw.items : [];
+  const items = Array.isArray(raw.items)
+    ? raw.items.map(compactPageControlledSignals)
+    : [];
   const hasHeroVideo = items.some((i) => i.inHero || i.aboveFold);
   const hasAutoplay = items.some((i) => i.autoplay);
   const hasUnmutedAutoplay = items.some((i) => i.autoplay && !i.muted);

@@ -55,6 +55,32 @@ test("analyzeVideoSignals rewards muted autoplay with captions", () => {
   assert.equal(good.accessibility.issues.length, 0);
 });
 
+test("analyzeVideoSignals bounds page-controlled title and preload metadata", () => {
+  const oversized = "x".repeat(1_000_000);
+  const result = analyzeVideoSignals({
+    count: 2,
+    items: [
+      {
+        kind: "embed",
+        provider: "youtube",
+        title: oversized,
+        aboveFold: true
+      },
+      {
+        kind: "video",
+        provider: "html5",
+        preload: oversized,
+        aboveFold: true
+      }
+    ]
+  });
+
+  assert.equal(result.items[0].title, true);
+  assert.equal(result.items[1].preload, "metadata");
+  assert.ok(JSON.stringify(result).length < 2_000);
+  assert.equal(JSON.stringify(result).includes(oversized), false);
+});
+
 test("videoPromptNote summarizes detected signals", () => {
   const note = videoPromptNote({
     present: true,
