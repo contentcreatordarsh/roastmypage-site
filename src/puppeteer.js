@@ -150,10 +150,12 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           });
         });
         const embedRe = /(youtube\.com|youtube-nocookie\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|wistia\.(com|net)|fast\.wistia|loom\.com\/embed|vidyard\.com|cloudinary\.com\/.*video)/i;
-        document.querySelectorAll("iframe[src]").forEach((frame, idx) => {
-          if (idx >= 8) return;
+        let embedMatches = 0;
+        for (const frame of document.querySelectorAll("iframe[src]")) {
+          if (embedMatches >= 8) break;
           const src = frame.getAttribute("src") || "";
-          if (!embedRe.test(src)) return;
+          if (!embedRe.test(src)) continue;
+          embedMatches++;
           const rect = frame.getBoundingClientRect();
           let provider = "embed";
           if (/youtube|youtu\.be/i.test(src)) provider = "youtube";
@@ -182,7 +184,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             width: Math.round(rect.width),
             height: Math.round(rect.height)
           });
-        });
+        }
 
         return {
           title: title22,
