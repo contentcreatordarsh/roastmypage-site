@@ -257,6 +257,26 @@ Respond with your analysis.`;
       console.log(`Parsed from markdown: overallScore=${parsed.overallScore}, industry=${parsed.industry}`);
     }
     if (parsed) {
+      const SCORE_CATS = ["hero", "cta", "trust", "copy", "design"];
+      const fallback = createFallbackAnalysis("", url);
+      const source = typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      const sourceScores = source.scores && typeof source.scores === "object" && !Array.isArray(source.scores) ? source.scores : {};
+      const sourceSections = source.sections && typeof source.sections === "object" && !Array.isArray(source.sections) ? source.sections : {};
+      const defaultScore = Number.isFinite(Number(source.overallScore)) ? source.overallScore : fallback.overallScore;
+      const scores = {};
+      const sections = {};
+      for (const cat of SCORE_CATS) {
+        const sourceSection = sourceSections[cat] && typeof sourceSections[cat] === "object" && !Array.isArray(sourceSections[cat]) ? sourceSections[cat] : {};
+        const score = Number.isFinite(Number(sourceScores[cat])) ? sourceScores[cat] : Number.isFinite(Number(sourceSection.score)) ? sourceSection.score : defaultScore;
+        scores[cat] = score;
+        sections[cat] = {
+          ...fallback.sections[cat],
+          ...sourceSection,
+          score: Number.isFinite(Number(sourceSection.score)) ? sourceSection.score : score,
+          scoreBreakdown: Array.isArray(sourceSection.scoreBreakdown) ? sourceSection.scoreBreakdown : []
+        };
+      }
+      parsed = { ...fallback, ...source, scores, sections };
       const placeholders = /^(Win \d|Issue|Solution|One sentence|specific|your |<.*>$)/i;
       if (!parsed.quickWins || !Array.isArray(parsed.quickWins)) {
         parsed.quickWins = [
@@ -294,7 +314,6 @@ Respond with your analysis.`;
             }
           }
         }
-        ensureScoreBreakdowns(parsed);
       }
       parsed.industry = resolveIndustry(parsed.industry);
       parsed.benchmarks = INDUSTRY_BENCHMARKS[parsed.industry] || INDUSTRY_BENCHMARKS.other;
@@ -308,7 +327,6 @@ Respond with your analysis.`;
       // derive the overall as the average of the five categories so the headline
       // number always matches the breakdown the user sees (no more 1.3-style outliers
       // that contradict the category bars).
-      const SCORE_CATS = ["hero", "cta", "trust", "copy", "design"];
       if (parsed.scores && typeof parsed.scores === "object") {
         let sum = 0;
         let count = 0;
@@ -330,6 +348,12 @@ Respond with your analysis.`;
       } else {
         parsed.overallScore = Math.max(1, Math.min(10, Math.round(Number(parsed.overallScore) * 10) / 10));
       }
+      for (const cat of SCORE_CATS) {
+        let sectionScore = Number(parsed.sections[cat].score);
+        if (!Number.isFinite(sectionScore)) sectionScore = parsed.scores[cat];
+        parsed.sections[cat].score = Math.max(1, Math.min(10, Math.round(sectionScore * 2) / 2));
+      }
+      ensureScoreBreakdowns(parsed);
       const heatmap = parsed.heatmap || {
         attention: [
           { x: 50, y: 10, intensity: 95 },
