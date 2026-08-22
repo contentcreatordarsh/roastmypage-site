@@ -1,7 +1,40 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeWithVisionAndHeatmap } from "../src/ai.js";
+import { analyzeWithVisionAndHeatmap, formatRoast } from "../src/ai.js";
 import { CONFIG } from "../src/config.js";
+
+test("AI partial JSON is normalized to a complete analysis", async () => {
+  const env = {
+    CONFIG: {
+      get: async () => "true"
+    },
+    AI: {
+      run: async () => ({
+        response: JSON.stringify({
+          overallScore: 7,
+          quickWins: ["x"],
+          industry: "saas",
+          verdict: "ok"
+        })
+      })
+    }
+  };
+
+  const { analysis } = await analyzeWithVisionAndHeatmap(env, "image", "https://example.com");
+
+  assert.equal(analysis.overallScore, 7);
+  assert.deepEqual(analysis.quickWins, ["x"]);
+  assert.equal(analysis.industry, "saas");
+  assert.equal(analysis.verdict, "ok");
+  for (const category of ["hero", "cta", "trust", "copy", "design"]) {
+    assert.equal(analysis.scores[category], 7);
+    assert.equal(analysis.sections[category].score, 7);
+    assert.equal(typeof analysis.sections[category].roast, "string");
+    assert.equal(typeof analysis.sections[category].fix, "string");
+    assert.ok(analysis.sections[category].scoreBreakdown.length > 0);
+  }
+  assert.doesNotThrow(() => formatRoast(analysis, "https://example.com"));
+});
 
 test("AI retries share one timeout budget", async () => {
   const originalTimeout = CONFIG.AI_TIMEOUT_MS;
