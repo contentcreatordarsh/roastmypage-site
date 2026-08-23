@@ -2566,11 +2566,18 @@ data: ${JSON.stringify(data)}
         ]);
         const registeredLookalikes = typosquats.filter((d) => d.registered);
         const suspiciousCount = registeredLookalikes.filter((d) => d.risk === "high" || d.risk === "medium").length;
-        const imposterCount = socialImposters.filter((i) => i.risk === "high" || i.risk === "medium").length;
+        // #17: only verified social hits affect the numeric threat score.
+        // Heuristic X/Instagram patterns are surfaced in the UI but not scored as confirmed imposters.
+        const verifiedImposters = socialImposters.filter(
+          (i) => i.verificationStatus === "verified" && (i.risk === "high" || i.risk === "medium")
+        );
+        const heuristicImposters = socialImposters.filter(
+          (i) => i.verificationStatus !== "verified" && i.risk !== "low"
+        );
         let threatScore = 100;
         threatScore -= registeredLookalikes.length * 2;
         threatScore -= suspiciousCount * 5;
-        threatScore -= imposterCount * 8;
+        threatScore -= verifiedImposters.length * 8;
         threatScore -= (100 - securityGrade.score) * 0.2;
         threatScore = Math.max(0, Math.min(100, Math.round(threatScore)));
         let riskLevel = "low";
@@ -2591,7 +2598,12 @@ data: ${JSON.stringify(data)}
           security: securityGrade,
           socialMedia: {
             totalChecked: socialImposters.length,
-            impostersFound: socialImposters.filter((i) => i.risk !== "low").length,
+            impostersFound: verifiedImposters.length,
+            heuristicCandidates: heuristicImposters.length,
+            verifiedCount: verifiedImposters.length,
+            unverifiedCount: heuristicImposters.length,
+            method: "heuristic_plus_github_api",
+            disclaimer: "X/Twitter and Instagram results are heuristic handle patterns and are not confirmed to exist. Platforms often block or mislead bot probes. GitHub accounts are checked via the official Users API when available.",
             accounts: socialImposters
           },
           recommendations: generateThreatRecommendations(typosquats, securityGrade, riskLevel, socialImposters),
@@ -2787,6 +2799,9 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
       let quotaReservationIpHash = null;
+      // Remembers a reservation we deliberately charged (once Browser Rendering
+      // started) so specific failure modes can still hand it back.
+      let quotaChargedIpHash = null;
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
@@ -2913,6 +2928,7 @@ data: ${JSON.stringify(data)}
         // point the reservation counts as an attempted roast even if the target
         // page times out or produces an oversized screenshot; otherwise callers
         // can intentionally fail captures forever without using per-IP quota.
+        quotaChargedIpHash = quotaReservationIpHash;
         quotaReservationIpHash = null;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
@@ -2996,6 +3012,11 @@ data: ${JSON.stringify(data)}
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         if (isBotChallengeError(error32)) {
+          // Bot protection is detected within a couple of seconds and the caller
+          // can do nothing about it, so refund rather than burning one of their
+          // few daily requests. This does not reopen the free-capture-burn hole:
+          // every other capture failure still stays charged.
+          quotaReservationIpHash = quotaChargedIpHash;
           return Response.json({
             success: false,
             error: "blocked_by_bot_protection",

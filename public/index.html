@@ -2329,7 +2329,7 @@
                         
                         <div class="card p-4 text-center">
                             <div id="social-imposter-stat" class="text-2xl font-bold text-[#f5f5f7]">-</div>
-                            <div class="text-xs text-[#6e6e73]">Imposters</div>
+                            <div class="text-xs text-[#6e6e73]">Verified</div>
                         </div>
                         
                     </div>
@@ -2407,13 +2407,14 @@
                                 </div>
                                 <div>
                                     <h4 class="text-[15px] font-semibold">Social Media Imposters</h4>
-                                    <p class="text-xs text-[#6e6e73]">Accounts potentially impersonating your brand</p>
+                                    <p class="text-xs text-[#6e6e73]">Heuristic handle watchlist + GitHub API checks</p>
                                 </div>
                             </div>
                             <div id="social-imposter-count" class="px-3 py-1 bg-purple-500/20 rounded-full text-sm font-medium text-purple-400">
-                                0 found
+                                0 candidates
                             </div>
                         </div>
+                        <p id="social-imposter-disclaimer" class="hidden text-xs text-[#6e6e73] mb-3 leading-relaxed"></p>
                         <div id="social-imposters-list" class="space-y-2 max-h-64 overflow-y-auto">
                             <div class="text-center text-[#6e6e73] py-4">Scanning social media...</div>
                         </div>
@@ -4762,7 +4763,7 @@
             const statusMessages = [
                 'Generating typosquat variations...',
                 'Checking domain registrations...',
-                'Scanning social media for imposters...',
+                'Building social handle watchlist...',
                 'Analyzing security headers...',
                 'Searching for visual copycats...',
                 'Scanning for phishing indicators...',
@@ -4837,7 +4838,8 @@
             // Stats
             document.getElementById('lookalike-count').textContent = data.lookalikes.registered;
             document.getElementById('suspicious-count').textContent = data.lookalikes.suspicious;
-            document.getElementById('social-imposter-stat').textContent = data.socialMedia?.impostersFound || 0;
+            document.getElementById('social-imposter-stat').textContent =
+                (data.socialMedia?.verifiedCount ?? data.socialMedia?.impostersFound ?? 0);
 
             // Security Grade
             const gradeEl = document.getElementById('security-grade');
@@ -4955,51 +4957,82 @@
             `).join('');
         }
 
-        // Render social media imposters
+        // Render social media imposters (#17 — label heuristics vs verified)
         function renderSocialImposters(socialData) {
             const listEl = document.getElementById('social-imposters-list');
             const countEl = document.getElementById('social-imposter-count');
+            const disclaimerEl = document.getElementById('social-imposter-disclaimer');
+
+            if (disclaimerEl) {
+                if (socialData?.disclaimer) {
+                    disclaimerEl.textContent = socialData.disclaimer;
+                    disclaimerEl.classList.remove('hidden');
+                } else {
+                    disclaimerEl.textContent = '';
+                    disclaimerEl.classList.add('hidden');
+                }
+            }
             
             if (!socialData || !socialData.accounts || socialData.accounts.length === 0) {
-                listEl.innerHTML = '<div class="p-4 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 text-center">✓ No suspicious social media accounts found</div>';
-                countEl.textContent = '0 found';
+                listEl.innerHTML = '<div class="p-4 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 text-center">✓ No high-risk social handle patterns flagged</div>';
+                countEl.textContent = '0 candidates';
                 return;
             }
             
             const imposters = socialData.accounts.filter(a => a.risk !== 'low');
-            countEl.textContent = `${imposters.length} found`;
-            countEl.className = imposters.length > 0 
+            const verifiedN = imposters.filter(a => a.verificationStatus === 'verified').length;
+            const heuristicN = imposters.length - verifiedN;
+            countEl.textContent = verifiedN > 0
+                ? `${verifiedN} verified · ${heuristicN} heuristic`
+                : `${imposters.length} heuristic`;
+            countEl.className = verifiedN > 0
                 ? 'px-3 py-1 bg-red-500/20 rounded-full text-sm font-medium text-red-400'
-                : 'px-3 py-1 bg-green-500/20 rounded-full text-sm font-medium text-green-400';
+                : imposters.length > 0
+                    ? 'px-3 py-1 bg-amber-500/20 rounded-full text-sm font-medium text-amber-300'
+                    : 'px-3 py-1 bg-green-500/20 rounded-full text-sm font-medium text-green-400';
             
             if (imposters.length === 0) {
-                listEl.innerHTML = '<div class="p-4 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 text-center">✓ No suspicious social media accounts found</div>';
+                listEl.innerHTML = '<div class="p-4 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 text-center">✓ No high-risk social handle patterns flagged</div>';
                 return;
             }
+
+            const platformIcon = (platform) => {
+                if (platform.includes('Twitter') || platform === 'X') return '𝕏';
+                if (platform.includes('Instagram')) return '📷';
+                if (platform.includes('GitHub')) return 'GH';
+                return '•';
+            };
             
-            listEl.innerHTML = imposters.map(account => `
-                <div class="flex items-center justify-between p-3 rounded-lg border ${
-                    account.risk === 'high' ? 'bg-red-500/10 border-red-500/30' :
-                    account.risk === 'medium' ? 'bg-orange-500/10 border-orange-500/30' :
+            listEl.innerHTML = imposters.map(account => {
+                const verified = account.verificationStatus === 'verified';
+                const statusLabel = verified ? 'verified' : 'unverified';
+                const statusClass = verified
+                    ? 'bg-red-500/20 text-red-300'
+                    : 'bg-white/[0.06] text-[#a1a1a6]';
+                return `
+                <div class="flex items-center justify-between gap-2 p-3 rounded-lg border ${
+                    verified && account.risk === 'high' ? 'bg-red-500/10 border-red-500/30' :
+                    account.risk === 'high' ? 'bg-orange-500/10 border-orange-500/25' :
+                    account.risk === 'medium' ? 'bg-white/[0.03] border-white/[0.08]' :
                     'bg-white/[0.05]/30 border-white/[0.04]'
                 }">
-                    <div class="flex items-center gap-3">
-                        <span class="text-lg">${account.platform.includes('Twitter') ? '𝕏' : '📷'}</span>
-                        <div>
-                            <div class="font-medium text-sm">${sanitizeHtml(account.handle)}</div>
-                            <div class="text-xs text-[#6e6e73]">${sanitizeHtml(account.platform)}</div>
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="text-lg shrink-0">${platformIcon(account.platform || '')}</span>
+                        <div class="min-w-0">
+                            <div class="font-medium text-sm truncate">${sanitizeHtml(account.handle)}</div>
+                            <div class="text-xs text-[#6e6e73] truncate">${sanitizeHtml(account.platform)} · ${sanitizeHtml(account.note || account.reason || '')}</div>
                         </div>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <span class="text-xs text-[#a1a1a6] max-w-32 truncate" title="${sanitizeHtml(account.reason)}">${sanitizeHtml((account.reason || '').split(' - ')[0])}</span>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <span class="px-2 py-1 rounded text-xs font-medium ${statusClass}">${statusLabel}</span>
                         <span class="px-2 py-1 rounded text-xs font-medium ${
                             account.risk === 'high' ? 'bg-red-500/20 text-red-400' :
                             'bg-orange-500/20 text-orange-400'
-                        }">${account.risk}</span>
-                        <a href="${account.url}" target="_blank" class="px-2 py-1 bg-white/[0.04] hover:bg-white/[0.08] rounded text-xs text-[#a1a1a6] transition-colors">View</a>
+                        }">${sanitizeHtml(account.risk)}</span>
+                        <a href="${sanitizeHtml(account.url)}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 bg-white/[0.04] hover:bg-white/[0.08] rounded text-xs text-[#a1a1a6] transition-colors">Check</a>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
         }
 
         function renderLookalikes(domains) {
@@ -5088,12 +5121,13 @@
             if (!currentThreatData) return;
             
             const d = currentThreatData;
-            const imposterCount = d.socialMedia?.impostersFound || 0;
+            const imposterCount = d.socialMedia?.verifiedCount ?? d.socialMedia?.impostersFound ?? 0;
+            const heuristicCount = d.socialMedia?.heuristicCandidates ?? d.socialMedia?.unverifiedCount ?? 0;
             
             const text = `Brand Threat Report for ${d.domain}:\n\n` +
                 `Threat Score: ${d.threatScore}/100 (${d.riskLevel} risk)\n` +
                 `Lookalike Domains: ${d.lookalikes.registered} found\n` +
-                `Social Imposters: ${imposterCount} found\n` +
+                `Social Imposters: ${imposterCount} verified, ${heuristicCount} heuristic\n` +
                 `Security Grade: ${d.security.grade}\n\n` +
                 `Scan your brand at:`;
             
@@ -5151,7 +5185,7 @@
             const stats = [
                 ['Registered lookalikes', String(d.lookalikes?.registered ?? 0)],
                 ['Suspicious domains', String(d.lookalikes?.suspicious ?? 0)],
-                ['Social imposters', String(d.socialMedia?.impostersFound ?? 0)],
+                ['Social imposters', `${d.socialMedia?.verifiedCount ?? d.socialMedia?.impostersFound ?? 0} verified / ${d.socialMedia?.heuristicCandidates ?? d.socialMedia?.unverifiedCount ?? 0} heuristic`],
                 ['Security grade', `${d.security?.grade ?? '-'} (${d.security?.score ?? 0}/100)`]
             ];
             doc.setFontSize(11);

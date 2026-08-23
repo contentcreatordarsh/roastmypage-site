@@ -193,54 +193,102 @@ async function checkSecurityHeaders(targetUrl) {
   else grade = "F";
   return { score, grade, headers, issues };
 }
+/**
+ * Probe GitHub's public users API — one of the few platforms that returns
+ * reliable existence signals without paid brand-monitoring credentials.
+ * Returns: "exists" | "missing" | "unknown"
+ */
+async function probeGithubUser(handle) {
+  try {
+    const response = await fetch(`https://api.github.com/users/${encodeURIComponent(handle)}`, {
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "RoastMyPage-BrandMonitor/1.0"
+      }
+    });
+    if (response.status === 404) return "missing";
+    if (response.ok) return "exists";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Build social imposter candidates.
+ *
+ * X/Twitter and Instagram block or mislead bot HEAD/GET probes, so those
+ * platforms are returned as explicit heuristics (unverified). GitHub is
+ * checked via the official Users API when possible.
+ *
+ * #17 — Social media imposter detection is unreliable
+ */
 async function scanSocialMediaImposters(brandName, domain22) {
   const imposters = [];
   const suspiciousHandles = generateSuspiciousHandles(brandName);
-  for (const handle of suspiciousHandles.slice(0, 15)) {
-    try {
-      const response = await fetch(`https://twitter.com/${handle}`, {
-        method: "HEAD",
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.0)" }
+  const riskyHandles = suspiciousHandles.filter((handle) => {
+    const risk = determineHandleRisk(handle, brandName);
+    return risk === "high" || risk === "medium";
+  });
+
+  // Heuristic watchlist for platforms that cannot be reliably probed.
+  // Cap keeps the UI actionable instead of dumping every variation.
+  const heuristicPlatforms = [
+    {
+      platform: "Twitter/X",
+      slice: 8,
+      urlFor: (h) => `https://x.com/${h}`
+    },
+    {
+      platform: "Instagram",
+      slice: 6,
+      urlFor: (h) => `https://www.instagram.com/${h}/`
+    }
+  ];
+
+  for (const { platform, slice, urlFor } of heuristicPlatforms) {
+    for (const handle of riskyHandles.slice(0, slice)) {
+      const risk = determineHandleRisk(handle, brandName);
+      imposters.push({
+        platform,
+        handle: `@${handle}`,
+        displayName: handle,
+        risk,
+        reason: getImposterReason(handle, brandName),
+        url: urlFor(handle),
+        verificationStatus: "unverified",
+        method: "heuristic",
+        note: "Heuristic handle pattern — not confirmed to exist. Check manually."
       });
-      if (response.ok || response.status === 200) {
-        const risk = determineHandleRisk(handle, brandName);
-        if (risk !== "low") {
-          imposters.push({
-            platform: "Twitter/X",
-            handle: `@${handle}`,
-            displayName: handle,
-            risk,
-            reason: getImposterReason(handle, brandName),
-            url: `https://twitter.com/${handle}`
-          });
-        }
-      }
-    } catch {
     }
   }
-  for (const handle of suspiciousHandles.slice(0, 10)) {
-    try {
-      const response = await fetch(`https://www.instagram.com/${handle}/`, {
-        method: "HEAD",
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; BrandMonitor/1.0)" }
-      });
-      if (response.ok) {
-        const risk = determineHandleRisk(handle, brandName);
-        if (risk !== "low") {
-          imposters.push({
-            platform: "Instagram",
-            handle: `@${handle}`,
-            displayName: handle,
-            risk,
-            reason: getImposterReason(handle, brandName),
-            url: `https://instagram.com/${handle}`
-          });
-        }
-      }
-    } catch {
-    }
+
+  // Official API probe for GitHub (reliable 200/404).
+  for (const handle of riskyHandles.slice(0, 8)) {
+    const risk = determineHandleRisk(handle, brandName);
+    const status = await probeGithubUser(handle);
+    if (status === "missing") continue;
+    imposters.push({
+      platform: "GitHub",
+      handle: `@${handle}`,
+      displayName: handle,
+      risk,
+      reason: getImposterReason(handle, brandName),
+      url: `https://github.com/${handle}`,
+      verificationStatus: status === "exists" ? "verified" : "unverified",
+      method: status === "exists" ? "github_api" : "github_api_inconclusive",
+      note: status === "exists"
+        ? "Confirmed via GitHub Users API."
+        : "GitHub probe inconclusive — check manually."
+    });
   }
+
   return imposters.sort((a, b) => {
+    // Prefer verified hits, then higher risk.
+    const verifiedOrder = { verified: 0, unverified: 1, unknown: 2 };
+    const va = verifiedOrder[a.verificationStatus] ?? 2;
+    const vb = verifiedOrder[b.verificationStatus] ?? 2;
+    if (va !== vb) return va - vb;
     const riskOrder = { high: 0, medium: 1, low: 2 };
     return riskOrder[a.risk] - riskOrder[b.risk];
   });
@@ -322,13 +370,26 @@ function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, s
     recommendations.push(`Found ${mediumRiskDomains.length} registered lookalike domain(s). Consider purchasing key variations to protect your brand.`);
   }
   if (socialImposters && socialImposters.length > 0) {
-    const highRiskImposters = socialImposters.filter((i) => i.risk === "high");
-    if (highRiskImposters.length > 0) {
-      recommendations.push(`ALERT: ${highRiskImposters.length} suspicious social media account(s) found that may be impersonating your brand's support/official channels.`);
+    const verified = socialImposters.filter((i) => i.verificationStatus === "verified");
+    const highRiskHeuristic = socialImposters.filter(
+      (i) => i.risk === "high" && i.verificationStatus !== "verified"
+    );
+    if (verified.length > 0) {
+      recommendations.push(
+        `ALERT: ${verified.length} social account(s) confirmed to exist with brand-like handles. Review and report impersonators on those platforms.`
+      );
     }
-    const totalImposters = socialImposters.filter((i) => i.risk !== "low").length;
-    if (totalImposters > 0) {
-      recommendations.push(`Report impostor accounts to the respective platforms. ${totalImposters} account(s) using variations of your brand name.`);
+    if (highRiskHeuristic.length > 0) {
+      recommendations.push(
+        `Review ${highRiskHeuristic.length} high-risk social handle pattern(s) (heuristic/unverified — X/Instagram cannot be reliably probed). Search and claim key @support / @official variants.`
+      );
+    } else if (verified.length === 0) {
+      const total = socialImposters.filter((i) => i.risk !== "low").length;
+      if (total > 0) {
+        recommendations.push(
+          `${total} brand-like social handle pattern(s) flagged as heuristics. Manually check X, Instagram, and GitHub — results are not proof of live accounts.`
+        );
+      }
     }
   }
   if (securityGrade.score < 70) {
@@ -345,4 +406,14 @@ function generateThreatRecommendations(domainChecks, securityGrade, riskLevel, s
   return recommendations.slice(0, 8);
 }
 
-export { generateTyposquats, checkDomainRegistrations, checkSecurityHeaders, scanSocialMediaImposters, generateSuspiciousHandles, determineHandleRisk, getImposterReason, generateThreatRecommendations };
+export {
+  generateTyposquats,
+  checkDomainRegistrations,
+  checkSecurityHeaders,
+  scanSocialMediaImposters,
+  generateSuspiciousHandles,
+  determineHandleRisk,
+  getImposterReason,
+  generateThreatRecommendations,
+  probeGithubUser
+};
