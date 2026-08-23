@@ -3324,9 +3324,16 @@
                 <div>
                     <div class="flex items-center gap-3 mb-4">
                         <span class="px-2.5 py-1 bg-green-500/20 text-green-400 rounded-lg text-xs font-semibold">LATEST</span>
-                        <span class="text-sm text-[#a1a1a6]">Aug 7, 2026</span>
+                        <span class="text-sm text-[#a1a1a6]">Aug 23, 2026</span>
                     </div>
                     <div class="space-y-3 pl-4 border-l-2 border-orange-500/30">
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🚧</span>
+                            <div>
+                                <div class="text-sm font-medium">Honest Answers on Bot-Protected Sites</div>
+                                <p class="text-xs text-[#6e6e73]">Some sites sit behind bot protection, so we only ever saw their "checking your browser" page — and scored that by mistake. Now we detect it and tell you plainly instead of inventing a score.</p>
+                            </div>
+                        </div>
                         <div class="flex items-start gap-3">
                             <span class="text-sm mt-0.5">🔗</span>
                             <div>
@@ -5260,6 +5267,22 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
         }
 
+        // Server error codes that deserve a specific explanation instead of a generic
+        // "something went wrong". Keyed by the `error` code the API returns.
+        const ROAST_ERROR_MESSAGES = {
+            blocked_by_bot_protection: "This site is behind bot protection (Cloudflare/similar), so we couldn't analyze the real page.",
+            blocked_url: "Cannot scan internal, private, or localhost URLs."
+        };
+
+        // Build an Error from an API error payload ({ error, message } or { error }),
+        // keeping the code on `.code` so callers can special-case it.
+        function roastError(data) {
+            const code = data?.error || '';
+            const err = new Error(ROAST_ERROR_MESSAGES[code] || data?.message || code || 'Roast failed');
+            err.code = code;
+            return err;
+        }
+
         // Main Roast Function
         async function roastPage() {
             const urlInput = document.getElementById('url-input');
@@ -5291,7 +5314,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 const contentType = response.headers.get('content-type');
                 if (contentType?.includes('application/json')) {
                     const data = await response.json();
-                    if (data.error) throw new Error(data.error);
+                    if (data.error) throw roastError(data);
                     if (analysisAborted) return;
                     currentRoast = data;
                     saveToHistory(data);
@@ -5331,7 +5354,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                                     retryCount = 0;
                                     pendingUrl = null;
                                 }
-                                else if (event === 'error') throw new Error(data.message);
+                                else if (event === 'error') throw roastError(data);
                             }
                         }
                     }
@@ -5340,6 +5363,13 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 if (analysisAborted) return;
                 hideLoadingModal();
                 
+                // Bot-challenge pages are never scored - explain why, and give the
+                // message longer than the usual toast since it needs to be read.
+                if (error.code === 'blocked_by_bot_protection') {
+                    showToast(error.message, 'error', 9000);
+                    return;
+                }
+
                 // Check if it's a busy/capacity error - show queue modal
                 const errorMsg = error.message.toLowerCase();
                 if (errorMsg.includes('busy') || errorMsg.includes('traffic') || errorMsg.includes('warming') || errorMsg.includes('capacity')) {
@@ -5409,8 +5439,8 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 }
 
                 const data = await response.json();
-                if (data.error) throw new Error(data.error);
-                
+                if (data.error) throw roastError(data);
+
                 // Show 100% briefly before hiding
                 document.getElementById('loading-percent').textContent = '100%';
                 document.getElementById('loading-progress-bar').style.width = '100%';
@@ -5425,7 +5455,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 clearInterval(progressInterval);
                 console.error('Compare error:', error);
                 hideLoadingModal();
-                showToast(error.message || 'Comparison failed. Please try again.', 'error');
+                showToast(error.message || 'Comparison failed. Please try again.', 'error', error.code === 'blocked_by_bot_protection' ? 9000 : 4000);
             } finally {
                 document.getElementById('compare-btn').disabled = false;
             }
@@ -5477,7 +5507,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     const contentType = resp.headers.get('content-type') || '';
                     if (contentType.includes('application/json')) {
                         const d = await resp.json();
-                        if (d.error) throw new Error(d.error);
+                        if (d.error) throw roastError(d);
                         // Completed without streaming (cache hit path)
                         const color = d.overallScore >= 7 ? 'text-green-400' : d.overallScore >= 5 ? 'text-yellow-400' : 'text-red-400';
                         set(`batch-score-${i}`, `${d.overallScore.toFixed(1)}/10`);
@@ -5521,7 +5551,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                                 }
                                 return data;
                             } else if (event === 'error') {
-                                set(`batch-status-${i}`, data.message || 'Failed');
+                                set(`batch-status-${i}`, roastError(data).message || 'Failed');
                                 setBar(`batch-progress-${i}`, 0);
                                 return null;
                             }
@@ -7595,14 +7625,14 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             el.className = 'text-xs px-2 py-1 rounded-full ' + (colors[status] || 'bg-gray-500/20 text-[#a1a1a6]');
         }
 
-        function showToast(msg, type = 'info') {
+        function showToast(msg, type = 'info', duration = 4000) {
             document.querySelectorAll('.toast').forEach(t => t.remove());
             const toast = document.createElement('div');
             const bg = type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-400' : type === 'success' ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400';
-            toast.className = `toast toast-enter fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 ${bg} border rounded-xl text-sm z-50`;
+            toast.className = `toast toast-enter fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 ${bg} border rounded-xl text-sm z-50 max-w-[min(92vw,32rem)] text-center`;
             toast.textContent = msg;
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 4000);
+            setTimeout(() => toast.remove(), duration);
         }
 
         function shareChallenge() {
