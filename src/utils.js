@@ -144,7 +144,12 @@ const CSP_DIRECTIVES = {
     // host list silently blocks a share of ad requests (revenue-affecting).
     "https://*.googlesyndication.com",
     "https://*.googleadservices.com",
-    "https://*.google.com"
+    "https://*.google.com",
+    // Cloudflare Web Analytics beacon is auto-injected on the zone; without this
+    // the site's own analytics are silently blocked by CSP.
+    "https://static.cloudflareinsights.com",
+    // AdSense loads its SODAR traffic-quality script from ep2.adtrafficquality.google.
+    "https://*.adtrafficquality.google"
   ],
   "style-src": [
     "'self'",
@@ -166,6 +171,8 @@ const CSP_DIRECTIVES = {
     "https://www.googletagservices.com",
     "https://adservice.google.com",
     "https://www.google.com",
+    // AdSense fires SODAR tracking pixels from adtrafficquality.google.
+    "https://*.adtrafficquality.google"
   ],
   "connect-src": [
     "'self'",
@@ -178,8 +185,13 @@ const CSP_DIRECTIVES = {
     "https://*.googlesyndication.com",
     "https://*.google.com",
     "https://*.doubleclick.net",
-    "https://*.googleadservices.com"
-],
+    "https://*.googleadservices.com",
+    // Analytics beacon POSTs here, and AdSense's traffic-quality (SODAR)
+    // service lives on adtrafficquality.google, which no *.google.com covers.
+    "https://static.cloudflareinsights.com",
+    "https://cloudflareinsights.com",
+    "https://*.adtrafficquality.google"
+  ],
   "frame-src": [
     "'self'",
     "https://googleads.g.doubleclick.net",
@@ -188,8 +200,10 @@ const CSP_DIRECTIVES = {
     "https://adservice.google.com",
     "https://www.google.com",
     "https://*.doubleclick.net",
-    "https://*.googlesyndication.com"
-],
+    "https://*.googlesyndication.com",
+    // SODAR renders a hidden frame.
+    "https://*.adtrafficquality.google"
+  ],
   "object-src": ["'none'"],
   "frame-ancestors": ["'none'"],
   "base-uri": ["'self'"],

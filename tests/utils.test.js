@@ -120,7 +120,7 @@ test("buildContentSecurityPolicy keeps script-src explicit and wildcard-free", (
   // (revenue-affecting, and it fails silently). Every non-Google source must
   // still be an explicit host.
   const scriptNonGoogleWildcards = directives["script-src"].filter(
-    (source) => source.includes("*") && !/googlesyndication|googleadservices|google\.com|doubleclick/.test(source)
+    (source) => source.includes("*") && !/googlesyndication|googleadservices|google\.com|doubleclick|adtrafficquality\.google/.test(source)
   );
   assert.deepEqual(scriptNonGoogleWildcards, []);
 });
@@ -144,7 +144,7 @@ test("buildContentSecurityPolicy restricts browser image and connect sources", (
   // (revenue-affecting, and it fails silently). Every non-Google source must
   // still be an explicit host.
   const connectNonGoogleWildcards = directives["connect-src"].filter(
-    (source) => source.includes("*") && !/googlesyndication|googleadservices|google\.com|doubleclick/.test(source)
+    (source) => source.includes("*") && !/googlesyndication|googleadservices|google\.com|doubleclick|adtrafficquality\.google/.test(source)
   );
   assert.deepEqual(connectNonGoogleWildcards, []);
 });
