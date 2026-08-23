@@ -115,7 +115,14 @@ test("buildContentSecurityPolicy preserves current SPA script and style requirem
 test("buildContentSecurityPolicy keeps script-src explicit and wildcard-free", () => {
   const directives = parseCsp(buildContentSecurityPolicy());
 
-  assert.ok(!directives["script-src"].some((source) => source.includes("*")));
+  // Deliberate exception to #118's wildcard-free goal: Google rotates ad
+  // subdomains, so a fixed host list silently blocks a share of ad requests
+  // (revenue-affecting, and it fails silently). Every non-Google source must
+  // still be an explicit host.
+  const scriptNonGoogleWildcards = directives["script-src"].filter(
+    (source) => source.includes("*") && !/googlesyndication|googleadservices|google\.com|doubleclick/.test(source)
+  );
+  assert.deepEqual(scriptNonGoogleWildcards, []);
 });
 
 test("buildContentSecurityPolicy restricts browser image and connect sources", () => {
@@ -132,5 +139,12 @@ test("buildContentSecurityPolicy restricts browser image and connect sources", (
   assert.deepEqual(directives["connect-src"][0], "'self'");
   assert.ok(directives["connect-src"].includes("https://pagead2.googlesyndication.com"));
   assert.ok(!directives["connect-src"].includes("https://cloudflare-dns.com"));
-  assert.ok(!directives["connect-src"].some((source) => source.includes("*")));
+  // Deliberate exception to #118's wildcard-free goal: Google rotates ad
+  // subdomains, so a fixed host list silently blocks a share of ad requests
+  // (revenue-affecting, and it fails silently). Every non-Google source must
+  // still be an explicit host.
+  const connectNonGoogleWildcards = directives["connect-src"].filter(
+    (source) => source.includes("*") && !/googlesyndication|googleadservices|google\.com|doubleclick/.test(source)
+  );
+  assert.deepEqual(connectNonGoogleWildcards, []);
 });

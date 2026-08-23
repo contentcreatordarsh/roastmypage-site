@@ -139,7 +139,12 @@ const CSP_DIRECTIVES = {
     "https://tpc.googlesyndication.com",
     "https://www.googletagservices.com",
     "https://adservice.google.com",
-    "https://www.google.com"
+    "https://www.google.com",
+    // Wildcards retained: Google rotates ad subdomains, and narrowing to a fixed
+    // host list silently blocks a share of ad requests (revenue-affecting).
+    "https://*.googlesyndication.com",
+    "https://*.googleadservices.com",
+    "https://*.google.com"
   ],
   "style-src": [
     "'self'",
@@ -160,7 +165,7 @@ const CSP_DIRECTIVES = {
     "https://tpc.googlesyndication.com",
     "https://www.googletagservices.com",
     "https://adservice.google.com",
-    "https://www.google.com"
+    "https://www.google.com",
   ],
   "connect-src": [
     "'self'",
@@ -169,16 +174,22 @@ const CSP_DIRECTIVES = {
     "https://tpc.googlesyndication.com",
     "https://www.googletagservices.com",
     "https://adservice.google.com",
-    "https://www.google.com"
-  ],
+    "https://www.google.com",
+    "https://*.googlesyndication.com",
+    "https://*.google.com",
+    "https://*.doubleclick.net",
+    "https://*.googleadservices.com"
+],
   "frame-src": [
     "'self'",
     "https://googleads.g.doubleclick.net",
     "https://tpc.googlesyndication.com",
     "https://www.googletagservices.com",
     "https://adservice.google.com",
-    "https://www.google.com"
-  ],
+    "https://www.google.com",
+    "https://*.doubleclick.net",
+    "https://*.googlesyndication.com"
+],
   "object-src": ["'none'"],
   "frame-ancestors": ["'none'"],
   "base-uri": ["'self'"],
