@@ -924,10 +924,11 @@
                 AI grades your hero, CTA, copy, trust &amp; design — then hands you the fixes. SEO, performance, and attention heatmaps included. No signup.
             </p>
 
-            <div class="rise-in rise-in-delay-3 segmented-control max-w-[300px] mx-auto mb-6">
+            <div class="rise-in rise-in-delay-3 segmented-control max-w-[420px] mx-auto mb-6">
                 <button onclick="showTab('single')" id="tab-single" class="active">Roast</button>
                 <button onclick="showTab('compare')" id="tab-compare">Compare</button>
                 <button onclick="showTab('batch')" id="tab-batch">Batch</button>
+                <button onclick="showTab('watchlist')" id="tab-watchlist">Watch</button>
             </div>
             
             <!-- Single Roast Form -->
@@ -1028,6 +1029,42 @@
                         Roast All Pages
                     </button>
                     <div id="batch-results" class="hidden space-y-3 pt-2 border-t border-white/[0.06]"></div>
+                </div>
+            </div>
+
+            <!-- Competitor Watchlist (#49) -->
+            <div id="form-watchlist" class="hidden card p-5 sm:p-7 max-w-xl mx-auto mb-4 text-left">
+                <div class="flex flex-col gap-4">
+                    <p class="text-[13px] text-cream-300/50">Save competitor URLs and get notified when their roast scores change.</p>
+                    <div>
+                        <label for="watchlist-url" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2">Competitor URL</label>
+                        <input type="url" id="watchlist-url" placeholder="https://competitor.com" class="input-dark w-full px-4 py-3.5">
+                    </div>
+                    <div>
+                        <label for="watchlist-label" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2">Label <span class="normal-case tracking-normal opacity-60">(optional)</span></label>
+                        <input type="text" id="watchlist-label" placeholder="Acme pricing" maxlength="80" class="input-dark w-full px-4 py-3.5">
+                    </div>
+                    <div>
+                        <label for="watchlist-email" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2">Alert email</label>
+                        <input type="email" id="watchlist-email" placeholder="you@company.com" class="input-dark w-full px-4 py-3.5">
+                    </div>
+                    <div>
+                        <label for="watchlist-webhook" class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase block mb-2">Slack / Discord webhook <span class="normal-case tracking-normal opacity-60">(optional)</span></label>
+                        <input type="url" id="watchlist-webhook" placeholder="https://hooks.slack.com/services/…" class="input-dark w-full px-4 py-3.5">
+                    </div>
+                    <button onclick="addWatchlistItem()" id="watchlist-add-btn" class="btn-primary w-full py-4 text-[16px]">
+                        Watch this URL
+                    </button>
+                    <div class="flex items-center justify-between gap-3 pt-1">
+                        <button onclick="checkWatchlistNow()" id="watchlist-check-btn" class="text-[13px] text-cream-300/50 hover:text-cream-100 font-medium transition-colors">
+                            Check scores now
+                        </button>
+                        <button onclick="loadWatchlist()" class="text-[13px] text-cream-300/40 hover:text-cream-100 font-medium transition-colors">
+                            Refresh
+                        </button>
+                    </div>
+                    <div id="watchlist-items" class="space-y-2.5 pt-2 border-t border-white/[0.06]"></div>
+                    <div id="watchlist-alerts" class="hidden space-y-2 pt-2 border-t border-white/[0.06]"></div>
                 </div>
             </div>
             
@@ -4425,9 +4462,196 @@
             document.getElementById('form-single').classList.toggle('hidden', tab !== 'single');
             document.getElementById('form-compare').classList.toggle('hidden', tab !== 'compare');
             document.getElementById('form-batch').classList.toggle('hidden', tab !== 'batch');
+            document.getElementById('form-watchlist').classList.toggle('hidden', tab !== 'watchlist');
             document.getElementById('tab-single').classList.toggle('active', tab === 'single');
             document.getElementById('tab-compare').classList.toggle('active', tab === 'compare');
             document.getElementById('tab-batch').classList.toggle('active', tab === 'batch');
+            document.getElementById('tab-watchlist').classList.toggle('active', tab === 'watchlist');
+            if (tab === 'watchlist') loadWatchlist();
+        }
+
+        const WATCHLIST_OWNER_KEY = 'watchlist_owner_key';
+
+        // The ownerKey is a bearer secret for the whole watchlist, so it must always be
+        // cryptographically random. A time-derived key (e.g. 'anon' + Date.now()) is
+        // guessable — anyone could enumerate a time window and read other people's lists.
+        function newWatchlistOwnerKey() {
+            if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+            const bytes = new Uint8Array(16);
+            crypto.getRandomValues(bytes);
+            return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function getWatchlistOwnerKey() {
+            try {
+                let key = localStorage.getItem(WATCHLIST_OWNER_KEY);
+                if (!key || !/^[a-zA-Z0-9_-]{8,64}$/.test(key)) {
+                    key = newWatchlistOwnerKey();
+                    localStorage.setItem(WATCHLIST_OWNER_KEY, key);
+                }
+                return key;
+            } catch {
+                // Storage unavailable (private mode / blocked): still use a random key.
+                // It won't persist across reloads, but it is never guessable.
+                if (!window.__wlEphemeralKey) window.__wlEphemeralKey = newWatchlistOwnerKey();
+                return window.__wlEphemeralKey;
+            }
+        }
+
+        function escapeWatchHtml(str) {
+            return String(str || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function hostFromUrl(u) {
+            try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; }
+        }
+
+        async function loadWatchlist() {
+            const listEl = document.getElementById('watchlist-items');
+            const alertsEl = document.getElementById('watchlist-alerts');
+            if (!listEl) return;
+            listEl.innerHTML = '<p class="text-[13px] text-cream-300/40">Loading…</p>';
+            try {
+                const ownerKey = getWatchlistOwnerKey();
+                const res = await fetch('/api/watchlist?ownerKey=' + encodeURIComponent(ownerKey));
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load watchlist');
+
+                const items = data.items || [];
+                if (!items.length) {
+                    listEl.innerHTML = '<p class="text-[13px] text-cream-300/40">No competitors watched yet.</p>';
+                } else {
+                    listEl.innerHTML = items.map((item) => {
+                        const score = item.lastScore == null ? '—' : Number(item.lastScore).toFixed(1);
+                        const label = item.label ? escapeWatchHtml(item.label) : escapeWatchHtml(hostFromUrl(item.url));
+                        const roastLink = item.lastRoastId
+                            ? `<a href="/roast/${escapeWatchHtml(item.lastRoastId)}" class="text-cream-100/80 hover:underline">${score}/10</a>`
+                            : `${score}/10`;
+                        return `<div class="flex items-start justify-between gap-3 py-2">
+                            <div class="min-w-0">
+                                <div class="text-[14px] text-cream-100 font-medium truncate">${label}</div>
+                                <div class="text-[12px] text-cream-300/40 truncate">${escapeWatchHtml(item.url)}</div>
+                            </div>
+                            <div class="flex items-center gap-3 shrink-0">
+                                <span class="text-[13px] text-cream-300/70 tabular-nums">${roastLink}</span>
+                                <button data-watch-id="${escapeWatchHtml(item.id)}" onclick="removeWatchlistItem(this.dataset.watchId)" class="text-[12px] text-cream-300/35 hover:text-red-400 transition-colors">Remove</button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+
+                const alerts = data.alerts || [];
+                if (alertsEl) {
+                    if (!alerts.length) {
+                        alertsEl.classList.add('hidden');
+                        alertsEl.innerHTML = '';
+                    } else {
+                        alertsEl.classList.remove('hidden');
+                        alertsEl.innerHTML = '<p class="text-[12px] text-cream-300/45 font-medium tracking-wide uppercase mb-1">Recent alerts</p>' +
+                            alerts.slice(0, 8).map((a) => {
+                                const prev = a.previousScore == null ? '—' : Number(a.previousScore).toFixed(1);
+                                const next = Number(a.newScore).toFixed(1);
+                                const link = a.roastId ? `<a href="/roast/${escapeWatchHtml(a.roastId)}" class="hover:underline">View</a>` : '';
+                                return `<div class="text-[13px] text-cream-300/55 flex justify-between gap-2">
+                                    <span class="truncate">${escapeWatchHtml(hostFromUrl(a.url))}: ${prev} → ${next}</span>
+                                    <span class="shrink-0 text-cream-300/40">${link}</span>
+                                </div>`;
+                            }).join('');
+                    }
+                }
+
+                const savedEmail = localStorage.getItem('userEmail');
+                const emailInput = document.getElementById('watchlist-email');
+                if (emailInput && !emailInput.value && savedEmail) emailInput.value = savedEmail;
+            } catch (err) {
+                listEl.innerHTML = `<p class="text-[13px] text-red-400/80">${escapeWatchHtml(err.message)}</p>`;
+            }
+        }
+
+        async function addWatchlistItem() {
+            const urlInput = document.getElementById('watchlist-url');
+            const labelInput = document.getElementById('watchlist-label');
+            const emailInput = document.getElementById('watchlist-email');
+            const webhookInput = document.getElementById('watchlist-webhook');
+            const btn = document.getElementById('watchlist-add-btn');
+            const rawUrl = (urlInput?.value || '').trim();
+            if (!rawUrl) return showToast('Enter a competitor URL', 'error');
+
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/watchlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ownerKey: getWatchlistOwnerKey(),
+                        url: rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl,
+                        label: (labelInput?.value || '').trim() || undefined,
+                        email: (emailInput?.value || '').trim() || undefined,
+                        webhookUrl: (webhookInput?.value || '').trim() || undefined
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    if (res.status === 429) showRateLimitWarning(data.error, data.retryAfter);
+                    throw new Error(data.error || 'Failed to add');
+                }
+                if (emailInput?.value) {
+                    try { localStorage.setItem('userEmail', emailInput.value.trim()); } catch {}
+                }
+                urlInput.value = '';
+                if (labelInput) labelInput.value = '';
+                showToast('Added to watchlist', 'success');
+                await loadWatchlist();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function removeWatchlistItem(id) {
+            try {
+                const res = await fetch('/api/watchlist/' + encodeURIComponent(id) + '?ownerKey=' + encodeURIComponent(getWatchlistOwnerKey()), {
+                    method: 'DELETE'
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Failed to remove');
+                showToast('Removed from watchlist', 'success');
+                await loadWatchlist();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function checkWatchlistNow() {
+            const btn = document.getElementById('watchlist-check-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('/api/watchlist/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ownerKey: getWatchlistOwnerKey() })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    if (res.status === 429) showRateLimitWarning(data.error, data.retryAfter);
+                    throw new Error(data.error || 'Check failed');
+                }
+                if (data.alerted > 0) {
+                    showToast(`${data.alerted} score change${data.alerted === 1 ? '' : 's'} detected`, 'success');
+                } else {
+                    showToast(`Checked ${data.checked} URL${data.checked === 1 ? '' : 's'} — no changes`, 'success');
+                }
+                await loadWatchlist();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         }
 
         function showResultTab(tab) {
@@ -9653,6 +9877,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             loadWallOfShame();
             loadFeed();
             if (window.location.hash === '#batch') showTab('batch');
+            if (window.location.hash === '#watchlist') showTab('watchlist');
         });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
