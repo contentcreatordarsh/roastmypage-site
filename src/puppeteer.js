@@ -128,6 +128,10 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           const rect = v.getBoundingClientRect();
           const tracks = Array.from(v.querySelectorAll("track")).map((t) => (t.getAttribute("kind") || "").toLowerCase());
           const hasCaptions = tracks.some((k) => k === "captions" || k === "subtitles");
+          const rawPreload = v.getAttribute("preload") || "";
+          const preload = rawPreload.length <= 8 && /^(auto|metadata|none)$/i.test(rawPreload)
+            ? rawPreload.toLowerCase()
+            : "metadata";
           items.push({
             kind: "video",
             provider: "html5",
@@ -140,7 +144,8 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             // attribute can copy an attacker-controlled multi-megabyte data URL
             // from Browser Rendering into Worker memory and persisted JSON.
             poster: v.hasAttribute("poster") && !!v.getAttribute("poster"),
-            preload: (v.getAttribute("preload") || "metadata").toLowerCase(),
+            // `preload` is validated against the allowed enum above (#139).
+            preload,
             hasCaptions,
             aboveFold: rect.top < heroCutoff && rect.bottom > 0,
             inHero: rect.top < viewportH * 0.85 && rect.height >= Math.min(180, viewportH * 0.25),
@@ -149,10 +154,12 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           });
         });
         const embedRe = /(youtube\.com|youtube-nocookie\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|wistia\.(com|net)|fast\.wistia|loom\.com\/embed|vidyard\.com|cloudinary\.com\/.*video)/i;
-        document.querySelectorAll("iframe[src]").forEach((frame, idx) => {
-          if (idx >= 8) return;
+        let embedMatches = 0;
+        for (const frame of document.querySelectorAll("iframe[src]")) {
+          if (embedMatches >= 8) break;
           const src = frame.getAttribute("src") || "";
-          if (!embedRe.test(src)) return;
+          if (!embedRe.test(src)) continue;
+          embedMatches++;
           const rect = frame.getBoundingClientRect();
           let provider = "embed";
           if (/youtube|youtu\.be/i.test(src)) provider = "youtube";
@@ -162,11 +169,12 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           else if (/vidyard/i.test(src)) provider = "vidyard";
           const autoplay = /[?&]autoplay=1/i.test(src) || /autoplay=true/i.test(src);
           const muted = /[?&]mute=1/i.test(src) || /muted=1/i.test(src) || /mute=true/i.test(src);
+          const hasTitle = !!frame.getAttribute("title");
           items.push({
             kind: "embed",
             provider,
             src: src.slice(0, 180),
-            title: frame.getAttribute("title") || "",
+            title: hasTitle,
             autoplay,
             muted: muted || autoplay, // embeds usually need mute for autoplay
             loop: /loop=1/i.test(src),
@@ -180,7 +188,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             width: Math.round(rect.width),
             height: Math.round(rect.height)
           });
-        });
+        }
 
         return {
           title: title22,

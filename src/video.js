@@ -7,6 +7,23 @@ function bool(v) {
   return !!v;
 }
 
+function compactPageControlledSignals(item) {
+  if (!item || typeof item !== "object") return item;
+  const compact = { ...item };
+  if (compact.kind === "embed") {
+    compact.title = bool(compact.title);
+  }
+  if (
+    compact.kind === "video" &&
+    compact.preload !== "auto" &&
+    compact.preload !== "metadata" &&
+    compact.preload !== "none"
+  ) {
+    compact.preload = "metadata";
+  }
+  return compact;
+}
+
 /**
  * Analyze raw DOM video signals collected in the browser.
  * @param {object|null} raw
@@ -27,11 +44,12 @@ export function analyzeVideoSignals(raw) {
     };
   }
 
-  // Poster URLs are not needed after presence detection. Normalize them to a
-  // boolean so callers cannot accidentally persist signed or unbounded data
-  // URLs supplied by the page.
+  // Normalize every page-controlled field before it can be persisted:
+  // compactPageControlledSignals (#139) bounds title/preload, and poster is
+  // reduced to a boolean (#138) so an attacker-controlled multi-megabyte data
+  // URL can never reach Worker memory or the stored JSON.
   const items = Array.isArray(raw.items)
-    ? raw.items.map((item) => ({ ...item, poster: bool(item?.poster) }))
+    ? raw.items.map((item) => ({ ...compactPageControlledSignals(item), poster: bool(item?.poster) }))
     : [];
   const hasHeroVideo = items.some((i) => i.inHero || i.aboveFold);
   const hasAutoplay = items.some((i) => i.autoplay);
