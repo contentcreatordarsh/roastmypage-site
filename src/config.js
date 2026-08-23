@@ -63,6 +63,13 @@ const CONFIG = {
   // Reduced from 3 — faster fail, top-level timeout guards
   MAX_BATCH_URLS: 3,
   // Reduced from 5 to save costs
+  // Bot-challenge handling — detection only, never a bypass. When a capture lands on
+  // an interstitial we give the page one honest second chance (a real browser's own
+  // JS challenge often self-resolves) and then fail with a clear error.
+  BOT_CHALLENGE_SETTLE_MS: 3500,
+  // Wait once for a challenge to redirect itself to the real page
+  BOT_CHALLENGE_RELOAD_TIMEOUT_MS: 1e4,
+  // Nav timeout for the single re-check reload; kept short to protect ROAST_TOTAL_TIMEOUT_MS
   // Storage limits
   MAX_SCREENSHOT_BYTES: 5 * 1024 * 1024,
   // 5MB — reject screenshots larger than this to prevent storage abuse

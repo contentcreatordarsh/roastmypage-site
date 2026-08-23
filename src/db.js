@@ -2,6 +2,7 @@ import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './c
 import { getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
 import { redactVideoItemUrls } from './video.js';
+import { isStoredChallengeRoast } from './botcheck.js';
 
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();
@@ -118,6 +119,12 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   // By default, self-heal legacy rows that would render blank audit cards.
   // Callers that cannot persist a recapture may opt into the incomplete row.
   if (requireAuditData && (!cached.seo_data || !cached.performance_data)) return null;
+  // Rows written before interstitial detection existed hold a score for a
+  // challenge page, not the site. Never replay that — re-capture instead, which
+  // now ends in an honest blocked_by_bot_protection error (or a real roast if
+  // the site has since dropped the challenge). Applies to every caller: serving
+  // a known-fabricated score is worse than a slower request.
+  if (isStoredChallengeRoast(cached.seo_data)) return null;
   let quickWins = [];
   try {
     quickWins = cached.quick_wins ? JSON.parse(cached.quick_wins) : [];
