@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildContentSecurityPolicy,
   isValidUrl,
   normalizeUrl,
   isUrlSafeForFetching,
@@ -9,6 +10,13 @@ import {
   hashUrl,
   hashIp
 } from "../src/utils.js";
+
+function parseCsp(policy) {
+  return Object.fromEntries(policy.split("; ").map((directive) => {
+    const [name, ...sources] = directive.split(" ");
+    return [name, sources];
+  }));
+}
 
 test("isValidUrl accepts http and https", () => {
   assert.equal(isValidUrl("https://example.com"), true);
@@ -74,4 +82,55 @@ test("hashIp requires a private salt in production", async () => {
   );
   const hash = await hashIp("203.0.113.10", undefined, "development");
   assert.match(hash, /^[a-f0-9]{32}$/);
+});
+
+test("buildContentSecurityPolicy includes hardening directives", () => {
+  const directives = parseCsp(buildContentSecurityPolicy());
+
+  assert.deepEqual(directives["default-src"], ["'self'"]);
+  assert.deepEqual(directives["object-src"], ["'none'"]);
+  assert.deepEqual(directives["frame-ancestors"], ["'none'"]);
+  assert.deepEqual(directives["base-uri"], ["'self'"]);
+  assert.deepEqual(directives["form-action"], ["'self'"]);
+  assert.deepEqual(directives["upgrade-insecure-requests"], []);
+});
+
+test("buildContentSecurityPolicy preserves current SPA script and style requirements", () => {
+  const directives = parseCsp(buildContentSecurityPolicy());
+
+  assert.ok(directives["script-src"].includes("'unsafe-inline'"));
+  assert.ok(directives["script-src"].includes("'report-sample'"));
+  assert.ok(directives["script-src"].includes("https://cdn.tailwindcss.com"));
+  assert.ok(directives["script-src"].includes("https://cdnjs.cloudflare.com"));
+  assert.ok(directives["script-src"].includes("https://cdn.jsdelivr.net"));
+  assert.ok(directives["script-src"].includes("https://pagead2.googlesyndication.com"));
+
+  assert.ok(directives["style-src"].includes("'unsafe-inline'"));
+  assert.ok(directives["style-src"].includes("'report-sample'"));
+  assert.ok(directives["style-src"].includes("https://cdn.tailwindcss.com"));
+  assert.ok(directives["style-src"].includes("https://fonts.googleapis.com"));
+  assert.ok(directives["font-src"].includes("https://fonts.gstatic.com"));
+});
+
+test("buildContentSecurityPolicy keeps script-src explicit and wildcard-free", () => {
+  const directives = parseCsp(buildContentSecurityPolicy());
+
+  assert.ok(!directives["script-src"].some((source) => source.includes("*")));
+});
+
+test("buildContentSecurityPolicy restricts browser image and connect sources", () => {
+  const directives = parseCsp(buildContentSecurityPolicy());
+
+  assert.ok(directives["img-src"].includes("'self'"));
+  assert.ok(directives["img-src"].includes("data:"));
+  assert.ok(directives["img-src"].includes("blob:"));
+  assert.ok(directives["img-src"].includes("https://api.producthunt.com"));
+  assert.ok(directives["img-src"].includes("https://placehold.co"));
+  assert.ok(!directives["img-src"].includes("https:"));
+  assert.ok(!directives["img-src"].includes("http:"));
+
+  assert.deepEqual(directives["connect-src"][0], "'self'");
+  assert.ok(directives["connect-src"].includes("https://pagead2.googlesyndication.com"));
+  assert.ok(!directives["connect-src"].includes("https://cloudflare-dns.com"));
+  assert.ok(!directives["connect-src"].some((source) => source.includes("*")));
 });
