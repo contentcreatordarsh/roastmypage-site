@@ -173,7 +173,9 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           items.push({
             kind: "embed",
             provider,
-            src: src.slice(0, 180),
+            // No src: embed URLs can carry signed params/access tokens (#134).
+            // Title is reduced to a boolean so an unbounded page-controlled
+            // string can never be persisted (#139).
             title: hasTitle,
             autoplay,
             muted: muted || autoplay, // embeds usually need mute for autoplay

@@ -1,6 +1,7 @@
 import { CONFIG, POPULAR_DOMAINS, API_V1_LIMITS, INDUSTRY_BENCHMARKS } from './config.js';
 import { getApiDayKey } from './utils.js';
 import { calculatePercentile } from './ai.js';
+import { redactVideoItemUrls } from './video.js';
 
 async function checkGlobalRateLimit(env22) {
   const now = /* @__PURE__ */ new Date();
@@ -127,7 +128,10 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   let performance22 = null;
   let heatmap = null;
   try {
-    if (cached.seo_data) seo = JSON.parse(cached.seo_data);
+    if (cached.seo_data) {
+      seo = JSON.parse(cached.seo_data);
+      if (seo?.video) seo.video = redactVideoItemUrls(seo.video);
+    }
   } catch {
   }
   try {

@@ -24,6 +24,14 @@ function compactPageControlledSignals(item) {
   return compact;
 }
 
+export function redactVideoItemUrls(video) {
+  if (!video || !Array.isArray(video.items)) return video;
+  return {
+    ...video,
+    items: video.items.map(({ src: _src, ...item }) => item)
+  };
+}
+
 /**
  * Analyze raw DOM video signals collected in the browser.
  * @param {object|null} raw
@@ -221,7 +229,10 @@ export function analyzeVideoSignals(raw) {
       issues: a11yIssues,
       checks: a11yChecks
     },
-    items: items.slice(0, 8),
+    // Embed URLs can carry signed query parameters or access tokens. The URL is
+    // only needed while collecting provider/autoplay signals, never in persisted
+    // or client-visible analysis data.
+    items: redactVideoItemUrls({ items: items.slice(0, 8) }).items,
     recommendations: recommendations.slice(0, 6)
   };
 }
