@@ -1,2 +1,4 @@
 node_modules/
+# also ignore a node_modules symlink (git worktrees link to the main checkout)
+node_modules
 .wrangler/
