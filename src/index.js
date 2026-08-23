@@ -43,6 +43,7 @@ import {
 import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
+import { redactVideoItemUrls } from './video.js';
 
 // Bundler shim: __name2 was injected by esbuild to name arrow functions.
 // In the modular source it's a safe no-op passthrough.
@@ -795,6 +796,16 @@ data: ${JSON.stringify(data)}
       const roast = await env22.DB.prepare("SELECT * FROM roasts WHERE id = ?").bind(roastId).first();
       if (!roast) {
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
+      }
+      if (roast.seo_data) {
+        try {
+          const seo = JSON.parse(roast.seo_data);
+          if (seo?.video) {
+            seo.video = redactVideoItemUrls(seo.video);
+            roast.seo_data = JSON.stringify(seo);
+          }
+        } catch {
+        }
       }
       const roastIndustry = roast.industry || "other";
       return Response.json({ ...roast, benchmarks: INDUSTRY_BENCHMARKS[roastIndustry] || INDUSTRY_BENCHMARKS.other }, { headers: corsHeaders });
@@ -2630,6 +2641,7 @@ data: ${JSON.stringify(data)}
             industry: cachedResult.industry || "other",
             seo: cachedResult.seo || null,
             performance: cachedResult.performance || null,
+            video: cachedResult.video || cachedResult.seo?.video || null,
             heatmap: cachedResult.heatmap || null,
             screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${cachedResult.id}`,
             shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${cachedResult.id}`,
@@ -2644,6 +2656,11 @@ data: ${JSON.stringify(data)}
           quotaReservationIpHash = null;
           return response;
         }
+        // A cache miss is about to consume Browser Rendering capacity. From this
+        // point the reservation counts as an attempted roast even if the target
+        // page times out or produces an oversized screenshot; otherwise callers
+        // can intentionally fail captures forever without using per-IP quota.
+        quotaReservationIpHash = null;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
         const pageData = await capturePageWithMetrics(env22, targetUrl, { device });

@@ -7,6 +7,31 @@ function bool(v) {
   return !!v;
 }
 
+function compactPageControlledSignals(item) {
+  if (!item || typeof item !== "object") return item;
+  const compact = { ...item };
+  if (compact.kind === "embed") {
+    compact.title = bool(compact.title);
+  }
+  if (
+    compact.kind === "video" &&
+    compact.preload !== "auto" &&
+    compact.preload !== "metadata" &&
+    compact.preload !== "none"
+  ) {
+    compact.preload = "metadata";
+  }
+  return compact;
+}
+
+export function redactVideoItemUrls(video) {
+  if (!video || !Array.isArray(video.items)) return video;
+  return {
+    ...video,
+    items: video.items.map(({ src: _src, ...item }) => item)
+  };
+}
+
 /**
  * Analyze raw DOM video signals collected in the browser.
  * @param {object|null} raw
@@ -27,7 +52,13 @@ export function analyzeVideoSignals(raw) {
     };
   }
 
-  const items = Array.isArray(raw.items) ? raw.items : [];
+  // Normalize every page-controlled field before it can be persisted:
+  // compactPageControlledSignals (#139) bounds title/preload, and poster is
+  // reduced to a boolean (#138) so an attacker-controlled multi-megabyte data
+  // URL can never reach Worker memory or the stored JSON.
+  const items = Array.isArray(raw.items)
+    ? raw.items.map((item) => ({ ...compactPageControlledSignals(item), poster: bool(item?.poster) }))
+    : [];
   const hasHeroVideo = items.some((i) => i.inHero || i.aboveFold);
   const hasAutoplay = items.some((i) => i.autoplay);
   const hasUnmutedAutoplay = items.some((i) => i.autoplay && !i.muted);
@@ -198,7 +229,10 @@ export function analyzeVideoSignals(raw) {
       issues: a11yIssues,
       checks: a11yChecks
     },
-    items: items.slice(0, 8),
+    // Embed URLs can carry signed query parameters or access tokens. The URL is
+    // only needed while collecting provider/autoplay signals, never in persisted
+    // or client-visible analysis data.
+    items: redactVideoItemUrls({ items: items.slice(0, 8) }).items,
     recommendations: recommendations.slice(0, 6)
   };
 }
