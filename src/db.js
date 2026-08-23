@@ -142,6 +142,12 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     if (cached.heatmap_data) heatmap = JSON.parse(cached.heatmap_data);
   } catch {
   }
+  // Video analysis is part of the current audit schema. Rows captured before it
+  // shipped have otherwise-complete SEO/performance JSON, so they must be
+  // recaptured once instead of hiding video findings until the cache TTL expires.
+  if (requireAuditData && (!seo || !Object.prototype.hasOwnProperty.call(seo, "video"))) {
+    return null;
+  }
   const industry = cached.industry || "other";
   const percentileData = CONFIG.ENABLE_PERCENTILE_RANKING ? await calculatePercentile(env22.DB, cached.overall_score, industry, "overall") : null;
   return {
