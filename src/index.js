@@ -2799,9 +2799,6 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
       let quotaReservationIpHash = null;
-      // Remembers a reservation we deliberately charged (once Browser Rendering
-      // started) so specific failure modes can still hand it back.
-      let quotaChargedIpHash = null;
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
@@ -2928,7 +2925,6 @@ data: ${JSON.stringify(data)}
         // point the reservation counts as an attempted roast even if the target
         // page times out or produces an oversized screenshot; otherwise callers
         // can intentionally fail captures forever without using per-IP quota.
-        quotaChargedIpHash = quotaReservationIpHash;
         quotaReservationIpHash = null;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
@@ -3012,11 +3008,6 @@ data: ${JSON.stringify(data)}
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         if (isBotChallengeError(error32)) {
-          // Bot protection is detected within a couple of seconds and the caller
-          // can do nothing about it, so refund rather than burning one of their
-          // few daily requests. This does not reopen the free-capture-burn hole:
-          // every other capture failure still stays charged.
-          quotaReservationIpHash = quotaChargedIpHash;
           return Response.json({
             success: false,
             error: "blocked_by_bot_protection",
