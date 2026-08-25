@@ -167,16 +167,28 @@ export async function processWatchlistAlerts(env, { limit = 40, baseUrl = "https
       baseUrl
     });
 
+    const deliveryResults = [];
     if (row.webhook_url) {
-      await fireWatchlistWebhook(row.webhook_url, message);
+      const webhookResult = await fireWatchlistWebhook(row.webhook_url, message);
+      deliveryResults.push(webhookResult.ok === true);
     }
     if (row.email) {
-      await sendWatchlistEmail(env, {
+      const emailResult = await sendWatchlistEmail(env, {
         to: row.email,
         subject: message.subject,
         html: message.html,
         text: message.text
       });
+      deliveryResults.push(emailResult.sent === true);
+    }
+    if (deliveryResults.length > 0 && !deliveryResults.some(Boolean)) {
+      // Do not consume the score change when every configured destination
+      // failed. Rotate the row so other watchlists still get scanned, then
+      // retry this notification on the next scheduled/manual check.
+      await env.DB.prepare(
+        `UPDATE watchlist SET updated_at = datetime('now') WHERE id = ?`
+      ).bind(row.id).run();
+      continue;
     }
 
     const alertId = crypto.randomUUID().slice(0, 8);
