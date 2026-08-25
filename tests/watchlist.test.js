@@ -4,6 +4,7 @@ import {
   isWatchlistWebhookUrl,
   scoreChanged,
   buildWatchlistAlertMessage,
+  lookupLatestRoastScore,
   processWatchlistAlerts
 } from "../src/watchlist.js";
 
@@ -47,6 +48,74 @@ test("buildWatchlistAlertMessage includes scores and link", () => {
   assert.match(msg.slack.text, /competitor\.com/);
   assert.match(msg.discord.content, /7\.4/);
   assert.match(msg.html, /roast\/abc123/);
+});
+
+test("lookupLatestRoastScore never falls back to another path on the same host", async () => {
+  const queries = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...binds) {
+            return {
+              async first() {
+                queries.push({ sql, binds });
+                if (sql.includes("url_hash")) return null;
+                const siblingRoast = {
+                  id: "homepage",
+                  url: "https://competitor.com/",
+                  overall_score: 9,
+                  created_at: "2026-08-01T00:00:00Z"
+                };
+                return binds.includes(siblingRoast.url) ? siblingRoast : null;
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const result = await lookupLatestRoastScore(env, {
+    url: "https://competitor.com/pricing",
+    urlHash: "missing-pricing-hash"
+  });
+
+  assert.equal(result, null);
+  assert.equal(queries.some(({ sql }) => sql.includes("LIKE")), false);
+});
+
+test("lookupLatestRoastScore exact fallback tolerates a trailing slash", async () => {
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...binds) {
+            return {
+              async first() {
+                if (sql.includes("url_hash")) return null;
+                const exactRoast = {
+                  id: "pricing",
+                  url: "https://competitor.com/pricing/",
+                  overall_score: 7.2,
+                  created_at: "2026-08-01T00:00:00Z"
+                };
+                return binds.includes(exactRoast.url) ? exactRoast : null;
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const result = await lookupLatestRoastScore(env, {
+    url: "https://competitor.com/pricing",
+    urlHash: "missing-pricing-hash"
+  });
+
+  assert.equal(result?.id, "pricing");
+  assert.equal(result?.overall_score, 7.2);
 });
 
 test("processWatchlistAlerts emits alert when score moves and updates row", async () => {
@@ -157,4 +226,53 @@ test("processWatchlistAlerts skips when score is unchanged", async () => {
   assert.equal(result.alerted, 0);
   assert.ok(runs.some((s) => s.includes("UPDATE watchlist SET updated_at")));
   assert.equal(runs.some((s) => s.includes("INSERT INTO watchlist_alerts")), false);
+});
+
+test("processWatchlistAlerts rotates rows that have no roast yet", async () => {
+  const runs = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        const stmt = {
+          _binds: [],
+          bind(...args) {
+            this._binds = args;
+            return this;
+          },
+          async all() {
+            return {
+              results: [{
+                id: "no-roast",
+                owner_key: "owner",
+                url: "https://new-competitor.example",
+                url_hash: "missing",
+                email: null,
+                webhook_url: null,
+                last_score: null,
+                last_roast_id: null
+              }]
+            };
+          },
+          async first() {
+            return null;
+          },
+          async run() {
+            runs.push({ sql, binds: this._binds });
+            return { success: true };
+          }
+        };
+        return stmt;
+      }
+    }
+  };
+
+  const result = await processWatchlistAlerts(env);
+
+  assert.equal(result.checked, 1);
+  assert.equal(result.alerted, 0);
+  assert.ok(runs.some(
+    (call) =>
+      call.sql.includes("UPDATE watchlist SET updated_at") &&
+      call.binds[0] === "no-roast"
+  ));
 });
