@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import worker from "../src/index.js";
 import {
   isWatchlistWebhookUrl,
   scoreChanged,
   buildWatchlistAlertMessage,
+  lookupLatestRoastScore,
   processWatchlistAlerts
 } from "../src/watchlist.js";
 
@@ -23,6 +25,27 @@ test("isWatchlistWebhookUrl allows Slack and Discord HTTPS webhooks only", () =>
   assert.equal(isWatchlistWebhookUrl("http://hooks.slack.com/services/T00/B00/xxx"), false);
   assert.equal(isWatchlistWebhookUrl("https://evil.example/webhook"), false);
   assert.equal(isWatchlistWebhookUrl("not-a-url"), false);
+});
+
+test("watchlist API rejects email alerts when no email binding exists", async () => {
+  const request = new Request("https://roastmypage.site/api/watchlist", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Origin": "https://roastmypage.site"
+    },
+    body: JSON.stringify({
+      ownerKey: "owner1234",
+      url: "https://competitor.com",
+      email: "alerts@example.com"
+    })
+  });
+
+  const response = await worker.fetch(request, { ENVIRONMENT: "development" }, {});
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.match(body.error, /Email alerts are not configured/i);
 });
 
 test("scoreChanged respects threshold and first-score case", () => {
@@ -47,6 +70,74 @@ test("buildWatchlistAlertMessage includes scores and link", () => {
   assert.match(msg.slack.text, /competitor\.com/);
   assert.match(msg.discord.content, /7\.4/);
   assert.match(msg.html, /roast\/abc123/);
+});
+
+test("lookupLatestRoastScore never falls back to another path on the same host", async () => {
+  const queries = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...binds) {
+            return {
+              async first() {
+                queries.push({ sql, binds });
+                if (sql.includes("url_hash")) return null;
+                const siblingRoast = {
+                  id: "homepage",
+                  url: "https://competitor.com/",
+                  overall_score: 9,
+                  created_at: "2026-08-01T00:00:00Z"
+                };
+                return binds.includes(siblingRoast.url) ? siblingRoast : null;
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const result = await lookupLatestRoastScore(env, {
+    url: "https://competitor.com/pricing",
+    urlHash: "missing-pricing-hash"
+  });
+
+  assert.equal(result, null);
+  assert.equal(queries.some(({ sql }) => sql.includes("LIKE")), false);
+});
+
+test("lookupLatestRoastScore exact fallback tolerates a trailing slash", async () => {
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...binds) {
+            return {
+              async first() {
+                if (sql.includes("url_hash")) return null;
+                const exactRoast = {
+                  id: "pricing",
+                  url: "https://competitor.com/pricing/",
+                  overall_score: 7.2,
+                  created_at: "2026-08-01T00:00:00Z"
+                };
+                return binds.includes(exactRoast.url) ? exactRoast : null;
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const result = await lookupLatestRoastScore(env, {
+    url: "https://competitor.com/pricing",
+    urlHash: "missing-pricing-hash"
+  });
+
+  assert.equal(result?.id, "pricing");
+  assert.equal(result?.overall_score, 7.2);
 });
 
 test("processWatchlistAlerts emits alert when score moves and updates row", async () => {
@@ -157,4 +248,115 @@ test("processWatchlistAlerts skips when score is unchanged", async () => {
   assert.equal(result.alerted, 0);
   assert.ok(runs.some((s) => s.includes("UPDATE watchlist SET updated_at")));
   assert.equal(runs.some((s) => s.includes("INSERT INTO watchlist_alerts")), false);
+});
+
+test("processWatchlistAlerts rotates rows that have no roast yet", async () => {
+  const runs = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        const stmt = {
+          _binds: [],
+          bind(...args) {
+            this._binds = args;
+            return this;
+          },
+          async all() {
+            return {
+              results: [{
+                id: "no-roast",
+                owner_key: "owner",
+                url: "https://new-competitor.example",
+                url_hash: "missing",
+                email: null,
+                webhook_url: null,
+                last_score: null,
+                last_roast_id: null
+              }]
+            };
+          },
+          async first() {
+            return null;
+          },
+          async run() {
+            runs.push({ sql, binds: this._binds });
+            return { success: true };
+          }
+        };
+        return stmt;
+      }
+    }
+  };
+
+  const result = await processWatchlistAlerts(env);
+
+  assert.equal(result.checked, 1);
+  assert.equal(result.alerted, 0);
+  assert.ok(runs.some(
+    (call) =>
+      call.sql.includes("UPDATE watchlist SET updated_at") &&
+      call.binds[0] === "no-roast"
+  ));
+});
+
+test("processWatchlistAlerts preserves a score change when webhook delivery fails", async () => {
+  const originalFetch = globalThis.fetch;
+  const runs = [];
+  globalThis.fetch = async () => new Response("rate limited", { status: 429 });
+  const env = {
+    DB: {
+      prepare(sql) {
+        const stmt = {
+          _binds: [],
+          bind(...args) {
+            this._binds = args;
+            return this;
+          },
+          async all() {
+            return {
+              results: [{
+                id: "retry-me",
+                owner_key: "owner",
+                url: "https://competitor.example",
+                url_hash: "hash",
+                email: null,
+                webhook_url: "https://hooks.slack.com/services/T00/B00/token",
+                last_score: 6,
+                last_roast_id: "old"
+              }]
+            };
+          },
+          async first() {
+            return {
+              id: "new",
+              url: "https://competitor.example",
+              overall_score: 8,
+              created_at: "2026-08-25T00:00:00Z"
+            };
+          },
+          async run() {
+            runs.push({ sql, binds: this._binds });
+            return { success: true };
+          }
+        };
+        return stmt;
+      }
+    }
+  };
+
+  try {
+    const result = await processWatchlistAlerts(env);
+
+    assert.equal(result.checked, 1);
+    assert.equal(result.alerted, 0);
+    assert.equal(runs.some(({ sql }) => sql.includes("INSERT INTO watchlist_alerts")), false);
+    assert.equal(runs.some(({ sql }) => sql.includes("SET last_score")), false);
+    assert.ok(runs.some(
+      ({ sql, binds }) =>
+        sql.includes("UPDATE watchlist SET updated_at") &&
+        binds[0] === "retry-me"
+    ));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

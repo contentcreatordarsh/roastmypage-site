@@ -1089,6 +1089,11 @@ data: ${JSON.stringify(data)}
             error: "Webhook must be a Slack or Discord HTTPS webhook URL"
           }, { status: 400, headers: corsHeaders });
         }
+        if (email && (!env22.EMAIL || typeof env22.EMAIL.send !== "function")) {
+          return Response.json({
+            error: "Email alerts are not configured. Use a Slack or Discord webhook instead."
+          }, { status: 503, headers: corsHeaders });
+        }
         if (!email && !webhookUrl) {
           return Response.json({
             error: "Add an email and/or Slack/Discord webhook to receive score-change alerts"

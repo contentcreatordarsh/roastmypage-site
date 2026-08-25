@@ -88,7 +88,7 @@ export async function sendWatchlistEmail(env, { to, subject, html, text }) {
 }
 
 /**
- * Find the newest roast score for a URL (hash match, then hostname fallback).
+ * Find the newest roast score for a URL (hash match, then exact URL fallback).
  */
 export async function lookupLatestRoastScore(env, { url, urlHash }) {
   if (urlHash) {
@@ -98,14 +98,27 @@ export async function lookupLatestRoastScore(env, { url, urlHash }) {
     ).bind(urlHash).first();
     if (byHash) return byHash;
   }
-  let hostname = "";
-  try { hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
-  if (!hostname) return null;
+  let canonicalUrl;
+  let trailingSlashVariant;
+  try {
+    const parsed = new URL(url);
+    canonicalUrl = parsed.toString();
+    if (parsed.pathname === "/") {
+      trailingSlashVariant = `${parsed.origin}${parsed.search}${parsed.hash}`;
+    } else {
+      parsed.pathname = parsed.pathname.endsWith("/")
+        ? parsed.pathname.slice(0, -1)
+        : `${parsed.pathname}/`;
+      trailingSlashVariant = parsed.toString();
+    }
+  } catch {
+    return null;
+  }
   return env.DB.prepare(
     `SELECT id, url, overall_score, created_at FROM roasts
-     WHERE lower(url) LIKE ? OR lower(url) LIKE ?
+     WHERE url = ? OR url = ?
      ORDER BY created_at DESC LIMIT 1`
-  ).bind(`https://${hostname}%`, `http://${hostname}%`).first();
+  ).bind(canonicalUrl, trailingSlashVariant).first();
 }
 
 /**
@@ -128,7 +141,14 @@ export async function processWatchlistAlerts(env, { limit = 40, baseUrl = "https
   const alerts = [];
   for (const row of rows.results || []) {
     const latest = await lookupLatestRoastScore(env, { url: row.url, urlHash: row.url_hash });
-    if (!latest) continue;
+    if (!latest) {
+      // Rotate entries without a roast too. Otherwise the oldest no-result rows
+      // occupy every limited cron batch and permanently starve newer entries.
+      await env.DB.prepare(
+        `UPDATE watchlist SET updated_at = datetime('now') WHERE id = ?`
+      ).bind(row.id).run();
+      continue;
+    }
     const nextScore = Number(latest.overall_score);
     if (!scoreChanged(row.last_score, nextScore)) {
       // Touch updated_at so we rotate through the list
@@ -147,16 +167,28 @@ export async function processWatchlistAlerts(env, { limit = 40, baseUrl = "https
       baseUrl
     });
 
+    const deliveryResults = [];
     if (row.webhook_url) {
-      await fireWatchlistWebhook(row.webhook_url, message);
+      const webhookResult = await fireWatchlistWebhook(row.webhook_url, message);
+      deliveryResults.push(webhookResult.ok === true);
     }
     if (row.email) {
-      await sendWatchlistEmail(env, {
+      const emailResult = await sendWatchlistEmail(env, {
         to: row.email,
         subject: message.subject,
         html: message.html,
         text: message.text
       });
+      deliveryResults.push(emailResult.sent === true);
+    }
+    if (deliveryResults.length > 0 && !deliveryResults.some(Boolean)) {
+      // Do not consume the score change when every configured destination
+      // failed. Rotate the row so other watchlists still get scanned, then
+      // retry this notification on the next scheduled/manual check.
+      await env.DB.prepare(
+        `UPDATE watchlist SET updated_at = datetime('now') WHERE id = ?`
+      ).bind(row.id).run();
+      continue;
     }
 
     const alertId = crypto.randomUUID().slice(0, 8);
