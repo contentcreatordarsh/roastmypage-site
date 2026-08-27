@@ -278,6 +278,11 @@ Respond with your analysis.`;
       }
       parsed = { ...fallback, ...source, scores, sections };
       const placeholders = /^(Win \d|Issue|Solution|One sentence|specific|your |<.*>$)/i;
+      const normalizeText = (value, fallbackText) => {
+        if (typeof value !== "string" || !value.trim()) return fallbackText;
+        const trimmed = value.trim();
+        return placeholders.test(trimmed) ? fallbackText : trimmed;
+      };
       if (!parsed.quickWins || !Array.isArray(parsed.quickWins)) {
         parsed.quickWins = [
           "Add a clear, benefit-driven headline above the fold",
@@ -285,7 +290,9 @@ Respond with your analysis.`;
           "Add customer testimonials or trust badges"
         ];
       } else {
-        parsed.quickWins = parsed.quickWins.filter((w) => w && !placeholders.test(w.trim()));
+        parsed.quickWins = parsed.quickWins
+          .filter((w) => typeof w === "string" && w.trim() && !placeholders.test(w.trim()))
+          .map((w) => w.trim());
         if (parsed.quickWins.length === 0) {
           parsed.quickWins = [
             "Add a clear, benefit-driven headline above the fold",
@@ -296,32 +303,45 @@ Respond with your analysis.`;
           ];
         }
       }
-      if (parsed.verdict && placeholders.test(parsed.verdict.trim())) {
-        parsed.verdict = "This page has room for improvement across several key areas.";
-      }
+      parsed.verdict = normalizeText(
+        parsed.verdict,
+        "This page has room for improvement across several key areas."
+      );
       if (parsed.sections) {
         for (const key of Object.keys(parsed.sections)) {
           const s = parsed.sections[key];
-          if (s.roast && placeholders.test(s.roast.trim())) s.roast = "Needs review and improvement";
-          if (s.fix && placeholders.test(s.fix.trim())) s.fix = "Focus on clarity and user intent";
+          s.roast = normalizeText(s.roast, "Needs review and improvement");
+          s.fix = normalizeText(s.fix, "Focus on clarity and user intent");
           if (s.scoreBreakdown && Array.isArray(s.scoreBreakdown)) {
-            for (const item of s.scoreBreakdown) {
-              if (item.reason && placeholders.test(item.reason.trim())) {
-                item.reason = item.points >= 2 ? "Good" : item.points >= 1 ? "Needs improvement" : "Missing or poor";
-              }
-              item.points = Math.max(0, Math.min(2, item.points || 0));
-              item.maxPoints = 2;
-            }
+            s.scoreBreakdown = s.scoreBreakdown
+              .filter((item) => item && typeof item === "object" && !Array.isArray(item))
+              .map((item) => {
+                const normalizedItem = { ...item };
+                const points = Number.isFinite(Number(item.points)) ? Number(item.points) : 0;
+                normalizedItem.reason = normalizeText(
+                  item.reason,
+                  points >= 2 ? "Good" : points >= 1 ? "Needs improvement" : "Missing or poor"
+                );
+                normalizedItem.points = Math.max(0, Math.min(2, points));
+                normalizedItem.maxPoints = 2;
+                return normalizedItem;
+              });
           }
         }
       }
       parsed.industry = resolveIndustry(parsed.industry);
       parsed.benchmarks = INDUSTRY_BENCHMARKS[parsed.industry] || INDUSTRY_BENCHMARKS.other;
-      if (parsed.competitorInsight && placeholders.test(parsed.competitorInsight.trim())) {
-        parsed.competitorInsight = "This page could benefit from studying top competitors in its space.";
+      if (parsed.competitorInsight !== undefined) {
+        parsed.competitorInsight = normalizeText(
+          parsed.competitorInsight,
+          "This page could benefit from studying top competitors in its space."
+        );
       }
-      if (parsed.detailedRoast && placeholders.test(parsed.detailedRoast.trim())) {
-        parsed.detailedRoast = "The page needs improvements in visual hierarchy, copy clarity, and conversion optimization. Focus on making the value proposition immediately clear and the call-to-action impossible to miss.";
+      if (parsed.detailedRoast !== undefined) {
+        parsed.detailedRoast = normalizeText(
+          parsed.detailedRoast,
+          "The page needs improvements in visual hierarchy, copy clarity, and conversion optimization. Focus on making the value proposition immediately clear and the call-to-action impossible to miss."
+        );
       }
       // Calibration: coerce + clamp each category score to a sane 1-10 range, then
       // derive the overall as the average of the five categories so the headline
@@ -496,7 +516,7 @@ function ensureScoreBreakdowns(parsed) {
 }
 
 function resolveIndustry(aiIndustry) {
-  if (!aiIndustry) return "other";
+  if (typeof aiIndustry !== "string" || !aiIndustry) return "other";
   const key = aiIndustry.toLowerCase().trim().replace(/[^a-z]/g, "");
   if (INDUSTRY_BENCHMARKS[key]) return key;
   if (key.includes("saas") || key.includes("software")) return "saas";

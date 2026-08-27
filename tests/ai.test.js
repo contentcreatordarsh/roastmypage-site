@@ -42,6 +42,56 @@ test("AI partial JSON is normalized to a complete analysis", async () => {
   }
 });
 
+test("AI normalization preserves valid analysis when text fields have invalid types", async () => {
+  const originalTimeout = CONFIG.AI_TIMEOUT_MS;
+  CONFIG.AI_TIMEOUT_MS = 50;
+  const env = {
+    CONFIG: {
+      get: async () => "true"
+    },
+    AI: {
+      run: async () => ({
+        response: JSON.stringify({
+          overallScore: 7,
+          scores: { hero: 8, cta: 7, trust: 6, copy: 7, design: 7 },
+          quickWins: [123, null, "  Clarify the CTA  ", "Win 1"],
+          industry: 42,
+          verdict: { text: "Strong base" },
+          competitorInsight: false,
+          detailedRoast: [],
+          sections: {
+            hero: {
+              roast: 999,
+              fix: "  Use one clear promise  ",
+              scoreBreakdown: [null, "invalid", { points: 2, reason: 123 }]
+            }
+          }
+        })
+      })
+    }
+  };
+
+  try {
+    const { analysis } = await analyzeWithVisionAndHeatmap(env, "image", "https://example.com");
+
+    assert.equal(analysis.aiUnavailable, undefined);
+    assert.equal(analysis.overallScore, 7);
+    assert.deepEqual(analysis.quickWins, ["Clarify the CTA"]);
+    assert.equal(analysis.industry, "other");
+    assert.equal(analysis.verdict, "This page has room for improvement across several key areas.");
+    assert.equal(analysis.sections.hero.roast, "Needs review and improvement");
+    assert.equal(analysis.sections.hero.fix, "Use one clear promise");
+    assert.deepEqual(analysis.sections.hero.scoreBreakdown, [
+      { points: 2, reason: "Good", maxPoints: 2 }
+    ]);
+    assert.equal(typeof analysis.competitorInsight, "string");
+    assert.equal(typeof analysis.detailedRoast, "string");
+    assert.doesNotThrow(() => formatRoast(analysis, "https://example.com"));
+  } finally {
+    CONFIG.AI_TIMEOUT_MS = originalTimeout;
+  }
+});
+
 test("AI retries share one timeout budget", async () => {
   const originalTimeout = CONFIG.AI_TIMEOUT_MS;
   const originalRetryBase = CONFIG.AI_RETRY_BASE_MS;
