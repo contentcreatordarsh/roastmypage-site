@@ -24,7 +24,10 @@ import {
 
 import { capturePageWithMetrics } from './puppeteer.js';
 
-import { isBotChallengeError, BOT_CHALLENGE_MESSAGE } from './botcheck.js';
+import {
+    isBotChallengeError, isStoredChallengeRoast, BOT_CHALLENGE_MESSAGE,
+    CHALLENGE_TITLE_PREFIXES
+} from './botcheck.js';
 
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
 
@@ -61,6 +64,21 @@ const __name2 = (fn, _name) => fn;
 const inFlightRequests = new Set();
 
 const OWNER_KEY_RE = /^[a-zA-Z0-9_-]{8,64}$/;
+
+function visibleStoredRoasts(rows = []) {
+  return rows
+    .filter((roast) => !isStoredChallengeRoast(roast?.seo_data))
+    .map(({ seo_data: _seoData, ...roast }) => roast);
+}
+
+function visibleStoredRoastSql(alias = "") {
+  const column = alias ? `${alias}.seo_data` : "seo_data";
+  const title = `LOWER(LTRIM(COALESCE(json_extract(${column}, '$.title.text'), '')))`;
+  const exclusions = CHALLENGE_TITLE_PREFIXES
+    .map((prefix) => `${title} NOT LIKE '${prefix.replaceAll("'", "''")}%'`)
+    .join(" AND ");
+  return `(CASE WHEN ${column} IS NULL OR json_valid(${column}) = 0 THEN 1 ELSE ${exclusions} END)`;
+}
 
 export default {
     async fetch(request, env22, ctx) {
@@ -821,7 +839,7 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Invalid roast ID" }, { status: 400, headers: corsHeaders });
       }
       const roast = await env22.DB.prepare("SELECT * FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
       }
       if (roast.seo_data) {
@@ -839,9 +857,10 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
-        "SELECT id, url, overall_score, created_at FROM roasts ORDER BY created_at DESC LIMIT 10"
+        `SELECT id, url, overall_score, created_at, seo_data FROM roasts
+         WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT 10`
       ).all();
-      return Response.json(roasts.results, { headers: corsHeaders });
+      return Response.json(visibleStoredRoasts(roasts.results), { headers: corsHeaders });
     }
     if (url.pathname === "/api/gallery" && request.method === "GET") {
       const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
@@ -852,13 +871,13 @@ data: ${JSON.stringify(data)}
       const industryParam = url.searchParams.get("industry");
       const industryFilter = industryParam && INDUSTRY_KEYS.includes(industryParam) ? industryParam : null;
       const roasts = industryFilter ? await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
-        FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
+        FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(industryFilter, perPage, offset).all() : await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
-        FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
+        FROM roasts WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(perPage, offset).all();
-      const results = roasts.results.map((roast) => ({
+      const results = visibleStoredRoasts(roasts.results).map((roast) => ({
         ...roast,
         screenshotUrl: `/api/screenshot/${roast.id}`,
         hostname: new URL(roast.url).hostname
@@ -867,7 +886,8 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/stats" && request.method === "GET") {
       const stats = await env22.DB.prepare(`
-        SELECT COUNT(*) as total_roasts, AVG(overall_score) as avg_score, MAX(created_at) as last_roast FROM roasts
+        SELECT COUNT(*) as total_roasts, AVG(overall_score) as avg_score, MAX(created_at) as last_roast
+        FROM roasts WHERE ${visibleStoredRoastSql()}
       `).first();
       const visitorCountry = request.headers.get("CF-IPCountry") || "XX";
       let recentCountries = [];
@@ -898,12 +918,13 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/live-activity" && request.method === "GET") {
       try {
         const recentRoasts = await env22.DB.prepare(`
-          SELECT id, url, overall_score, country, created_at
+          SELECT id, url, overall_score, country, created_at, seo_data
           FROM roasts 
+          WHERE ${visibleStoredRoastSql()}
           ORDER BY created_at DESC 
           LIMIT 20
         `).all();
-        const activity = recentRoasts.results.map((roast) => {
+        const activity = visibleStoredRoasts(recentRoasts.results).map((roast) => {
           let hostname = "unknown";
           try {
             hostname = new URL(roast.url).hostname.replace(/^www\./, "");
@@ -933,6 +954,7 @@ data: ${JSON.stringify(data)}
             COUNT(*) as total,
             SUM(CASE WHEN created_at > datetime('now', '-24 hours') THEN 1 ELSE 0 END) as today
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         `).first();
         return Response.json({
           activity,
@@ -1231,8 +1253,8 @@ data: ${JSON.stringify(data)}
       if (!isValidRoastIdLoose(roastId)) {
         return new Response("Invalid roast ID", { status: 400, headers: corsHeaders });
       }
-      const roast = await env22.DB.prepare("SELECT overall_score, url FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      const roast = await env22.DB.prepare("SELECT overall_score, url, seo_data FROM roasts WHERE id = ?").bind(roastId).first();
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = roast.overall_score;
@@ -1274,13 +1296,13 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/leaderboard" && request.method === "GET") {
       const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
         FROM roasts 
-        WHERE overall_score >= 7
+        WHERE overall_score >= 7 AND ${visibleStoredRoastSql()}
         ORDER BY overall_score DESC, created_at DESC 
         LIMIT 10
       `).all();
-      const results = roasts.results.map((roast) => ({
+      const results = visibleStoredRoasts(roasts.results).map((roast) => ({
         id: roast.id,
         hostname: new URL(roast.url).hostname,
         score: roast.overall_score,
@@ -1299,13 +1321,13 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/leaderboard/shame" && request.method === "GET") {
       try {
         const roasts = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
           FROM roasts 
-          WHERE overall_score <= 4
+          WHERE overall_score <= 4 AND ${visibleStoredRoastSql()}
           ORDER BY overall_score ASC, created_at DESC 
           LIMIT 20
         `).all();
-        const results = roasts.results.map((roast) => {
+        const results = visibleStoredRoasts(roasts.results).map((roast) => {
           let hostname = "unknown";
           try {
             hostname = new URL(roast.url).hostname.replace(/^www\./, "");
@@ -1338,13 +1360,16 @@ data: ${JSON.stringify(data)}
         const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 50);
         const offset = (page - 1) * limit;
         const roasts = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at, seo_data
           FROM roasts 
+          WHERE ${visibleStoredRoastSql()}
           ORDER BY created_at DESC 
           LIMIT ? OFFSET ?
         `).bind(limit, offset).all();
-        const total = await env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first();
-        const results = roasts.results.map((roast) => {
+        const total = await env22.DB.prepare(
+          `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
+        ).first();
+        const results = visibleStoredRoasts(roasts.results).map((roast) => {
           let hostname = "unknown";
           try {
             hostname = new URL(roast.url).hostname.replace(/^www\./, "");
@@ -1429,8 +1454,8 @@ data: ${JSON.stringify(data)}
           });
         }
       }
-      const roast = await env22.DB.prepare("SELECT overall_score, url, hero_score, cta_score, trust_score, copy_score, design_score FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      const roast = await env22.DB.prepare("SELECT overall_score, url, hero_score, cta_score, trust_score, copy_score, design_score, seo_data FROM roasts WHERE id = ?").bind(roastId).first();
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = roast.overall_score;
@@ -1525,9 +1550,9 @@ data: ${JSON.stringify(data)}
         return new Response("Invalid roast ID", { status: 400, headers: corsHeaders });
       }
       const roast = await env22.DB.prepare(
-        "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at FROM roasts WHERE id = ?"
+        "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data FROM roasts WHERE id = ?"
       ).bind(roastId).first();
-      if (!roast) {
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = parseFloat(roast.overall_score) || 0;
@@ -1725,13 +1750,13 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/leaderboard/weekly" && request.method === "GET") {
       const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
         FROM roasts 
-        WHERE created_at > datetime('now', '-7 days')
+        WHERE created_at > datetime('now', '-7 days') AND ${visibleStoredRoastSql()}
         ORDER BY overall_score DESC, created_at DESC 
         LIMIT 20
       `).all();
-      const results = roasts.results.map((roast, index) => {
+      const results = visibleStoredRoasts(roasts.results).map((roast, index) => {
         let hostname = "unknown";
         try {
           hostname = new URL(roast.url).hostname.replace("www.", "");
@@ -1761,7 +1786,7 @@ data: ${JSON.stringify(data)}
           ROUND(AVG(overall_score), 1) as avg_score,
           MAX(overall_score) as top_score
         FROM roasts 
-        WHERE created_at > datetime('now', '-7 days')
+        WHERE created_at > datetime('now', '-7 days') AND ${visibleStoredRoastSql()}
       `).first();
       return Response.json({
         leaderboard: results,
@@ -1771,12 +1796,13 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/leaderboard/alltime" && request.method === "GET") {
       const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
         FROM roasts 
+        WHERE ${visibleStoredRoastSql()}
         ORDER BY overall_score DESC, created_at DESC 
         LIMIT 20
       `).all();
-      const results = roasts.results.map((roast, index) => {
+      const results = visibleStoredRoasts(roasts.results).map((roast, index) => {
         let hostname = "unknown";
         try {
           hostname = new URL(roast.url).hostname.replace("www.", "");
@@ -1810,7 +1836,7 @@ data: ${JSON.stringify(data)}
       const roasts = await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
         FROM roasts 
-        WHERE url_hash = ?
+        WHERE url_hash = ? AND ${visibleStoredRoastSql()}
         ORDER BY created_at ASC
       `).bind(urlHashParam).all();
       if (!roasts.results || roasts.results.length === 0) {
@@ -1869,6 +1895,7 @@ data: ${JSON.stringify(data)}
             ROW_NUMBER() OVER (PARTITION BY url_hash ORDER BY created_at ASC) as first_roast,
             ROW_NUMBER() OVER (PARTITION BY url_hash ORDER BY created_at DESC) as latest_roast
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         ),
         first_scores AS (
           SELECT url_hash, url, overall_score as first_score, id as first_id, created_at as first_date
@@ -1962,7 +1989,7 @@ data: ${JSON.stringify(data)}
       const likeClauses = featuredDomains.map(() => `(url LIKE ?)`).join(" OR ");
       const likeParams = featuredDomains.map((d) => `%${d}%`);
       const featured = await env22.DB.prepare(`
-        SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.created_at
+        SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.created_at, r.seo_data
         FROM roasts r
         INNER JOIN (
           SELECT url, MAX(created_at) as latest
@@ -1970,21 +1997,22 @@ data: ${JSON.stringify(data)}
           WHERE ${likeClauses}
           GROUP BY url
         ) latest ON r.url = latest.url AND r.created_at = latest.latest
+        WHERE ${visibleStoredRoastSql("r")}
         ORDER BY r.overall_score DESC
         LIMIT 12
       `).bind(...likeParams).all();
-      let results = featured.results || [];
+      let results = visibleStoredRoasts(featured.results);
       if (results.length < 6) {
         const existingIds = results.map((r) => r.id);
         const excludeClause = existingIds.length > 0 ? `AND id NOT IN (${existingIds.map(() => "?").join(",")})` : "";
         const padding = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
           FROM roasts
-          WHERE overall_score > 0 ${excludeClause}
+          WHERE overall_score > 0 AND ${visibleStoredRoastSql()} ${excludeClause}
           ORDER BY overall_score DESC, created_at DESC
           LIMIT ?
         `).bind(...existingIds, 12 - results.length).all();
-        results = [...results, ...padding.results || []];
+        results = [...results, ...visibleStoredRoasts(padding.results)];
       }
       const formatted = results.map((r) => {
         let hostname = "";
@@ -2016,8 +2044,8 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname.match(/^\/api\/badge\/[^/]+\/large$/) && request.method === "GET") {
       const roastId = url.pathname.split("/")[3];
-      const roast = await env22.DB.prepare("SELECT overall_score, url FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      const roast = await env22.DB.prepare("SELECT overall_score, url, seo_data FROM roasts WHERE id = ?").bind(roastId).first();
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = roast.overall_score;
@@ -2071,7 +2099,7 @@ data: ${JSON.stringify(data)}
               MAX(overall_score) as best_score,
               MIN(overall_score) as worst_score
             FROM roasts
-            WHERE industry IS NOT NULL
+            WHERE industry IS NOT NULL AND ${visibleStoredRoastSql()}
             GROUP BY industry
             ORDER BY count DESC
           `).all();
@@ -2084,6 +2112,7 @@ data: ${JSON.stringify(data)}
               WHERE industry = ?
               AND seo_data IS NOT NULL
               AND performance_data IS NOT NULL
+              AND ${visibleStoredRoastSql()}
             `).bind(ind).all();
             let seoSum = 0, perfSum = 0, a11ySum = 0, validCount = 0;
             for (const row of detailScores.results) {
@@ -2164,12 +2193,12 @@ data: ${JSON.stringify(data)}
             MAX(overall_score) as best_score,
             MIN(overall_score) as worst_score
           FROM roasts
-          WHERE industry = ?
+          WHERE industry = ? AND ${visibleStoredRoastSql()}
         `).bind(normalizedIndustry).first();
         const topPages = await env22.DB.prepare(`
           SELECT id, url, overall_score, created_at
           FROM roasts
-          WHERE industry = ? AND overall_score IS NOT NULL
+          WHERE industry = ? AND overall_score IS NOT NULL AND ${visibleStoredRoastSql()}
           ORDER BY overall_score DESC
           LIMIT 5
         `).bind(normalizedIndustry).all();
@@ -2179,6 +2208,7 @@ data: ${JSON.stringify(data)}
           WHERE industry = ?
           AND seo_data IS NOT NULL
           AND performance_data IS NOT NULL
+          AND ${visibleStoredRoastSql()}
         `).bind(normalizedIndustry).all();
         let seoSum = 0, perfSum = 0, a11ySum = 0, validCount = 0;
         for (const row of detailScores.results) {
@@ -2241,6 +2271,7 @@ data: ${JSON.stringify(data)}
             END as range,
             COUNT(*) as count
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
           GROUP BY range
           ORDER BY range DESC
         `).all();
@@ -2252,6 +2283,7 @@ data: ${JSON.stringify(data)}
             ROUND(AVG(copy_score), 1) as copy,
             ROUND(AVG(design_score), 1) as design
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         `).first();
         const topDomains = await env22.DB.prepare(`
           SELECT 
@@ -2260,6 +2292,7 @@ data: ${JSON.stringify(data)}
             ROUND(AVG(overall_score), 1) as avg_score,
             MAX(overall_score) as best_score
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
           GROUP BY url
           ORDER BY roast_count DESC
           LIMIT 10
@@ -2267,6 +2300,7 @@ data: ${JSON.stringify(data)}
         const recentActivity = await env22.DB.prepare(`
           SELECT id, url, overall_score, created_at
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
           ORDER BY created_at DESC
           LIMIT 10
         `).all();
@@ -2276,7 +2310,7 @@ data: ${JSON.stringify(data)}
             COUNT(*) as count,
             ROUND(AVG(overall_score), 1) as avg_score
           FROM roasts
-          WHERE created_at > datetime('now', '-7 days')
+          WHERE created_at > datetime('now', '-7 days') AND ${visibleStoredRoastSql()}
           GROUP BY DATE(created_at)
           ORDER BY date ASC
         `).all();
@@ -2288,12 +2322,15 @@ data: ${JSON.stringify(data)}
             MIN(overall_score) as lowest_score,
             COUNT(DISTINCT url) as unique_urls
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         `).first();
         const bestPage = await env22.DB.prepare(`
-          SELECT url, overall_score FROM roasts ORDER BY overall_score DESC LIMIT 1
+          SELECT url, overall_score FROM roasts
+          WHERE ${visibleStoredRoastSql()} ORDER BY overall_score DESC LIMIT 1
         `).first();
         const worstPage = await env22.DB.prepare(`
-          SELECT url, overall_score FROM roasts ORDER BY overall_score ASC LIMIT 1
+          SELECT url, overall_score FROM roasts
+          WHERE ${visibleStoredRoastSql()} ORDER BY overall_score ASC LIMIT 1
         `).first();
         const formattedDomains = topDomains.results.map((d) => {
           try {
@@ -3052,11 +3089,14 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/sitemap.xml" && request.method === "GET") {
       try {
         const BASE_URL_SM = PRODUCTION_ORIGINS[0];
-        const totalResult = await env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first();
+        const totalResult = await env22.DB.prepare(
+          `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
+        ).first();
         const totalRoasts = totalResult?.count || 0;
         const galleryPages = Math.ceil(totalRoasts / 24);
         const roasts = await env22.DB.prepare(
-          "SELECT id, created_at FROM roasts ORDER BY created_at DESC LIMIT 50000"
+          `SELECT id, created_at, seo_data FROM roasts
+           WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT 50000`
         ).all();
         const now = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
         let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -3083,7 +3123,7 @@ data: ${JSON.stringify(data)}
   </url>`;
         }
         if (roasts.results) {
-          for (const roast of roasts.results) {
+          for (const roast of visibleStoredRoasts(roasts.results)) {
             const created = roast.created_at || now;
             const hasZ = /Z$/.test(created);
             const lastmod = (/* @__PURE__ */ new Date(hasZ ? created : (created + "Z"))).toISOString().split("T")[0];
@@ -3123,7 +3163,7 @@ data: ${JSON.stringify(data)}
                roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, created_at
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
-      if (!roast) {
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response(generateNotFoundPage(BASE_URL), {
           status: 404,
           headers: { "Content-Type": "text/html; charset=utf-8", ...getSecurityHeaders(origin, env22.ENVIRONMENT) }
@@ -3165,7 +3205,9 @@ data: ${JSON.stringify(data)}
       const scoreDiffNum = parseFloat(scoreDiff);
       const isAboveAvg = scoreDiffNum > 0;
       const isAtAvg = Math.abs(scoreDiffNum) < 0.3;
-      const industryCountRow = await env22.DB.prepare(`SELECT COUNT(*) as cnt FROM roasts WHERE industry = ?`).bind(roastIndustryKey).first();
+      const industryCountRow = await env22.DB.prepare(
+        `SELECT COUNT(*) as cnt FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()}`
+      ).bind(roastIndustryKey).first();
       const industrySampleSize = industryCountRow?.cnt || 0;
       const sections = {};
       if (roast.roast_response) {
@@ -3636,23 +3678,27 @@ data: ${JSON.stringify(data)}
       if (validIndustry) {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
-            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, created_at
-            FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, created_at, seo_data
+            FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
           `).bind(validIndustry, perPage, offset).all(),
-          env22.DB.prepare("SELECT COUNT(*) as count FROM roasts WHERE industry = ?").bind(validIndustry).first()
+          env22.DB.prepare(
+            `SELECT COUNT(*) as count FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()}`
+          ).bind(validIndustry).first()
         ]);
       } else {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
-            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at
-            FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
+            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at, seo_data
+            FROM roasts WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
           `).bind(perPage, offset).all(),
-          env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first()
+          env22.DB.prepare(
+            `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
+          ).first()
         ]);
       }
       const total = totalResult?.count || 0;
       const totalPages = Math.ceil(total / perPage);
-      const roasts = roastsResult.results || [];
+      const roasts = visibleStoredRoasts(roastsResult.results);
       const industryMeta = validIndustry ? INDUSTRY_BENCHMARKS[validIndustry] : null;
       const galleryHtml = renderGalleryPage({
           roasts, total, page, totalPages,

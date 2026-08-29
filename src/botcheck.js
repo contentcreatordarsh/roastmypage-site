@@ -17,7 +17,15 @@ const BOT_CHALLENGE_MESSAGE = "This site is behind bot protection, so we couldn'
 
 // Titles served by challenge/deny interstitials. Anchored at the start so a real
 // page whose title merely *contains* one of these words is not caught.
-const CHALLENGE_TITLE_RE = /^\s*(just a moment|attention required|checking your browser|please wait|access denied|verifying you are human)/i;
+const CHALLENGE_TITLE_PREFIXES = [
+  "just a moment",
+  "attention required",
+  "checking your browser",
+  "please wait",
+  "access denied",
+  "verifying you are human"
+];
+const CHALLENGE_TITLE_RE = new RegExp(`^\\s*(${CHALLENGE_TITLE_PREFIXES.join("|")})`, "i");
 
 // Main-document statuses that mean we never received the real page.
 const CHALLENGE_STATUSES = new Set([403, 429, 503]);
@@ -113,6 +121,7 @@ export {
   isStoredChallengeRoast,
   BOT_CHALLENGE_ERROR_PREFIX,
   BOT_CHALLENGE_MESSAGE,
+  CHALLENGE_TITLE_PREFIXES,
   CHALLENGE_TITLE_RE,
   NEAR_EMPTY_BODY_CHARS
 };
