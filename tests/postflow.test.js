@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CONFIG } from "../src/config.js";
 import { checkOperationRateLimit, getCachedRoast } from "../src/db.js";
+import worker from "../src/index.js";
 
 // #22 — integration-style coverage for the POST roast/compare/batch path. These exercise
 // the real db.js logic against a minimal D1 stub (no network, no live worker), so the
@@ -45,6 +46,77 @@ test("checkOperationRateLimit applies the tighter batch limit for the batch oper
   const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_BATCH_MAX + 1, window_start: new Date().toISOString() }) };
   const blocked = await checkOperationRateLimit(env, "ip-hash", "batch");
   assert.equal(blocked.allowed, false);
+});
+
+test("cached batch roasts do not consume the global browser-session budget", async () => {
+  const kvWrites = [];
+  const cachedRoast = {
+    id: "cached-batch",
+    url: "https://example.com/",
+    url_hash: "hash",
+    overall_score: 7.5,
+    hero_score: 8,
+    cta_score: 7,
+    trust_score: 7,
+    copy_score: 8,
+    design_score: 7.5,
+    roast_response: "Cached roast",
+    quick_wins: "[]",
+    seo_data: JSON.stringify({ score: 80, video: { present: false, count: 0 } }),
+    performance_data: JSON.stringify({ score: 75 }),
+    heatmap_data: "{}",
+    industry: "other"
+  };
+  const env = {
+    ENVIRONMENT: "development",
+    IP_HASH_SALT: "test-salt",
+    CONFIG: {
+      get: async () => "0",
+      put: async (...args) => kvWrites.push(args)
+    },
+    DB: {
+      prepare(sql) {
+        const stmt = {
+          bind() {
+            return stmt;
+          },
+          run: async () => ({ success: true }),
+          async first() {
+            if (sql.includes("SELECT request_count, window_start")) {
+              return { request_count: 1, window_start: new Date().toISOString() };
+            }
+            if (sql.includes("SELECT id, url, url_hash")) return cachedRoast;
+            if (sql.includes("SELECT COUNT(*) as count")) return { count: 1 };
+            throw new Error(`Unexpected query: ${sql}`);
+          }
+        };
+        return stmt;
+      }
+    }
+  };
+  const request = new Request("https://roastmypage.site/api/batch-roast", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": "203.0.113.10"
+    },
+    body: JSON.stringify({
+      urls: ["https://example.com", "https://example.com", "https://example.com"]
+    })
+  });
+
+  const response = await worker.fetch(request, env, {
+    waitUntil() {
+      throw new Error("Cache hits must not schedule background work");
+    }
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.results.length, 3);
+  assert.equal(body.results.every((result) => result.cached), true);
+  assert.equal(kvWrites.length, 1);
+  assert.deepEqual(kvWrites[0][2], { expirationTtl: 7200 });
 });
 
 // --- getCachedRoast: self-heal (#89) — never serve an incomplete cached roast ---
