@@ -2,6 +2,8 @@
  * #49 — Competitor watchlists with score-change alerts.
  */
 
+import { isStoredChallengeRoast } from "./botcheck.js";
+
 export function isWatchlistWebhookUrl(url) {
   try {
     const u = new URL(url);
@@ -93,19 +95,20 @@ export async function sendWatchlistEmail(env, { to, subject, html, text }) {
 export async function lookupLatestRoastScore(env, { url, urlHash }) {
   if (urlHash) {
     const byHash = await env.DB.prepare(
-      `SELECT id, url, overall_score, created_at FROM roasts
+      `SELECT id, url, overall_score, created_at, seo_data FROM roasts
        WHERE url_hash = ? ORDER BY created_at DESC LIMIT 1`
     ).bind(urlHash).first();
-    if (byHash) return byHash;
+    if (byHash) return isStoredChallengeRoast(byHash.seo_data) ? null : byHash;
   }
   let hostname = "";
   try { hostname = new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
   if (!hostname) return null;
-  return env.DB.prepare(
-    `SELECT id, url, overall_score, created_at FROM roasts
+  const byHostname = await env.DB.prepare(
+    `SELECT id, url, overall_score, created_at, seo_data FROM roasts
      WHERE lower(url) LIKE ? OR lower(url) LIKE ?
      ORDER BY created_at DESC LIMIT 1`
   ).bind(`https://${hostname}%`, `http://${hostname}%`).first();
+  return byHostname && !isStoredChallengeRoast(byHostname.seo_data) ? byHostname : null;
 }
 
 /**
