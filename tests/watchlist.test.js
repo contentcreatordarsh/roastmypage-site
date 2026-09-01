@@ -158,3 +158,52 @@ test("processWatchlistAlerts skips when score is unchanged", async () => {
   assert.ok(runs.some((s) => s.includes("UPDATE watchlist SET updated_at")));
   assert.equal(runs.some((s) => s.includes("INSERT INTO watchlist_alerts")), false);
 });
+
+test("processWatchlistAlerts ignores stored bot-challenge scores", async () => {
+  const runs = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        const stmt = {
+          bind() { return this; },
+          async all() {
+            if (sql.includes("FROM watchlist WHERE active")) {
+              return {
+                results: [{
+                  id: "w1",
+                  owner_key: "o",
+                  url: "https://blocked.example",
+                  url_hash: "blocked-hash",
+                  email: null,
+                  webhook_url: null,
+                  last_score: 8.0,
+                  last_roast_id: "real-roast"
+                }]
+              };
+            }
+            return { results: [] };
+          },
+          async first() {
+            return {
+              id: "challenge-roast",
+              url: "https://blocked.example",
+              overall_score: 2.0,
+              created_at: "2026-08-01T00:00:00Z",
+              seo_data: JSON.stringify({ title: { text: "Just a moment..." } })
+            };
+          },
+          async run() {
+            runs.push(sql);
+            return { success: true };
+          }
+        };
+        return stmt;
+      }
+    }
+  };
+
+  const result = await processWatchlistAlerts(env);
+  assert.equal(result.checked, 1);
+  assert.equal(result.alerted, 0);
+  assert.equal(runs.length, 0);
+});
