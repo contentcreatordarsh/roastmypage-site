@@ -131,6 +131,30 @@
         }
         
         body > * { position: relative; z-index: 1; }
+
+        body.embed-mode .site-nav,
+        body.embed-mode #live-ticker,
+        body.embed-mode #featured-section,
+        body.embed-mode #gallery-section,
+        body.embed-mode #analytics-section,
+        body.embed-mode #leaderboard-section,
+        body.embed-mode #shame-section,
+        body.embed-mode #feed-section,
+        body.embed-mode footer {
+            display: none !important;
+        }
+
+        body.embed-mode #roast {
+            min-height: 100svh;
+            padding-top: 3rem;
+            padding-bottom: 3rem;
+        }
+
+        body.embed-mode #roast .rise-in {
+            animation: none;
+            opacity: 1;
+            transform: none;
+        }
         
         .gradient-text { 
             color: #E85D04;
@@ -3918,6 +3942,21 @@
   -H "Content-Type: application/json" \
   -d '{"url": "https://yoursite.com"}'</code></pre>
                         <button onclick="copyApiExample()" class="absolute top-2 right-2 px-2 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded text-xs text-[#a1a1a6] transition-colors opacity-0 group-hover:opacity-100">Copy</button>
+                    </div>
+                </div>
+
+                <!-- Embed Widget -->
+                <div class="space-y-3">
+                    <h4 class="text-sm font-semibold text-[#d1d1d6] uppercase tracking-wider">White-label Widget</h4>
+                    <div class="p-4 bg-white/[0.03] border border-white/[0.04] rounded-xl space-y-3">
+                        <p class="text-xs text-[#a1a1a6]">Drop this on an agency site to add a branded URL input and roast CTA. Use <code class="text-orange-400/80">data-mode="iframe"</code> for a fully isolated widget.</p>
+                        <div class="relative group">
+                            <pre class="p-4 bg-black/60 border border-white/[0.06] rounded-xl text-xs font-mono text-[#d1d1d6] overflow-x-auto leading-relaxed"><code id="widget-embed-code">&lt;script async src="https://roastmypage.site/embed.js"
+  data-agency="Your Agency"
+  data-cta="Roast my page"&gt;&lt;/script&gt;</code></pre>
+                            <button onclick="copyWidgetEmbedCode()" class="absolute top-2 right-2 px-2 py-1 bg-white/[0.06] hover:bg-white/[0.12] rounded text-xs text-[#a1a1a6] transition-colors opacity-0 group-hover:opacity-100">Copy</button>
+                        </div>
+                        <p class="text-xs text-[#6e6e73]">Optional attributes: <code class="text-[#a1a1a6]">data-target="#container"</code>, <code class="text-[#a1a1a6]">data-mode="iframe"</code>, <code class="text-[#a1a1a6]">data-agency</code>, and <code class="text-[#a1a1a6]">data-cta</code>.</p>
                     </div>
                 </div>
 
@@ -7981,6 +8020,10 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             const cmd = 'curl -X POST https://roastmypage.site/api/v1/roast \\\n  -H "Content-Type: application/json" \\\n  -d \'{"url": "https://yoursite.com"}\'';
             navigator.clipboard.writeText(cmd).then(() => showToast('Copied to clipboard!', 'success'));
         }
+        function copyWidgetEmbedCode() {
+            const code = '<script async src="https://roastmypage.site/embed.js" data-agency="Your Agency" data-cta="Roast my page"><\/script>';
+            navigator.clipboard.writeText(code).then(() => showToast('Widget snippet copied!', 'success'));
+        }
         async function loadFromHistory(id) {
             hideHistoryModal();
             try {
@@ -9419,6 +9462,21 @@ Your landing page is like a first date where you talk about yourself for 45 minu
         // Check URL params and load gallery + stats + analytics
         window.addEventListener('load', () => {
             const params = new URLSearchParams(location.search);
+            if (params.get('embed') === '1') {
+                document.body.classList.add('embed-mode');
+            }
+            const embedUrl = params.get('url');
+            if (embedUrl) {
+                let candidate = embedUrl.trim();
+                if (candidate && !/^https?:\/\//i.test(candidate)) candidate = 'https://' + candidate;
+                try {
+                    const parsed = new URL(candidate);
+                    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                        const urlInput = document.getElementById('url-input');
+                        if (urlInput) urlInput.value = parsed.toString();
+                    }
+                } catch {}
+            }
             const roastId = params.get('roast');
             if (roastId) loadFromHistory(roastId);
             

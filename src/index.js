@@ -57,6 +57,21 @@ import {
 // In the modular source it's a safe no-op passthrough.
 const __name2 = (fn, _name) => fn;
 
+function getEmbedPageHeaders(origin, environment) {
+  const headers = getSecurityHeaders(origin, environment);
+  delete headers["X-Frame-Options"];
+  headers["Content-Security-Policy"] = [
+    "default-src 'none'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors http: https:"
+  ].join("; ");
+  return headers;
+}
+
 // Module-level dedup set — prevents duplicate concurrent roast requests for the same URL.
 const inFlightRequests = new Set();
 
@@ -3673,6 +3688,23 @@ data: ${JSON.stringify(data)}
       const roastId = url.pathname.split("/").pop();
       const base = env22.BASE_URL || PRODUCTION_ORIGINS[0];
       return Response.redirect(`${base}/api/og/${roastId}`, 301);
+    }
+    // Minimal iframe page for the white-label embeddable widget.
+    if (url.pathname === "/embed" && request.method === "GET") {
+      if (env22.ASSETS) {
+        const embedUrl = new URL(request.url);
+        embedUrl.pathname = "/embed.html";
+        const assetResponse = await env22.ASSETS.fetch(new Request(embedUrl.toString(), request));
+        return new Response(assetResponse.body, {
+          status: assetResponse.status,
+          statusText: assetResponse.statusText,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            ...getEmbedPageHeaders(origin, env22.ENVIRONMENT)
+          }
+        });
+      }
     }
     // Pricing page — served as SPA route from index.html
     if (url.pathname === "/pricing" && request.method === "GET") {
