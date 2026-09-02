@@ -1,4 +1,4 @@
-import { hashUrl } from './utils.js';
+import { isUrlSafeForFetching } from './utils.js';
 
 function generateTyposquats(domain22) {
   const variations = /* @__PURE__ */ new Set();
@@ -140,11 +140,26 @@ async function checkSecurityHeaders(targetUrl) {
   const issues = [];
   let score = 100;
   try {
-    const response = await fetch(targetUrl, {
-      method: "HEAD",
-      redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; SecurityScanner/1.0)" }
-    });
+    let currentUrl = targetUrl;
+    let response;
+    const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+    for (let redirectCount = 0; redirectCount <= 5; redirectCount++) {
+      if (!isUrlSafeForFetching(currentUrl)) {
+        throw new Error("Blocked internal or private security-header target");
+      }
+      response = await fetch(currentUrl, {
+        method: "HEAD",
+        redirect: "manual",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; SecurityScanner/1.0)" }
+      });
+      if (!redirectStatuses.has(response.status)) break;
+      const location = response.headers.get("Location");
+      if (!location) break;
+      if (redirectCount === 5) {
+        throw new Error("Too many redirects while checking security headers");
+      }
+      currentUrl = new URL(location, currentUrl).toString();
+    }
     const securityHeaders = [
       { name: "Strict-Transport-Security", importance: "critical", penalty: 15 },
       { name: "Content-Security-Policy", importance: "high", penalty: 10 },
@@ -172,7 +187,7 @@ async function checkSecurityHeaders(targetUrl) {
         }
       }
     }
-    const isHttps = targetUrl.startsWith("https://") || response.url.startsWith("https://");
+    const isHttps = currentUrl.startsWith("https://");
     if (!isHttps) {
       score -= 20;
       issues.push("Site not using HTTPS - Major security risk");
