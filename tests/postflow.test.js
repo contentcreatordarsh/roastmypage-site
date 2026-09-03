@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CONFIG } from "../src/config.js";
 import { checkOperationRateLimit, getCachedRoast } from "../src/db.js";
+import worker from "../src/index.js";
 
 // #22 — integration-style coverage for the POST roast/compare/batch path. These exercise
 // the real db.js logic against a minimal D1 stub (no network, no live worker), so the
@@ -97,4 +98,77 @@ test("getCachedRoast returns null on a genuine cache miss", async () => {
   const env = { DB: mockDb(null) };
   const result = await getCachedRoast(env, "h", "https://example.com");
   assert.equal(result, null);
+});
+
+test("invalid expensive POSTs do not consume the shared hourly capacity", async () => {
+  const globalWrites = [];
+  const env = {
+    DB: mockDb({ request_count: 0 }),
+    CONFIG: {
+      get: async () => "0",
+      put: async (...args) => globalWrites.push(args)
+    },
+    IP_HASH_SALT: "test-salt",
+    ENVIRONMENT: "development"
+  };
+  const cases = [
+    ["/api/roast", {}],
+    ["/api/compare", {}],
+    ["/api/batch-roast", { urls: [] }],
+    ["/api/roast-stream", {}],
+    ["/api/threat-scan", {}],
+    ["/api/tech-scan", {}],
+    ["/api/v1/roast", {}]
+  ];
+
+  for (const [pathname, body] of cases) {
+    const response = await worker.fetch(
+      new Request(`https://roastmypage.site${pathname}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "203.0.113.10"
+        },
+        body: JSON.stringify(body)
+      }),
+      env,
+      { waitUntil() {} }
+    );
+    assert.equal(response.status, 400, pathname);
+  }
+
+  assert.equal(globalWrites.length, 0);
+});
+
+test("per-IP throttling runs before the shared hourly capacity check", async () => {
+  const globalWrites = [];
+  const now = new Date().toISOString();
+  const env = {
+    DB: mockDb({
+      request_count: CONFIG.RATE_LIMIT_MAX_REQUESTS + 1,
+      window_start: now
+    }),
+    CONFIG: {
+      get: async () => "0",
+      put: async (...args) => globalWrites.push(args)
+    },
+    IP_HASH_SALT: "test-salt",
+    ENVIRONMENT: "development"
+  };
+
+  const response = await worker.fetch(
+    new Request("https://roastmypage.site/api/roast", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "203.0.113.10"
+      },
+      body: JSON.stringify({ url: "https://example.com" })
+    }),
+    env,
+    { waitUntil() {} }
+  );
+
+  assert.equal(response.status, 429);
+  assert.equal(globalWrites.length, 0);
 });

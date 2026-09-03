@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
 
-function cachedRoastDb(video) {
+function cachedRoastDb(video, queries = []) {
   const roast = {
     id: "video-roast",
     url: "https://example.com/",
@@ -23,6 +23,7 @@ function cachedRoastDb(video) {
 
   return {
     prepare(sql) {
+      queries.push(sql);
       return {
         bind() {
           return {
@@ -42,6 +43,7 @@ function cachedRoastDb(video) {
 }
 
 test("API v1 cached responses preserve top-level video analysis", async () => {
+  const queries = [];
   const video = {
     present: true,
     count: 1,
@@ -49,7 +51,7 @@ test("API v1 cached responses preserve top-level video analysis", async () => {
     recommendations: ["Add captions"]
   };
   const env = {
-    DB: cachedRoastDb(video),
+    DB: cachedRoastDb(video, queries),
     CONFIG: {
       get: async () => "0",
       put: async () => {}
@@ -77,4 +79,9 @@ test("API v1 cached responses preserve top-level video analysis", async () => {
   assert.equal(response.headers.get("X-Cache"), "HIT");
   assert.deepEqual(body.video, video);
   assert.deepEqual(body.video, body.seo.video);
+  assert.equal(
+    queries.some((sql) => sql.includes("INSERT INTO api_v1_counters")),
+    false,
+    "cache hits must not reserve daily Browser Rendering quota"
+  );
 });
