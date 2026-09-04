@@ -3205,7 +3205,9 @@ data: ${JSON.stringify(data)}
       const ogDesc = `AI analysis: Hero ${roast.hero_score}/10, CTA ${roast.cta_score}/10, Trust ${roast.trust_score}/10, Copy ${roast.copy_score}/10, Design ${roast.design_score}/10. Get your free roast!`;
       const ogImage = `${BASE_URL}/api/card/${roastId}`;
       const pageUrl = `${BASE_URL}/roast/${roastId}`;
-      const screenshotUrl = `${BASE_URL}/api/screenshot/${roastId}`;
+      // Keep page images on the request origin. Production is reachable from
+      // both the custom domain and workers.dev, while CSP img-src is 'self'.
+      const screenshotUrl = `/api/screenshot/${roastId}`;
       const categories = [
         { key: "hero", label: "Hero Section", score: roast.hero_score, color: "#8B5CF6", gradFrom: "from-purple-500/10", gradTo: "to-purple-600/5", borderColor: "border-purple-500/20", emoji: "\u{1F9B8}", question: "Is your headline clear, benefit-driven, and immediately compelling?", description: "The first thing visitors see \u2014 your headline, subheadline, and hero image. It must communicate your value in under 5 seconds or visitors bounce." },
         { key: "cta", label: "Call to Action", score: roast.cta_score, color: "#F97316", gradFrom: "from-orange-500/10", gradTo: "to-red-600/5", borderColor: "border-orange-500/20", emoji: "\u{1F3AF}", question: "Are your buttons visible, urgent, and impossible to miss?", description: "Your conversion buttons and links. Great CTAs are visually distinct, use action-oriented copy, and create urgency. This is where visitors become customers." },
