@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { appendFileSync } from "node:fs";
 import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
@@ -81,6 +82,94 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
   assert.equal(cached.id, "legacy-1");
   assert.equal(cached.seo, null);
   assert.equal(cached.performance, null);
+});
+
+test("getCachedRoast falls back past a newer stored challenge roast", async () => {
+  const url = "https://cache-shadow.example/";
+  const urlHash = "shared-hash";
+  const validSeo = JSON.stringify({
+    score: 92,
+    title: { text: "Acme — Ship faster", length: 18, status: "good" },
+    video: { present: false, count: 0 }
+  });
+  const rows = [
+    {
+      id: "newer-challenge",
+      url,
+      url_hash: urlHash,
+      created_at: "2026-09-07T10:00:00.000Z",
+      overall_score: 4.2,
+      hero_score: 4,
+      cta_score: 4,
+      trust_score: 4,
+      copy_score: 5,
+      design_score: 4,
+      roast_response: "Roast of an interstitial",
+      quick_wins: "[]",
+      seo_data: JSON.stringify({
+        score: 75,
+        title: { text: "Just a moment...", length: 16, status: "short" },
+        video: { present: false, count: 0 }
+      }),
+      performance_data: '{"loadTime":500}',
+      heatmap_data: null,
+      industry: "other"
+    },
+    {
+      id: "older-valid",
+      url,
+      url_hash: urlHash,
+      created_at: "2026-09-07T09:00:00.000Z",
+      overall_score: 8.1,
+      hero_score: 8,
+      cta_score: 8,
+      trust_score: 8,
+      copy_score: 8,
+      design_score: 9,
+      roast_response: "Valid landing-page roast",
+      quick_wins: '["Clarify the CTA"]',
+      seo_data: validSeo,
+      performance_data: '{"loadTime":700}',
+      heatmap_data: null,
+      industry: "other"
+    }
+  ];
+  const queryTrace = {};
+  const env = {
+    DB: {
+      prepare(sql) {
+        queryTrace.sql = sql;
+        return {
+          bind(hash, expiry) {
+            queryTrace.bindings = [hash, expiry];
+            return {
+              async first() {
+                const candidates = rows
+                  .filter((row) => row.url_hash === hash && row.created_at > expiry)
+                  .sort((left, right) => right.created_at.localeCompare(left.created_at));
+                const selected = candidates[0] ?? null;
+                // #region agent log
+                appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,C", location: "tests/db.test.js:getCachedRoast mock first", message: "D1 mock applied current newest-row query", data: { hasDescendingOrder: /ORDER BY created_at DESC/.test(sql), hasLimitOne: /LIMIT 1/.test(sql), expiry, candidateIds: candidates.map((row) => row.id), selectedId: selected?.id ?? null }, timestamp: Date.now() })}\n`);
+                // #endregion
+                return selected;
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  // #region agent log
+  appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C,D", location: "tests/db.test.js:getCachedRoast reproduction", message: "Invoking cache lookup with two current schema-complete rows", data: { urlHash, rowIds: rows.map((row) => row.id), createdAt: rows.map((row) => row.created_at), bothHaveAuditData: rows.every((row) => Boolean(row.seo_data && row.performance_data)) }, timestamp: Date.now() })}\n`);
+  // #endregion
+  const cached = await getCachedRoast(env, urlHash, url);
+  // #region agent log
+  appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,B", location: "tests/db.test.js:getCachedRoast result", message: "Observed cache lookup result after newest challenge row", data: { selectedId: "newer-challenge", returnedId: cached?.id ?? null, expectedFallbackId: "older-valid" }, timestamp: Date.now() })}\n`);
+  // #endregion
+
+  assert.match(queryTrace.sql, /ORDER BY created_at DESC LIMIT 1/);
+  assert.equal(cached?.id, "older-valid");
 });
 
 test("releaseApiV1Quota atomically restores a reserved daily quota", async () => {
