@@ -26,6 +26,10 @@ function cachedRoastDb(video) {
       return {
         bind() {
           return {
+            async all() {
+              if (sql.includes("SELECT id, url, url_hash")) return { results: [roast] };
+              throw new Error(`Unexpected query: ${sql}`);
+            },
             async first() {
               if (sql.includes("INSERT INTO api_v1_counters")) return { request_count: 1 };
               if (sql.includes("SELECT id, url, url_hash")) return roast;
