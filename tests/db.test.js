@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync } from "node:fs";
 import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
@@ -63,7 +62,8 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
         return {
           bind() {
             return {
-              first: async () => sql.includes("SELECT id, url") ? legacyRoast : { count: 1 }
+              first: async () => sql.includes("SELECT id, url") ? legacyRoast : { count: 1 },
+              all: async () => ({ results: sql.includes("SELECT id, url") ? [legacyRoast] : [] })
             };
           }
         };
@@ -138,21 +138,18 @@ test("getCachedRoast falls back past a newer stored challenge roast", async () =
   const env = {
     DB: {
       prepare(sql) {
-        queryTrace.sql = sql;
+        if (sql.includes("SELECT id, url")) queryTrace.sql = sql;
         return {
           bind(hash, expiry) {
             queryTrace.bindings = [hash, expiry];
             return {
-              async first() {
+              async all() {
                 const candidates = rows
                   .filter((row) => row.url_hash === hash && row.created_at > expiry)
                   .sort((left, right) => right.created_at.localeCompare(left.created_at));
-                const selected = candidates[0] ?? null;
-                // #region agent log
-                appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,C", location: "tests/db.test.js:getCachedRoast mock first", message: "D1 mock applied current newest-row query", data: { hasDescendingOrder: /ORDER BY created_at DESC/.test(sql), hasLimitOne: /LIMIT 1/.test(sql), expiry, candidateIds: candidates.map((row) => row.id), selectedId: selected?.id ?? null }, timestamp: Date.now() })}\n`);
-                // #endregion
-                return selected;
-              }
+                return { results: candidates };
+              },
+              first: async () => null
             };
           }
         };
@@ -160,15 +157,10 @@ test("getCachedRoast falls back past a newer stored challenge roast", async () =
     }
   };
 
-  // #region agent log
-  appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C,D", location: "tests/db.test.js:getCachedRoast reproduction", message: "Invoking cache lookup with two current schema-complete rows", data: { urlHash, rowIds: rows.map((row) => row.id), createdAt: rows.map((row) => row.created_at), bothHaveAuditData: rows.every((row) => Boolean(row.seo_data && row.performance_data)) }, timestamp: Date.now() })}\n`);
-  // #endregion
   const cached = await getCachedRoast(env, urlHash, url);
-  // #region agent log
-  appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,B", location: "tests/db.test.js:getCachedRoast result", message: "Observed cache lookup result after newest challenge row", data: { selectedId: "newer-challenge", returnedId: cached?.id ?? null, expectedFallbackId: "older-valid" }, timestamp: Date.now() })}\n`);
-  // #endregion
 
-  assert.match(queryTrace.sql, /ORDER BY created_at DESC LIMIT 1/);
+  assert.match(queryTrace.sql, /ORDER BY created_at DESC/);
+  assert.doesNotMatch(queryTrace.sql, /LIMIT 1/);
   assert.equal(cached?.id, "older-valid");
 });
 

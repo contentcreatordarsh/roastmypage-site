@@ -10,11 +10,15 @@ import { checkOperationRateLimit, getCachedRoast } from "../src/db.js";
 // Minimal D1 statement/DB stub: prepare().bind().run() / .first().
 // firstVal may be a value or a () => value factory (evaluated per .first() call).
 function makeStmt(firstVal) {
+  const value = () => (typeof firstVal === "function" ? firstVal() : firstVal);
   const stmt = {
     bind: () => stmt,
     run: async () => ({ success: true, meta: {} }),
-    first: async () => (typeof firstVal === "function" ? firstVal() : firstVal),
-    all: async () => ({ results: [] })
+    first: async () => value(),
+    all: async () => {
+      const result = value();
+      return { results: result == null ? [] : [result] };
+    }
   };
   return stmt;
 }
