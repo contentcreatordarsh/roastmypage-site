@@ -15,6 +15,10 @@ function quotaDb() {
       return {
         bind() {
           return {
+            async all() {
+              if (sql.includes("SELECT id, url, url_hash")) return { results: [] };
+              throw new Error(`Unexpected all query: ${sql}`);
+            },
             async first() {
               if (sql.includes("INSERT INTO api_v1_counters")) {
                 state.count += 1;
@@ -73,23 +77,40 @@ function roastRequest() {
   });
 }
 
-test("API v1 bot challenges consume quota after Browser Rendering starts", async () => {
+test("API v1 refunds quota for bot challenges but keeps other failures charged", async () => {
   const quota = quotaDb();
   const env = quotaEnv(quota);
-  const scenarios = [
+  const challenges = [
     { status: 403, signals: { title: "Ordinary title", bodyTextLength: 500, markers: {} } },
     { status: 200, signals: { title: "Just a moment...", bodyTextLength: 0, markers: {} } }
   ];
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, _delay, ...args) => originalSetTimeout(callback, 0, ...args);
   try {
-    for (const scenario of scenarios) {
+    for (const scenario of challenges) {
       configureChallenge(scenario.signals, scenario.status);
       const response = await worker.fetch(roastRequest(), env, { waitUntil() {} });
-      const body = await response.json();
+      const body2 = await response.json();
       assert.equal(response.status, 422);
-      assert.equal(body.error, "blocked_by_bot_protection");
+      assert.equal(body2.error, "blocked_by_bot_protection");
     }
+
+    // Quota is consumed at the capture point and handed straight back: the
+    // caller cannot influence whether a target sits behind bot protection.
+    assert.equal(browserLaunches(), challenges.length);
+    assert.equal(quota.state.releases, challenges.length);
+    assert.equal(quota.state.count, 0);
+
+    // Every other capture failure stays charged, so a caller cannot burn
+    // Browser Rendering capacity for free by forcing captures to fail.
+    configureChallenge({ title: "Ordinary title", bodyTextLength: 500, markers: {} }, 200);
+    const failed = await worker.fetch(roastRequest(), env, { waitUntil() {} });
+    const failedBody = await failed.json();
+    assert.equal(failed.status, 500);
+    assert.equal(failedBody.error, "roast_failed");
+    assert.ok(browserLaunches() > challenges.length, "capture was attempted");
+    assert.equal(quota.state.releases, challenges.length);
+    assert.equal(quota.state.count, 1);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
@@ -100,9 +121,6 @@ test("API v1 bot challenges consume quota after Browser Rendering starts", async
   ), env, { waitUntil() {} });
   const usage = await usageResponse.json();
 
-  assert.equal(browserLaunches(), scenarios.length);
-  assert.equal(quota.state.releases, 0);
-  assert.equal(quota.state.count, scenarios.length);
-  assert.equal(usage.limits.perIp.used, scenarios.length);
-  assert.equal(usage.limits.global.used, scenarios.length);
+  assert.equal(usage.limits.perIp.used, 1);
+  assert.equal(usage.limits.global.used, 1);
 });
