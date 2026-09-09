@@ -3,7 +3,7 @@ import { VIEWPORTS, CONFIG } from './config.js';
 import { sleep, isUrlSafeForFetching } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
-import { analyzeVideoSignals } from './video.js';
+import { analyzeVideoSignals, VIDEO_EMBED_RE } from './video.js';
 import { detectBotChallenge, botChallengeError, isBotChallengeError } from './botcheck.js';
 
 // Collected inside the page so detectBotChallenge() can stay a pure, testable
@@ -117,7 +117,8 @@ async function capturePageWithMetrics(env22, url, options = {}) {
         // Real page on the second try — measure it, not the challenge round-trip.
         loadTime = Date.now() - retryStart;
       }
-      const seoData = await page.evaluate(() => {
+      const seoData = await page.evaluate(({ embedReSource, embedReFlags }) => {
+        const embedRe = new RegExp(embedReSource, embedReFlags);
         const title22 = document.title || "";
         const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
         const h1Elements = document.querySelectorAll("h1");
@@ -224,38 +225,21 @@ async function capturePageWithMetrics(env22, url, options = {}) {
             height: Math.round(rect.height)
           });
         });
-        const embedRe = /(youtube\.com|youtube-nocookie\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|wistia\.(com|net)|fast\.wistia|loom\.com\/embed|vidyard\.com|cloudinary\.com\/.*video)/i;
+        // Match against the shared host regex. Autoplay/mute/loop are parsed in
+        // the Worker from `src` so we do not coerce autoplay→muted here (#63).
         let embedMatches = 0;
         for (const frame of document.querySelectorAll("iframe[src]")) {
           if (embedMatches >= 8) break;
-          const src = frame.getAttribute("src") || "";
-          if (!embedRe.test(src)) continue;
+          const src = (frame.getAttribute("src") || "").slice(0, 2048);
+          if (!/^https?:\/\//i.test(src) || !embedRe.test(src)) continue;
           embedMatches++;
           const rect = frame.getBoundingClientRect();
-          let provider = "embed";
-          if (/youtube|youtu\.be/i.test(src)) provider = "youtube";
-          else if (/vimeo/i.test(src)) provider = "vimeo";
-          else if (/wistia/i.test(src)) provider = "wistia";
-          else if (/loom/i.test(src)) provider = "loom";
-          else if (/vidyard/i.test(src)) provider = "vidyard";
-          const autoplay = /[?&]autoplay=1/i.test(src) || /autoplay=true/i.test(src);
-          const muted = /[?&]mute=1/i.test(src) || /muted=1/i.test(src) || /mute=true/i.test(src);
-          const hasTitle = !!frame.getAttribute("title");
           items.push({
             kind: "embed",
-            provider,
-            // No src: embed URLs can carry signed params/access tokens (#134).
-            // Title is reduced to a boolean so an unbounded page-controlled
-            // string can never be persisted (#139).
-            title: hasTitle,
-            autoplay,
-            muted: muted || autoplay, // embeds usually need mute for autoplay
-            loop: /loop=1/i.test(src),
-            controls: true,
-            playsInline: true,
-            poster: "",
-            preload: "unknown",
-            hasCaptions: null,
+            // `src`/`allow` are parsed then stripped before persist (#134).
+            src,
+            allow: (frame.getAttribute("allow") || "").slice(0, 256),
+            title: !!frame.getAttribute("title"),
             aboveFold: rect.top < heroCutoff && rect.bottom > 0,
             inHero: rect.top < viewportH * 0.85 && rect.height >= Math.min(180, viewportH * 0.25),
             width: Math.round(rect.width),
@@ -273,7 +257,7 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           accessibility: a11y,
           videoRaw: { count: items.length, items }
         };
-      });
+      }, { embedReSource: VIDEO_EMBED_RE.source, embedReFlags: VIDEO_EMBED_RE.flags });
       let perfData = {
         domContentLoaded: 0,
         domInteractive: 0,

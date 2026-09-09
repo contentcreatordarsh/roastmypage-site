@@ -7,6 +7,79 @@ function bool(v) {
   return !!v;
 }
 
+/** Hosts treated as video embeds. Kept in one place so capture + scoring stay in sync. */
+export const VIDEO_EMBED_RE =
+  /(youtube\.com|youtube-nocookie\.com|youtu\.be|player\.vimeo\.com|vimeo\.com|wistia\.(com|net)|fast\.wistia|loom\.com\/embed|vidyard\.com|cloudinary\.com\/.*video|cloudflarestream\.com|videodelivery\.net)/i;
+
+const SRC_MAX = 2048;
+const ALLOW_MAX = 256;
+
+function clip(value, max) {
+  if (typeof value !== "string") return "";
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+function hasQueryFlag(src, names) {
+  const escaped = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return new RegExp(`[?&#](?:${escaped})=(?:1|true)\\b`, "i").test(src);
+}
+
+export function matchVideoProvider(src) {
+  const s = clip(src, SRC_MAX);
+  if (!s) return null;
+  if (/youtube|youtu\.be/i.test(s)) return "youtube";
+  if (/vimeo/i.test(s)) return "vimeo";
+  if (/wistia/i.test(s)) return "wistia";
+  if (/loom/i.test(s)) return "loom";
+  if (/vidyard/i.test(s)) return "vidyard";
+  if (/cloudflarestream\.com|videodelivery\.net/i.test(s)) return "cloudflare-stream";
+  if (/cloudinary\.com/i.test(s) && /video/i.test(s)) return "cloudinary";
+  return VIDEO_EMBED_RE.test(s) ? "embed" : null;
+}
+
+/**
+ * Derive autoplay / mute / loop / captions from an embed URL.
+ * Autoplay is NOT treated as muted — `autoplay=1` without mute is unmuted autoplay.
+ */
+export function parseEmbedSignals(src, allow = "") {
+  const s = clip(src, SRC_MAX);
+  const allowStr = clip(allow, ALLOW_MAX).toLowerCase();
+  const provider = matchVideoProvider(s) || "embed";
+  const vimeoBackground = provider === "vimeo" && hasQueryFlag(s, ["background"]);
+  const autoplay = hasQueryFlag(s, ["autoplay", "autoPlay"]) || vimeoBackground;
+  const muted = hasQueryFlag(s, ["mute", "muted"]) || vimeoBackground;
+  const loop = hasQueryFlag(s, ["loop"]) || vimeoBackground;
+  const hideControls = vimeoBackground || /[?&#]controls=0\b/i.test(s);
+  const hasCaptionHint = hasQueryFlag(s, ["cc_load_policy"]) || /[?&#]texttrack=/i.test(s);
+  return {
+    provider,
+    autoplay,
+    muted,
+    loop,
+    controls: !hideControls,
+    playsInline: true,
+    hasCaptions: hasCaptionHint ? true : null,
+    allowAutoplay: /\bautoplay\b/.test(allowStr)
+  };
+}
+
+function applyEmbedSrcSignals(item) {
+  if (!item || item.kind !== "embed" || !item.src) return item;
+  const parsed = parseEmbedSignals(item.src, item.allow);
+  const { src: _src, allow: _allow, ...rest } = item;
+  return {
+    ...rest,
+    provider: parsed.provider !== "embed" ? parsed.provider : (item.provider || "embed"),
+    autoplay: parsed.autoplay,
+    muted: parsed.muted,
+    loop: parsed.loop,
+    controls: parsed.controls,
+    playsInline: true,
+    hasCaptions: parsed.hasCaptions === true ? true : item.hasCaptions ?? null,
+    preload: item.preload && item.preload !== "unknown" ? item.preload : "metadata"
+  };
+}
+
 function compactPageControlledSignals(item) {
   if (!item || typeof item !== "object") return item;
   const compact = { ...item };
@@ -28,7 +101,7 @@ export function redactVideoItemUrls(video) {
   if (!video || !Array.isArray(video.items)) return video;
   return {
     ...video,
-    items: video.items.map(({ src: _src, ...item }) => item)
+    items: video.items.map(({ src: _src, allow: _allow, ...item }) => item)
   };
 }
 
@@ -57,11 +130,15 @@ export function analyzeVideoSignals(raw) {
   // reduced to a boolean (#138) so an attacker-controlled multi-megabyte data
   // URL can never reach Worker memory or the stored JSON.
   const items = Array.isArray(raw.items)
-    ? raw.items.map((item) => ({ ...compactPageControlledSignals(item), poster: bool(item?.poster) }))
+    ? raw.items.map((item) => {
+        const compact = compactPageControlledSignals(applyEmbedSrcSignals(item));
+        return { ...compact, poster: bool(compact?.poster) };
+      })
     : [];
   const hasHeroVideo = items.some((i) => i.inHero || i.aboveFold);
   const hasAutoplay = items.some((i) => i.autoplay);
   const hasUnmutedAutoplay = items.some((i) => i.autoplay && !i.muted);
+  const loopingNoPause = items.filter((i) => i.autoplay && i.loop && !i.controls);
   const missingCaptions = items.filter((i) => i.kind === "video" && !i.hasCaptions);
   const missingPoster = items.filter((i) => i.kind === "video" && !i.poster);
   const embedCount = items.filter((i) => i.kind === "embed").length;
@@ -162,6 +239,22 @@ export function analyzeVideoSignals(raw) {
     });
   }
 
+  if (loopingNoPause.length) {
+    a11yChecks.push({
+      name: "Pause looping motion",
+      pass: false,
+      detail: "Looping autoplay has no pause control (WCAG 2.2.2)"
+    });
+    a11yIssues.push("Provide a pause/stop control for looping autoplay video — WCAG 2.2.2.");
+    a11yScore -= 12;
+  } else if (hasAutoplay) {
+    a11yChecks.push({
+      name: "Pause looping motion",
+      pass: true,
+      detail: "Autoplay is not a looping clip without controls"
+    });
+  }
+
   const labeledEmbeds = items.filter((i) => i.kind === "embed");
   if (labeledEmbeds.length) {
     const unlabeled = labeledEmbeds.filter((i) => !i.title);
@@ -191,6 +284,9 @@ export function analyzeVideoSignals(raw) {
   if (embedCount || hasAutoplay) {
     recommendations.push("Lazy-load non-hero videos; keep one intentional hero clip max.");
   }
+  if (loopingNoPause.length) {
+    recommendations.push("Add a pause control for looping autoplay so motion can be stopped.");
+  }
   if (hasHeroVideo) {
     recommendations.push("Keep headline + CTA readable over video — avoid text that relies on a moving frame.");
   }
@@ -212,6 +308,7 @@ export function analyzeVideoSignals(raw) {
     hasHeroVideo,
     hasAutoplay,
     hasUnmutedAutoplay: bool(hasUnmutedAutoplay),
+    hasLoopingNoPause: loopingNoPause.length > 0,
     providers: [...new Set(items.map((i) => i.provider).filter(Boolean))],
     score,
     conversion: {
@@ -245,6 +342,7 @@ export function videoPromptNote(video) {
     video.hasHeroVideo ? "hero/above-fold placement" : "below-fold or secondary",
     video.hasAutoplay ? (video.hasUnmutedAutoplay ? "autoplay WITH sound" : "muted autoplay") : "no autoplay"
   ];
+  if (video.hasLoopingNoPause) bits.push("looping autoplay without pause control");
   if (video.providers?.length) bits.push(`providers: ${video.providers.join(", ")}`);
   return `\nVideo landing-page signals: ${bits.join("; ")}. Comment on whether video helps or hurts conversion, and call out caption/autoplay risks.`;
 }

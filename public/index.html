@@ -3358,10 +3358,26 @@
             </div>
             <div class="p-6 overflow-y-auto flex-1 space-y-8">
 
-                <!-- Jul 31, 2026 -->
+                <!-- Sep 9, 2026 -->
                 <div>
                     <div class="flex items-center gap-3 mb-4">
                         <span class="px-2.5 py-1 bg-green-500/20 text-green-400 rounded-lg text-xs font-semibold">LATEST</span>
+                        <span class="text-sm text-[#a1a1a6]">Sep 9, 2026</span>
+                    </div>
+                    <div class="space-y-3 pl-4 border-l-2 border-orange-500/30">
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🔊</span>
+                            <div>
+                                <div class="text-sm font-medium">Sharper Autoplay-With-Sound Detection</div>
+                                <p class="text-xs text-[#6e6e73]">YouTube, Vimeo, and Cloudflare Stream heroes with <code>autoplay=1</code> and no mute are now scored as autoplay-with-sound — we no longer treat every autoplaying embed as muted. Looping clips without a pause control show up in accessibility.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Aug 23, 2026 -->
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
                         <span class="text-sm text-[#a1a1a6]">Aug 23, 2026</span>
                     </div>
                     <div class="space-y-3 pl-4 border-l-2 border-orange-500/30">
@@ -4727,6 +4743,8 @@
                     ];
                     if (item.kind === 'video') bits.push(item.hasCaptions ? 'captions' : 'no captions');
                     if (item.poster) bits.push('has poster');
+                    if (item.loop) bits.push('looping');
+                    if (item.autoplay && item.loop && !item.controls) bits.push('no pause control');
                     return `<div class="p-3 rounded-xl bg-white/[0.03] border border-white/[0.04] flex flex-wrap gap-2 items-center">
                         <span class="text-[#d1d1d6] font-medium capitalize">${sanitizeHtml(bits[0])}</span>
                         ${bits.slice(1).map((b) => `<span class="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.04] text-[#a1a1a6]">${sanitizeHtml(b)}</span>`).join('')}
