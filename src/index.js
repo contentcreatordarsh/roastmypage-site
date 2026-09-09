@@ -19,7 +19,8 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders,
+    runRetentionCleanup
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -852,15 +853,15 @@ data: ${JSON.stringify(data)}
       const industryParam = url.searchParams.get("industry");
       const industryFilter = industryParam && INDUSTRY_KEYS.includes(industryParam) ? industryParam : null;
       const roasts = industryFilter ? await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, screenshot_key, created_at
         FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(industryFilter, perPage, offset).all() : await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, screenshot_key, created_at
         FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(perPage, offset).all();
       const results = roasts.results.map((roast) => ({
         ...roast,
-        screenshotUrl: `/api/screenshot/${roast.id}`,
+        screenshotUrl: roast.screenshot_key ? `/api/screenshot/${roast.id}` : null,
         hostname: new URL(roast.url).hostname
       }));
       return Response.json(results, { headers: corsHeaders });
@@ -1962,7 +1963,7 @@ data: ${JSON.stringify(data)}
       const likeClauses = featuredDomains.map(() => `(url LIKE ?)`).join(" OR ");
       const likeParams = featuredDomains.map((d) => `%${d}%`);
       const featured = await env22.DB.prepare(`
-        SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.created_at
+        SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.screenshot_key, r.created_at
         FROM roasts r
         INNER JOIN (
           SELECT url, MAX(created_at) as latest
@@ -1978,7 +1979,7 @@ data: ${JSON.stringify(data)}
         const existingIds = results.map((r) => r.id);
         const excludeClause = existingIds.length > 0 ? `AND id NOT IN (${existingIds.map(() => "?").join(",")})` : "";
         const padding = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, screenshot_key, created_at
           FROM roasts
           WHERE overall_score > 0 ${excludeClause}
           ORDER BY overall_score DESC, created_at DESC
@@ -2006,7 +2007,7 @@ data: ${JSON.stringify(data)}
             design: r.design_score
           },
           industry: r.industry || "other",
-          screenshotUrl: `/api/screenshot/${r.id}`,
+          screenshotUrl: r.screenshot_key ? `/api/screenshot/${r.id}` : null,
           createdAt: r.created_at
         };
       });
@@ -3120,7 +3121,7 @@ data: ${JSON.stringify(data)}
       const roastId = url.pathname.split("/").pop();
       const roast = await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score,
-               roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, created_at
+               roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, screenshot_key, created_at
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
       if (!roast) {
@@ -3205,7 +3206,7 @@ data: ${JSON.stringify(data)}
       const ogDesc = `AI analysis: Hero ${roast.hero_score}/10, CTA ${roast.cta_score}/10, Trust ${roast.trust_score}/10, Copy ${roast.copy_score}/10, Design ${roast.design_score}/10. Get your free roast!`;
       const ogImage = `${BASE_URL}/api/card/${roastId}`;
       const pageUrl = `${BASE_URL}/roast/${roastId}`;
-      const screenshotUrl = `${BASE_URL}/api/screenshot/${roastId}`;
+      const screenshotUrl = roast.screenshot_key ? `${BASE_URL}/api/screenshot/${roastId}` : null;
       const categories = [
         { key: "hero", label: "Hero Section", score: roast.hero_score, color: "#8B5CF6", gradFrom: "from-purple-500/10", gradTo: "to-purple-600/5", borderColor: "border-purple-500/20", emoji: "\u{1F9B8}", question: "Is your headline clear, benefit-driven, and immediately compelling?", description: "The first thing visitors see \u2014 your headline, subheadline, and hero image. It must communicate your value in under 5 seconds or visitors bounce." },
         { key: "cta", label: "Call to Action", score: roast.cta_score, color: "#F97316", gradFrom: "from-orange-500/10", gradTo: "to-red-600/5", borderColor: "border-orange-500/20", emoji: "\u{1F3AF}", question: "Are your buttons visible, urgent, and impossible to miss?", description: "Your conversion buttons and links. Great CTAs are visually distinct, use action-oriented copy, and create urgency. This is where visitors become customers." },
@@ -3636,7 +3637,7 @@ data: ${JSON.stringify(data)}
       if (validIndustry) {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
-            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, created_at
+            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, screenshot_key, created_at
             FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
           `).bind(validIndustry, perPage, offset).all(),
           env22.DB.prepare("SELECT COUNT(*) as count FROM roasts WHERE industry = ?").bind(validIndustry).first()
@@ -3644,7 +3645,7 @@ data: ${JSON.stringify(data)}
       } else {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
-            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at
+            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, screenshot_key, created_at
             FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
           `).bind(perPage, offset).all(),
           env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first()
@@ -3689,12 +3690,24 @@ data: ${JSON.stringify(data)}
   },
 
   async scheduled(event, env, ctx) {
-    const baseUrl = env.BASE_URL || PRODUCTION_ORIGINS[0];
-    ctx.waitUntil(
-      processWatchlistAlerts(env, { limit: 40, baseUrl }).catch((err) => {
-        console.error("Watchlist cron failed:", err?.message || err);
-      })
-    );
+    const cron = event?.cron;
+    const runWatchlist = !cron || cron === CONFIG.WATCHLIST_CRON;
+    const runRetention = !cron || cron === CONFIG.RETENTION_CRON;
+    if (runWatchlist) {
+      const baseUrl = env.BASE_URL || PRODUCTION_ORIGINS[0];
+      ctx.waitUntil(
+        processWatchlistAlerts(env, { limit: 40, baseUrl }).catch((err) => {
+          console.error("Watchlist cron failed:", err?.message || err);
+        })
+      );
+    }
+    if (runRetention) {
+      ctx.waitUntil(
+        runRetentionCleanup(env)
+          .then((summary) => console.log("Retention cleanup complete:", summary))
+          .catch((err) => console.error("Retention cleanup failed:", err?.message || err))
+      );
+    }
   }
 
 };

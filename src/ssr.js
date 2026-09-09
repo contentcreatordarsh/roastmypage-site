@@ -2,7 +2,7 @@ import { escapeHtml, getTimeAgoSSR, getCountryFlag } from './utils.js';
 import { INDUSTRY_BENCHMARKS, INDUSTRY_KEYS } from './config.js';
 
 function generateNotFoundPage(baseUrl) {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#0A0908;color:#F5F0E8;font-family:'DM Sans',system-ui,sans-serif}h1{font-family:'Syne',system-ui,sans-serif;letter-spacing:-0.02em}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have expired or never existed.</p><a href="/" class="px-6 py-3 bg-[#E85D04] hover:bg-[#FF6B1A] text-[#0A0908] font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2390553551531836" crossorigin="anonymous"><\/script><title>Roast Not Found</title><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"><\/script><style>body{background:#0A0908;color:#F5F0E8;font-family:'DM Sans',system-ui,sans-serif}h1{font-family:'Syne',system-ui,sans-serif;letter-spacing:-0.02em}</style></head><body class="min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-6xl mb-4">\u{1F525}</div><h1 class="text-2xl font-bold mb-2">Roast Not Found</h1><p class="text-[#a1a1a6] mb-6">This roast may have been removed or never existed.</p><a href="/" class="px-6 py-3 bg-[#E85D04] hover:bg-[#FF6B1A] text-[#0A0908] font-semibold rounded-xl transition-colors">Roast Your Page</a><br><a href="/gallery" class="inline-block mt-4 text-sm text-[#6e6e73] hover:text-[#d1d1d6]">Browse the Gallery</a></div></body></html>`;
 }
 var PRODUCTION_ORIGINS = [
   "https://roastmypage.site",
@@ -12,6 +12,13 @@ var DEV_ORIGINS = [
   "http://localhost:8787",
   "http://127.0.0.1:8787"
 ];
+
+function screenshotMarkup(screenshotUrl, alt, className) {
+  if (screenshotUrl) {
+    return `<img src="${screenshotUrl}" alt="${escapeHtml(alt)}" class="${className}" loading="lazy">`;
+  }
+  return `<div class="${className} bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-center px-4 min-h-[10rem]"><p class="text-sm text-[#6e6e73]">Screenshot no longer stored</p></div>`;
+}
 
 export function renderRoastPage(params) {
     const {
@@ -307,7 +314,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
   <div id="tab-overview" class="tab-content active">
     <!-- Screenshot -->
     <div class="card p-4 mb-6">
-      <img src="${screenshotUrl}" alt="Screenshot of ${escapeHtml(hostname)}" class="w-full rounded-xl" loading="lazy">
+      ${screenshotMarkup(screenshotUrl, `Screenshot of ${hostname}`, "w-full rounded-xl")}
     </div>
 
     <!-- Category Breakdown with Roast/Fix details -->
@@ -468,7 +475,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
           <p class="text-xs text-[#6e6e73]">Where users are most likely to look</p>
         </div>
         <div class="relative inline-block w-full">
-          <img src="${screenshotUrl}" alt="Screenshot with heatmap" class="w-full rounded-lg border border-white/[0.06]" loading="lazy">
+          ${screenshotMarkup(screenshotUrl, "Screenshot with heatmap", "w-full rounded-lg border border-white/[0.06]")}
           <div id="heatmap-overlay" class="absolute inset-0 pointer-events-none rounded-lg overflow-hidden">
             ${heatmapDotsHtml}
           </div>
@@ -823,7 +830,9 @@ ${page < totalPages ? `<link rel="next" href="${BASE_URL}/gallery?page=${page + 
         const rFlag = r.country && r.country !== "XX" ? getCountryFlag(r.country) : "";
         return `<a href="/roast/${r.id}" class="gallery-card card p-4 block hover:no-underline">
       <div class="aspect-video bg-black/40 rounded-xl overflow-hidden mb-3 border border-white/[0.04]">
-        <img src="/api/screenshot/${r.id}" alt="${escapeHtml(rHostname)}" class="w-full h-full object-cover object-top" loading="lazy">
+        ${r.screenshot_key
+          ? `<img src="/api/screenshot/${r.id}" alt="${escapeHtml(rHostname)}" class="w-full h-full object-cover object-top" loading="lazy">`
+          : `<div class="w-full h-full flex items-center justify-center text-xs text-[#6e6e73] px-3 text-center">Screenshot no longer stored</div>`}
       </div>
       <div class="flex items-center justify-between mb-2">
         <span class="text-sm font-medium text-[#d1d1d6] truncate flex-1 mr-3">${escapeHtml(rHostname)}</span>

@@ -77,6 +77,15 @@ const CONFIG = {
   // Storage limits
   MAX_SCREENSHOT_BYTES: 5 * 1024 * 1024,
   // 5MB — reject screenshots larger than this to prevent storage abuse
+  // #40 — never delete roast rows (/roast/:id is indexed). Purge R2 screenshots
+  // and stale rate-limit counters only. Override with SCREENSHOT_RETENTION_DAYS.
+  SCREENSHOT_RETENTION_DAYS: 90,
+  RATE_LIMIT_ROW_RETENTION_DAYS: 7,
+  API_V1_COUNTER_RETENTION_DAYS: 7,
+  SCREENSHOT_PURGE_BATCH_SIZE: 100,
+  SCREENSHOT_PURGE_MAX_BATCHES: 20,
+  WATCHLIST_CRON: "0 */6 * * *",
+  RETENTION_CRON: "0 3 * * *",
   // AI settings
   AI_MAX_TOKENS: 1536,
   // Reduced from 2500 — compact prompt needs less output

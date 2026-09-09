@@ -40,8 +40,9 @@ CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
 
 # #49 Periodically scan watchlists for score changes (DB-only; no Browser Rendering).
+# #40 Daily screenshot/rate-limit prune — never deletes roast rows (indexed /roast/:id pages).
 [triggers]
-crons = ["0 */6 * * *"]
+crons = ["0 */6 * * *", "0 3 * * *"]
 
 # ============================================================================
 # PRODUCTION ENVIRONMENT  (deploy via:  npx wrangler deploy --env production)
@@ -84,5 +85,6 @@ CF_ZONE_TAG = "1147710735"
 
 # #49 — named environments do NOT inherit the top-level [triggers], so production
 # needs its own block or the watchlist alert scan would never run there.
+# #40 daily screenshot/rate-limit prune is listed second; roast rows are never deleted.
 [env.production.triggers]
-crons = ["0 */6 * * *"]
+crons = ["0 */6 * * *", "0 3 * * *"]

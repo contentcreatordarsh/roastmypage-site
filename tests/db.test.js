@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import { checkGlobalRateLimit, getCachedRoast, purgeExpiredScreenshots, pruneExpiredRateLimitRows, runRetentionCleanup, releaseApiV1Quota } from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -81,6 +81,212 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
   assert.equal(cached.id, "legacy-1");
   assert.equal(cached.seo, null);
   assert.equal(cached.performance, null);
+});
+
+function mockDbRouter(handlers) {
+  return {
+    prepare(statement) {
+      const handler = Object.entries(handlers).find(([needle]) => statement.includes(needle));
+      if (!handler) {
+        throw new Error(`Unexpected SQL: ${statement}`);
+      }
+      return handler[1](statement);
+    }
+  };
+}
+
+test("purgeExpiredScreenshots deletes R2 objects and clears keys without deleting roast rows", async () => {
+  const selectBatches = [
+    [{ id: "old-1", screenshot_key: "screenshots/old-1.jpg" }],
+    [{ id: "old-2", screenshot_key: "screenshots/old-2.jpg" }],
+    []
+  ];
+  const deletedScreenshots = [];
+  const updateBatches = [];
+  let selectCount = 0;
+  let selectSql = "";
+  let selectBindings = [];
+  const env = {
+    DB: mockDbRouter({
+      "SELECT id, screenshot_key": () => ({
+        bind(...values) {
+          selectBindings = values;
+          return {
+            all: async () => ({ results: selectBatches[selectCount++] || [] })
+          };
+        }
+      }),
+      "UPDATE roasts SET screenshot_key = NULL": (statement) => {
+        selectSql = selectSql || statement;
+        return {
+          bind(...ids) {
+            updateBatches.push(ids);
+            return {
+              run: async () => ({ meta: { changes: ids.length } })
+            };
+          }
+        };
+      }
+    }),
+    SCREENSHOTS: {
+      delete: async (key) => deletedScreenshots.push(key)
+    }
+  };
+
+  const summary = await purgeExpiredScreenshots(env, { days: 7, batchSize: 1 });
+
+  assert.equal(selectBindings[1], 1);
+  assert.ok(deletedScreenshots.includes("screenshots/old-1.jpg"));
+  assert.ok(deletedScreenshots.includes("screenshots/old-2.jpg"));
+  assert.deepEqual(updateBatches, [["old-1"], ["old-2"]]);
+  assert.equal(summary.days, 7);
+  assert.equal(summary.scanned, 2);
+  assert.equal(summary.deletedScreenshots, 2);
+  assert.equal(summary.clearedKeys, 2);
+  assert.equal(summary.batches, 2);
+});
+
+test("purgeExpiredScreenshots uses SCREENSHOT_RETENTION_DAYS env override", async () => {
+  let selectBindings = [];
+  const env = {
+    SCREENSHOT_RETENTION_DAYS: "30",
+    DB: mockDbRouter({
+      "SELECT id, screenshot_key": () => ({
+        bind(...values) {
+          selectBindings = values;
+          return { all: async () => ({ results: [] }) };
+        }
+      })
+    }),
+    SCREENSHOTS: { delete: async () => {} }
+  };
+
+  const summary = await purgeExpiredScreenshots(env);
+  assert.equal(summary.days, 30);
+  assert.match(selectBindings[0], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(selectBindings[1], 100);
+});
+
+test("purgeExpiredScreenshots keeps screenshot_key when R2 delete fails", async () => {
+  const updateBatches = [];
+  const env = {
+    DB: mockDbRouter({
+      "SELECT id, screenshot_key": () => ({
+        bind() {
+          return {
+            all: async () => ({
+              results: [
+                { id: "bad-screenshot", screenshot_key: "screenshots/bad.jpg" },
+                { id: "ok-screenshot", screenshot_key: "screenshots/ok.jpg" }
+              ]
+            })
+          };
+        }
+      }),
+      "UPDATE roasts SET screenshot_key = NULL": () => ({
+        bind(...ids) {
+          updateBatches.push(ids);
+          return { run: async () => ({ meta: { changes: ids.length } }) };
+        }
+      })
+    }),
+    SCREENSHOTS: {
+      delete: async (key) => {
+        if (key.includes("bad")) throw new Error("R2 unavailable");
+      }
+    }
+  };
+
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const summary = await purgeExpiredScreenshots(env, { days: 90 });
+    assert.deepEqual(updateBatches, [["ok-screenshot"]]);
+    assert.equal(summary.clearedKeys, 1);
+    assert.equal(summary.deletedScreenshots, 1);
+    assert.equal(summary.failedScreenshots, 1);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("purgeExpiredScreenshots never issues DELETE FROM roasts", async () => {
+  const statements = [];
+  const env = {
+    DB: {
+      prepare(statement) {
+        statements.push(statement);
+        return {
+          bind() {
+            return {
+              all: async () => ({ results: [] }),
+              run: async () => ({ meta: { changes: 0 } })
+            };
+          }
+        };
+      }
+    },
+    SCREENSHOTS: { delete: async () => {} }
+  };
+
+  await purgeExpiredScreenshots(env, { days: 90 });
+  assert.equal(statements.some((sql) => /DELETE\s+FROM\s+roasts/i.test(sql)), false);
+});
+
+test("pruneExpiredRateLimitRows deletes stale rate_limits and api_v1_counters", async () => {
+  const deletes = [];
+  const env = {
+    DB: {
+      prepare(statement) {
+        return {
+          bind(...values) {
+            deletes.push({ statement, values });
+            return {
+              run: async () => ({ meta: { changes: statement.includes("rate_limits") ? 4 : 2 } })
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const summary = await pruneExpiredRateLimitRows(env);
+  assert.equal(deletes.length, 2);
+  assert.match(deletes[0].statement, /DELETE FROM rate_limits WHERE last_request < \?/);
+  assert.match(deletes[1].statement, /DELETE FROM api_v1_counters WHERE day_key < \?/);
+  assert.match(deletes[0].values[0], /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(deletes[1].values[0], /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(summary.deletedRateLimits, 4);
+  assert.equal(summary.deletedApiCounters, 2);
+});
+
+test("runRetentionCleanup returns screenshot and counter summaries", async () => {
+  const env = {
+    DB: mockDbRouter({
+      "SELECT id, screenshot_key": () => ({
+        bind() {
+          return { all: async () => ({ results: [] }) };
+        }
+      }),
+      "DELETE FROM rate_limits": () => ({
+        bind() {
+          return { run: async () => ({ meta: { changes: 1 } }) };
+        }
+      }),
+      "DELETE FROM api_v1_counters": () => ({
+        bind() {
+          return { run: async () => ({ meta: { changes: 3 } }) };
+        }
+      })
+    }),
+    SCREENSHOTS: { delete: async () => {} }
+  };
+
+  const summary = await runRetentionCleanup(env, { days: 90 });
+  assert.equal(summary.screenshots.days, 90);
+  assert.equal(summary.screenshots.scanned, 0);
+  assert.equal(summary.counters.deletedRateLimits, 1);
+  assert.equal(summary.counters.deletedApiCounters, 3);
 });
 
 test("releaseApiV1Quota atomically restores a reserved daily quota", async () => {

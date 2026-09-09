@@ -48,3 +48,14 @@ The application's source code in `src/` is separated into focused modules:
 ## Environment Setup
 
 The worker requires bindings for `DB` (D1), `SCREENSHOTS` (R2), `CONFIG` (KV), `BROWSER`, and `AI`. Ensure your `wrangler.toml` is configured with the corresponding namespace IDs for your Cloudflare account.
+
+## Data Retention
+
+Roast **rows** in D1 are kept indefinitely. `/roast/:id` pages are indexed by search engines and are the main organic-discovery surface, so deleting old reports would 404 ranking URLs.
+
+A daily cron (`0 3 * * *`, alongside the existing 6-hour watchlist scan) instead:
+
+- Deletes R2 screenshots older than 90 days (override with `SCREENSHOT_RETENTION_DAYS`) and clears `screenshot_key` on those rows. The roast report page stays live with a placeholder.
+- Prunes stale `rate_limits` rows and old `api_v1_counters` days (7-day default).
+
+This is **not** a roast-row TTL. Do not add `DELETE FROM roasts` for age-based cleanup.

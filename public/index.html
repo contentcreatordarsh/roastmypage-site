@@ -8923,6 +8923,13 @@ Your landing page is like a first date where you talk about yourself for 45 minu
             }
         }
 
+        function roastThumbHtml(screenshotUrl, hostname, extraClass = '') {
+            if (screenshotUrl) {
+                return `<img src="${screenshotUrl}" alt="${hostname}" class="w-full h-full object-cover object-top ${extraClass}" loading="lazy">`;
+            }
+            return `<div class="w-full h-full flex items-center justify-center text-[11px] text-[#6e6e73] px-2 text-center">Screenshot archived</div>`;
+        }
+
         // Featured sites showcase
         async function loadFeaturedRoasts() {
             try {
@@ -8941,7 +8948,9 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                     return `
                         <a href="/roast/${roast.id}" class="featured-card block rounded-2xl bg-[rgba(28,28,30,0.72)] border border-white/[0.04] overflow-hidden no-underline">
                             <div class="aspect-[16/10] bg-white/[0.03] overflow-hidden relative">
-                                <img src="${roast.screenshotUrl}" alt="${roast.hostname}" class="w-full h-full object-cover object-top" loading="lazy" style="opacity:0" onload="this.style.opacity='1'">
+                                ${roast.screenshotUrl
+                                    ? `<img src="${roast.screenshotUrl}" alt="${roast.hostname}" class="w-full h-full object-cover object-top" loading="lazy" style="opacity:0" onload="this.style.opacity='1'">`
+                                    : roastThumbHtml(null, roast.hostname)}
                                 <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
                                 <div class="absolute bottom-2 left-2.5 right-2.5 flex items-end justify-between">
                                     <span class="text-[11px] text-white/80 font-medium truncate max-w-[140px]">${roast.hostname}</span>
@@ -9034,7 +9043,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 const html = roasts.map(roast => `
                     <a href="/roast/${roast.id}" class="gallery-card card p-3 block hover:no-underline">
                         <div class="aspect-video bg-white/[0.05] rounded-lg overflow-hidden mb-2">
-                            <img src="${roast.screenshotUrl}" alt="${roast.hostname}" class="w-full h-full object-cover object-top" loading="lazy">
+                            ${roastThumbHtml(roast.screenshotUrl, roast.hostname)}
                         </div>
                         <div class="flex justify-between items-center">
                             <span class="text-xs text-[#a1a1a6] truncate flex-1">${roast.hostname}</span>

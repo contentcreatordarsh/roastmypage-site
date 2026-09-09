@@ -179,6 +179,141 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   };
 }
 
+function resolvePositiveDays(value, fallback) {
+  const parsedDays = Number(value ?? fallback);
+  if (!Number.isFinite(parsedDays) || parsedDays <= 0) {
+    throw new Error("Retention days must be a positive number");
+  }
+  return parsedDays;
+}
+
+function formatSqliteDateTime(date) {
+  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+}
+
+function screenshotKeysForRow(row) {
+  const keys = new Set();
+  if (row?.screenshot_key) keys.add(row.screenshot_key);
+  if (row?.id) {
+    keys.add(`screenshots/${row.id}.jpg`);
+    keys.add(`screenshots/${row.id}.png`);
+  }
+  return [...keys];
+}
+
+/**
+ * Delete expired R2 screenshots and clear screenshot_key.
+ * Never deletes roast rows — indexed /roast/:id pages must stay alive (#40).
+ */
+async function purgeExpiredScreenshots(env22, { days, batchSize, maxBatches } = {}) {
+  const retentionDays = resolvePositiveDays(
+    days ?? env22?.SCREENSHOT_RETENTION_DAYS,
+    CONFIG.SCREENSHOT_RETENTION_DAYS
+  );
+  const normalizedBatchSize = Math.max(
+    1,
+    Math.min(Number(batchSize) || CONFIG.SCREENSHOT_PURGE_BATCH_SIZE, CONFIG.SCREENSHOT_PURGE_BATCH_SIZE)
+  );
+  const normalizedMaxBatches = Math.max(
+    1,
+    Math.min(Number(maxBatches) || CONFIG.SCREENSHOT_PURGE_MAX_BATCHES, CONFIG.SCREENSHOT_PURGE_MAX_BATCHES)
+  );
+  const cutoff = formatSqliteDateTime(new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1e3));
+  const summary = {
+    cutoff,
+    days: retentionDays,
+    scanned: 0,
+    deletedScreenshots: 0,
+    clearedKeys: 0,
+    failedScreenshots: 0,
+    batches: 0
+  };
+
+  while (summary.batches < normalizedMaxBatches) {
+    const result = await env22.DB.prepare(`
+      SELECT id, screenshot_key
+      FROM roasts
+      WHERE created_at < ?
+        AND screenshot_key IS NOT NULL
+        AND screenshot_key != ''
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).bind(cutoff, normalizedBatchSize).all();
+    const rows = result.results || [];
+    if (rows.length === 0) break;
+
+    summary.scanned += rows.length;
+    summary.batches += 1;
+
+    const clearedIds = [];
+    for (const row of rows) {
+      try {
+        if (env22.SCREENSHOTS) {
+          for (const key of screenshotKeysForRow(row)) {
+            await env22.SCREENSHOTS.delete(key);
+          }
+        }
+        summary.deletedScreenshots += 1;
+        clearedIds.push(row.id);
+      } catch (error32) {
+        summary.failedScreenshots += 1;
+        console.error(`Failed to delete expired screenshot for ${row.id}:`, error32);
+      }
+    }
+
+    if (clearedIds.length > 0) {
+      const placeholders = clearedIds.map(() => "?").join(", ");
+      const updateResult = await env22.DB.prepare(
+        `UPDATE roasts SET screenshot_key = NULL WHERE id IN (${placeholders})`
+      ).bind(...clearedIds).run();
+      summary.clearedKeys += Number(updateResult.meta?.changes || clearedIds.length);
+    }
+
+    if (rows.length < normalizedBatchSize) break;
+  }
+
+  return summary;
+}
+
+async function pruneExpiredRateLimitRows(env22, { rateLimitDays, apiCounterDays } = {}) {
+  const rateLimitRetentionDays = resolvePositiveDays(
+    rateLimitDays ?? env22?.RATE_LIMIT_ROW_RETENTION_DAYS,
+    CONFIG.RATE_LIMIT_ROW_RETENTION_DAYS
+  );
+  const apiCounterRetentionDays = resolvePositiveDays(
+    apiCounterDays ?? env22?.API_V1_COUNTER_RETENTION_DAYS,
+    CONFIG.API_V1_COUNTER_RETENTION_DAYS
+  );
+  const rateLimitCutoff = new Date(
+    Date.now() - rateLimitRetentionDays * 24 * 60 * 60 * 1e3
+  ).toISOString();
+  const counterCutoff = new Date(
+    Date.now() - apiCounterRetentionDays * 24 * 60 * 60 * 1e3
+  ).toISOString().slice(0, 10);
+
+  const [rateLimits, apiCounters] = await Promise.all([
+    env22.DB.prepare(
+      "DELETE FROM rate_limits WHERE last_request < ?"
+    ).bind(rateLimitCutoff).run(),
+    env22.DB.prepare(
+      "DELETE FROM api_v1_counters WHERE day_key < ?"
+    ).bind(counterCutoff).run()
+  ]);
+
+  return {
+    rateLimitCutoff,
+    counterCutoff,
+    deletedRateLimits: Number(rateLimits.meta?.changes || 0),
+    deletedApiCounters: Number(apiCounters.meta?.changes || 0)
+  };
+}
+
+async function runRetentionCleanup(env22, options = {}) {
+  const screenshots = await purgeExpiredScreenshots(env22, options);
+  const counters = await pruneExpiredRateLimitRows(env22, options);
+  return { screenshots, counters };
+}
+
 async function getApiV1Counts(env, ipHash) {
   const dayKey = getApiDayKey();
   const [ipRow, globalRow] = await Promise.all([
@@ -311,4 +446,4 @@ function apiV1RateLimitHeaders(ipCount, globalCount) {
   };
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
+export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, purgeExpiredScreenshots, pruneExpiredRateLimitRows, runRetentionCleanup, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
