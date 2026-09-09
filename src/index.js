@@ -81,13 +81,6 @@ export default {
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
@@ -108,6 +101,13 @@ export default {
           return Response.json(
             { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
@@ -232,13 +232,6 @@ export default {
     }
     if (url.pathname === "/api/compare" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
@@ -259,6 +252,13 @@ export default {
           return Response.json(
             { error: `Compare rate limit exceeded (${CONFIG.RATE_LIMIT_COMPARE_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: corsHeaders }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         const [hash1, hash2] = await Promise.all([
@@ -542,13 +542,6 @@ export default {
     }
     if (url.pathname === "/api/batch-roast" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
@@ -569,6 +562,13 @@ export default {
           return Response.json(
             { error: `Batch rate limit exceeded (${CONFIG.RATE_LIMIT_BATCH_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: corsHeaders }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         await trackBrowserUsage(env22, validUrls.length);
@@ -652,13 +652,6 @@ export default {
     }
     if (url.pathname === "/api/roast-stream" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
@@ -678,6 +671,13 @@ export default {
           return Response.json(
             { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
@@ -2515,10 +2515,6 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/threat-scan" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
@@ -2552,6 +2548,10 @@ data: ${JSON.stringify(data)}
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
         if (!rateLimit.allowed) {
           return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const [typosquats, securityGrade, socialImposters] = await Promise.all([
           // 1. Generate and check typosquats
@@ -2616,10 +2616,6 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/tech-scan" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
@@ -2633,6 +2629,10 @@ data: ${JSON.stringify(data)}
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
         if (!rateLimit.allowed) {
           return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const cacheKey = `tech-scan:${await hashUrl(sanitizedUrl)}`;
         const cached = await env22.CONFIG.get(cacheKey);
@@ -2831,17 +2831,6 @@ data: ${JSON.stringify(data)}
             }
           });
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({
-            success: false,
-            error: "service_busy",
-            message: "The roasting service is at capacity. Please try again in a few minutes."
-          }, {
-            status: 503,
-            headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
-          });
-        }
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
@@ -2867,27 +2856,17 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
-        const quota = await consumeApiV1Quota(env22, ipHash);
-        if (!quota.allowed) {
-          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
           return Response.json({
             success: false,
-            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
-            message: quota.error,
-            limits: {
-              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
-              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
-            }
+            error: "service_busy",
+            message: "The roasting service is at capacity. Please try again in a few minutes."
           }, {
-            status: statusCode,
-            headers: {
-              ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
-              "Retry-After": String(secondsUntilMidnightUTC())
-            }
+            status: 503,
+            headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
           });
         }
-        quotaReservationIpHash = ipHash;
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
@@ -2917,13 +2896,33 @@ data: ${JSON.stringify(data)}
           }, {
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              ...apiV1RateLimitHeaders(rateLimits.ipCount, rateLimits.globalCount),
               "X-Cache": "HIT"
             }
           });
-          quotaReservationIpHash = null;
           return response;
         }
+        const quota = await consumeApiV1Quota(env22, ipHash);
+        if (!quota.allowed) {
+          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+          return Response.json({
+            success: false,
+            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
+            message: quota.error,
+            limits: {
+              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
+              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
+            }
+          }, {
+            status: statusCode,
+            headers: {
+              ...apiV1CorsHeaders,
+              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              "Retry-After": String(secondsUntilMidnightUTC())
+            }
+          });
+        }
+        quotaReservationIpHash = ipHash;
         // A cache miss is about to consume Browser Rendering capacity. From this
         // point the reservation counts as an attempted roast even if the target
         // page times out or produces an oversized screenshot; otherwise callers
