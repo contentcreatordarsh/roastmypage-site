@@ -19,8 +19,23 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders,
+    getApiV1DailyLimit, getApiV1CounterKeyForApiKey, getWebHourlyLimit
 } from './db.js';
+
+import {
+    authenticateApiKeyRequest, createApiKey, isPaidApiKeyTier,
+    setApiKeyTier, touchApiKeyLastUsed
+} from './apiKeys.js';
+
+import {
+    applyStripeEvent, createCheckoutSession, publicPlans,
+    UPGRADEABLE_TIERS, verifyStripeSignature, verifyUpgradeToken
+} from './billing.js';
+
+import {
+    deliverPaidRoastWebhook, extractRoastWebhookUrl, isPaidWebhookUrl
+} from './apiWebhooks.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
 
@@ -65,6 +80,70 @@ const inFlightRequests = new Set();
 
 const OWNER_KEY_RE = /^[a-zA-Z0-9_-]{8,64}$/;
 
+const PUBLIC_API_CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, Stripe-Signature",
+  "Access-Control-Expose-Headers": "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-RateLimit-Global-Limit, X-RateLimit-Global-Remaining, X-RateLimit-Tier, X-Queue-Priority",
+  "Access-Control-Max-Age": "86400"
+};
+
+function getApiV1QuotaOptions(apiKey) {
+  if (!apiKey) return { dailyLimit: API_V1_LIMITS.PER_IP_DAILY, includeGlobal: true, priority: false };
+  const paid = isPaidApiKeyTier(apiKey.tier);
+  return {
+    dailyLimit: getApiV1DailyLimit(apiKey.tier),
+    includeGlobal: !paid,
+    tier: apiKey.tier,
+    priority: paid
+  };
+}
+
+function buildApiV1UsagePayload({ apiKey, used, globalCount, quotaOptions }) {
+  const resetAt = /* @__PURE__ */ new Date();
+  resetAt.setUTCHours(24, 0, 0, 0);
+  const daily = {
+    limit: quotaOptions.dailyLimit,
+    used,
+    remaining: Math.max(0, quotaOptions.dailyLimit - used)
+  };
+  const payload = {
+    limits: apiKey ? { daily } : {
+      perIp: daily,
+      global: {
+        limit: API_V1_LIMITS.GLOBAL_DAILY,
+        used: globalCount,
+        remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount)
+      }
+    },
+    resetsAt: resetAt.toISOString(),
+    resetsIn: secondsUntilMidnightUTC(),
+    features: {
+      priority: !!quotaOptions.priority,
+      webhooks: !!apiKey && isPaidApiKeyTier(apiKey.tier)
+    }
+  };
+  if (apiKey) {
+    payload.key = {
+      id: apiKey.id,
+      prefix: apiKey.prefix,
+      tier: apiKey.tier,
+      label: apiKey.label,
+      createdAt: apiKey.createdAt,
+      lastUsedAt: apiKey.lastUsedAt,
+      paid: apiKey.paid
+    };
+  }
+  return payload;
+}
+
+function invalidApiKeyJson(headers, { successEnvelope = false } = {}) {
+  const body = successEnvelope
+    ? { success: false, error: "invalid_api_key", message: "The API key is invalid or revoked." }
+    : { error: "invalid_api_key", message: "The API key is invalid or revoked." };
+  return Response.json(body, { status: 401, headers });
+}
+
 function visibleStoredRoasts(rows = []) {
   return rows
     .filter((roast) => !isStoredChallengeRoast(roast?.seo_data))
@@ -85,6 +164,9 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
     const securityHeaders = getSecurityHeaders(origin, env22.ENVIRONMENT);
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/v1/")) {
+      return new Response(null, { headers: PUBLIC_API_CORS_HEADERS });
+    }
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: securityHeaders });
     }
@@ -102,6 +184,10 @@ export default {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const webAuth = await authenticateApiKeyRequest(env22, request);
+        if (webAuth.present && !webAuth.apiKey) {
+          return invalidApiKeyJson(corsHeaders);
+        }
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
@@ -114,14 +200,15 @@ export default {
         if (!isUrlSafeForFetching(targetUrl)) {
           return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
         }
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
+        const webActor = webAuth.apiKey ? getApiV1CounterKeyForApiKey(webAuth.apiKey) : ipHash;
+        const rateLimit = await checkOperationRateLimit(env22, webActor, "roast", getWebHourlyLimit(webAuth.apiKey?.tier));
         if (!rateLimit.allowed) {
           return Response.json(
             { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
           );
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, { priority: !!webAuth.apiKey?.paid });
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
@@ -673,6 +760,10 @@ export default {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const streamAuth = await authenticateApiKeyRequest(env22, request);
+        if (streamAuth.present && !streamAuth.apiKey) {
+          return invalidApiKeyJson(corsHeaders);
+        }
         const body = await request.json();
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device || "desktop" : "desktop";
         const brandName = body.brandName ? sanitizeHtml(body.brandName.slice(0, 100)) : void 0;
@@ -684,14 +775,15 @@ export default {
         if (!isUrlSafeForFetching(targetUrl)) {
           return Response.json({ error: "Cannot scan internal/private URLs" }, { status: 400, headers: corsHeaders });
         }
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "roast");
+        const streamActor = streamAuth.apiKey ? getApiV1CounterKeyForApiKey(streamAuth.apiKey) : ipHash;
+        const rateLimit = await checkOperationRateLimit(env22, streamActor, "roast", getWebHourlyLimit(streamAuth.apiKey?.tier));
         if (!rateLimit.allowed) {
           return Response.json(
             { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
           );
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const globalLimit = await checkGlobalRateLimit(env22, { priority: !!streamAuth.apiKey?.paid });
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
@@ -2812,59 +2904,153 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Failed to fetch results" }, { status: 500, headers: corsHeaders });
       }
     }
-    const apiV1CorsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Expose-Headers": "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-RateLimit-Global-Limit, X-RateLimit-Global-Remaining",
-      "Access-Control-Max-Age": "86400"
-    };
-    if (url.pathname.startsWith("/api/v1/") && request.method === "OPTIONS") {
-      return new Response(null, { headers: apiV1CorsHeaders });
+    const apiV1CorsHeaders = PUBLIC_API_CORS_HEADERS;
+    if (url.pathname === "/api/v1/billing/plans" && request.method === "GET") {
+      return Response.json(publicPlans(env22), { headers: apiV1CorsHeaders });
+    }
+    if (url.pathname === "/api/v1/keys" && request.method === "POST") {
+      try {
+        const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const mintLimit = await checkOperationRateLimit(env22, ipHash, "apikey");
+        if (!mintLimit.allowed) {
+          return Response.json({
+            error: "rate_limit_exceeded",
+            message: `Key creation is limited to 5 per hour. Try again in ${Math.ceil(mintLimit.resetIn / 60)} minutes.`
+          }, { status: 429, headers: { ...apiV1CorsHeaders, "Retry-After": String(mintLimit.resetIn) } });
+        }
+        const body = await request.json().catch(() => ({}));
+        const created = await createApiKey(env22, { label: body.label });
+        return Response.json({
+          key: created.key,
+          prefix: created.apiKey.prefix,
+          tier: created.apiKey.tier,
+          label: created.apiKey.label,
+          createdAt: created.apiKey.createdAt,
+          limits: {
+            apiDaily: getApiV1DailyLimit(created.apiKey.tier),
+            webHourly: getWebHourlyLimit(created.apiKey.tier)
+          },
+          warning: "Store this key now. For security, the plaintext key is shown only once."
+        }, { status: 201, headers: apiV1CorsHeaders });
+      } catch (error32) {
+        safeLogError("API key creation failed:", error32);
+        return Response.json({ error: "Failed to create API key" }, { status: 500, headers: apiV1CorsHeaders });
+      }
+    }
+    if (url.pathname === "/api/v1/keys/checkout" && request.method === "POST") {
+      const auth = await authenticateApiKeyRequest(env22, request);
+      if (!auth.present) {
+        return Response.json({ error: "api_key_required", message: "Send your key with Authorization: Bearer rmp_... or X-Api-Key." }, { status: 401, headers: apiV1CorsHeaders });
+      }
+      if (!auth.apiKey) return invalidApiKeyJson(apiV1CorsHeaders);
+      const body = await request.json().catch(() => ({}));
+      const checkout = await createCheckoutSession(env22, {
+        apiKey: auth.apiKey,
+        tier: body.tier,
+        successUrl: typeof body.successUrl === "string" ? body.successUrl.slice(0, 500) : undefined,
+        cancelUrl: typeof body.cancelUrl === "string" ? body.cancelUrl.slice(0, 500) : undefined
+      });
+      if (checkout.error) {
+        const status = checkout.error === "invalid_tier" ? 400 : 503;
+        return Response.json(checkout, { status, headers: apiV1CorsHeaders });
+      }
+      return Response.json({ url: checkout.url, sessionId: checkout.sessionId }, { headers: apiV1CorsHeaders });
+    }
+    if (url.pathname === "/api/v1/keys/upgrade" && request.method === "POST") {
+      const auth = await authenticateApiKeyRequest(env22, request);
+      if (!auth.present) {
+        return Response.json({ error: "api_key_required", message: "Send your key with Authorization: Bearer rmp_... or X-Api-Key." }, { status: 401, headers: apiV1CorsHeaders });
+      }
+      if (!auth.apiKey) return invalidApiKeyJson(apiV1CorsHeaders);
+      const body = await request.json().catch(() => ({}));
+      const tier = String(body.tier || "").toLowerCase();
+      if (!UPGRADEABLE_TIERS.has(tier)) {
+        return Response.json({ error: "invalid_tier", message: "Choose the pro or agency plan." }, { status: 400, headers: apiV1CorsHeaders });
+      }
+      const ok = await verifyUpgradeToken(env22.TIER_UPGRADE_SECRET, auth.apiKey.id, tier, body.exp, body.token);
+      if (!ok) {
+        return Response.json({ error: "invalid_upgrade_token", message: "Paid upgrades need a signed token or a completed Stripe checkout." }, { status: 403, headers: apiV1CorsHeaders });
+      }
+      const updated = await setApiKeyTier(env22, auth.apiKey.id, tier);
+      return Response.json({
+        prefix: updated.prefix,
+        tier: updated.tier,
+        paid: updated.paid,
+        limits: {
+          apiDaily: getApiV1DailyLimit(updated.tier),
+          webHourly: getWebHourlyLimit(updated.tier)
+        }
+      }, { headers: apiV1CorsHeaders });
+    }
+    if (url.pathname === "/api/v1/billing/webhook" && request.method === "POST") {
+      const rawBody = await request.text();
+      const valid = await verifyStripeSignature(env22.STRIPE_WEBHOOK_SECRET, rawBody, request.headers.get("Stripe-Signature"));
+      if (!valid) {
+        return Response.json({ error: "invalid_signature" }, { status: 400, headers: apiV1CorsHeaders });
+      }
+      let event;
+      try {
+        event = JSON.parse(rawBody);
+      } catch {
+        return Response.json({ error: "invalid_payload" }, { status: 400, headers: apiV1CorsHeaders });
+      }
+      const result = await applyStripeEvent(env22, event);
+      return Response.json({ received: true, applied: result.applied }, { headers: apiV1CorsHeaders });
     }
     if (url.pathname === "/api/v1/usage" && request.method === "GET") {
+      const auth = await authenticateApiKeyRequest(env22, request);
+      if (auth.present && !auth.apiKey) return invalidApiKeyJson(apiV1CorsHeaders);
+      if (auth.apiKey) ctx.waitUntil(touchApiKeyLastUsed(env22, auth.apiKey.id));
       const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
-      const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
-      const usage = await checkApiV1RateLimits(env22, ipHash);
-      const ipCount = usage.ipCount;
-      const globalCount = usage.globalCount;
-      const resetAt = /* @__PURE__ */ new Date();
-      resetAt.setUTCHours(24, 0, 0, 0);
-      return Response.json({
-        limits: {
-          perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount) },
-          global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount) }
-        },
-        resetsAt: resetAt.toISOString(),
-        resetsIn: secondsUntilMidnightUTC()
-      }, {
+      const ipHash = auth.apiKey ? null : await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+      const quotaOptions = getApiV1QuotaOptions(auth.apiKey);
+      const actorKey = auth.apiKey ? getApiV1CounterKeyForApiKey(auth.apiKey) : ipHash;
+      const usage = await checkApiV1RateLimits(env22, actorKey, quotaOptions);
+      const used = usage.actorCount ?? usage.ipCount;
+      return Response.json(buildApiV1UsagePayload({
+        apiKey: auth.apiKey,
+        used,
+        globalCount: usage.globalCount,
+        quotaOptions
+      }), {
         headers: {
           ...apiV1CorsHeaders,
-          ...apiV1RateLimitHeaders(ipCount, globalCount)
+          ...apiV1RateLimitHeaders(used, usage.globalCount, quotaOptions)
         }
       });
     }
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
-      let quotaReservationIpHash = null;
+      let quotaReservationActorKey = null;
       // Remembers the quota we deliberately charged (once Browser Rendering
       // started) so specific failure modes can still hand it back.
-      let quotaChargedIpHash = null;
+      let quotaChargedActorKey = null;
       try {
+        const auth = await authenticateApiKeyRequest(env22, request);
+        if (auth.present && !auth.apiKey) {
+          return invalidApiKeyJson(apiV1CorsHeaders, { successEnvelope: true });
+        }
+        if (auth.apiKey) ctx.waitUntil(touchApiKeyLastUsed(env22, auth.apiKey.id));
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
-        const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
-        const rateLimits = await checkApiV1RateLimits(env22, ipHash);
+        const ipHash = auth.apiKey ? null : await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
+        const quotaOptions = getApiV1QuotaOptions(auth.apiKey);
+        const actorKey = auth.apiKey ? getApiV1CounterKeyForApiKey(auth.apiKey) : ipHash;
+        const rateLimits = await checkApiV1RateLimits(env22, actorKey, quotaOptions);
+        const rateLimitUsed = rateLimits.actorCount ?? rateLimits.ipCount;
         if (!rateLimits.allowed) {
           const statusCode = rateLimits.errorType === "global_limit" ? 503 : 429;
           return Response.json({
             success: false,
             error: rateLimits.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
             message: rateLimits.error,
-            limits: {
-              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: rateLimits.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - rateLimits.ipCount) },
-              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: rateLimits.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - rateLimits.globalCount) }
-            },
+            limits: buildApiV1UsagePayload({
+              apiKey: auth.apiKey,
+              used: rateLimitUsed,
+              globalCount: rateLimits.globalCount,
+              quotaOptions
+            }).limits,
             resetsAt: (() => {
               const d = /* @__PURE__ */ new Date();
               d.setUTCHours(24, 0, 0, 0);
@@ -2874,7 +3060,7 @@ data: ${JSON.stringify(data)}
             status: statusCode,
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(rateLimits.ipCount, rateLimits.globalCount),
+              ...apiV1RateLimitHeaders(rateLimitUsed, rateLimits.globalCount, quotaOptions),
               "Retry-After": String(secondsUntilMidnightUTC())
             }
           });
@@ -2904,12 +3090,31 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
+        const webhookUrl = extractRoastWebhookUrl(body);
+        if (webhookUrl) {
+          if (!auth.apiKey || !isPaidApiKeyTier(auth.apiKey.tier)) {
+            return Response.json({
+              success: false,
+              error: "webhook_requires_paid_tier",
+              message: "HTTPS callbackUrl / webhookUrl is available on Pro and Agency keys."
+            }, { status: 403, headers: apiV1CorsHeaders });
+          }
+          if (!isPaidWebhookUrl(webhookUrl)) {
+            return Response.json({
+              success: false,
+              error: "invalid_webhook_url",
+              message: "Webhook URL must be public HTTPS and cannot point at private or metadata hosts."
+            }, { status: 400, headers: apiV1CorsHeaders });
+          }
+        }
+        const globalLimit = await checkGlobalRateLimit(env22, { priority: !!quotaOptions.priority });
         if (!globalLimit.allowed) {
           return Response.json({
             success: false,
             error: "service_busy",
-            message: "The roasting service is at capacity. Please try again in a few minutes."
+            message: quotaOptions.priority
+              ? "Paid capacity is also full. Please retry in a few minutes."
+              : "The roasting service is at capacity. Please try again in a few minutes."
           }, {
             status: 503,
             headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
@@ -2918,7 +3123,7 @@ data: ${JSON.stringify(data)}
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
-          const response = Response.json({
+          const payload = {
             success: true,
             cached: true,
             url: targetUrl,
@@ -2941,31 +3146,37 @@ data: ${JSON.stringify(data)}
             screenshotUrl: `${PRODUCTION_ORIGINS[0]}/api/screenshot/${cachedResult.id}`,
             shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${cachedResult.id}`,
             timestamp: cachedResult.createdAt || (/* @__PURE__ */ new Date()).toISOString()
-          }, {
+          };
+          if (webhookUrl) {
+            ctx.waitUntil(deliverPaidRoastWebhook(env22, { webhookUrl, apiKey: auth.apiKey, payload }));
+          }
+          return Response.json(payload, {
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(rateLimits.ipCount, rateLimits.globalCount),
+              ...apiV1RateLimitHeaders(rateLimitUsed, rateLimits.globalCount, quotaOptions),
               "X-Cache": "HIT"
             }
           });
-          return response;
         }
-        const quota = await consumeApiV1Quota(env22, ipHash);
+        const quota = await consumeApiV1Quota(env22, actorKey, quotaOptions);
+        const quotaUsed = quota.actorCount ?? quota.ipCount;
         if (!quota.allowed) {
           const statusCode = quota.errorType === "global_limit" ? 503 : 429;
           return Response.json({
             success: false,
             error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
             message: quota.error,
-            limits: {
-              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
-              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
-            }
+            limits: buildApiV1UsagePayload({
+              apiKey: auth.apiKey,
+              used: quotaUsed,
+              globalCount: quota.globalCount,
+              quotaOptions
+            }).limits
           }, {
             status: statusCode,
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              ...apiV1RateLimitHeaders(quotaUsed, quota.globalCount, quotaOptions),
               "Retry-After": String(secondsUntilMidnightUTC())
             }
           });
@@ -2974,7 +3185,7 @@ data: ${JSON.stringify(data)}
         // point the quota stays charged even if the target page times out or
         // produces an oversized screenshot; otherwise callers can intentionally
         // fail captures forever without using per-IP quota.
-        quotaChargedIpHash = ipHash;
+        quotaChargedActorKey = actorKey;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
         const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
@@ -3019,7 +3230,7 @@ data: ${JSON.stringify(data)}
             industry
           ).run()
         );
-        const response = Response.json({
+        const payload = {
           success: true,
           cached: false,
           url: targetUrl,
@@ -3045,21 +3256,24 @@ data: ${JSON.stringify(data)}
           shareUrl: `${PRODUCTION_ORIGINS[0]}/roast/${roastId}`,
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           processingTime: Date.now() - startTime
-        }, {
+        };
+        if (webhookUrl) {
+          ctx.waitUntil(deliverPaidRoastWebhook(env22, { webhookUrl, apiKey: auth.apiKey, payload }));
+        }
+        return Response.json(payload, {
           headers: {
             ...apiV1CorsHeaders,
-            ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+            ...apiV1RateLimitHeaders(quotaUsed, quota.globalCount, quotaOptions),
             "X-Cache": "MISS"
           }
         });
-        return response;
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         if (isBotChallengeError(error32)) {
           // Bot protection is detected within a couple of seconds and the caller
           // can do nothing about it, so refund rather than burning one of their
           // few daily requests. Every other capture failure still stays charged.
-          quotaReservationIpHash = quotaChargedIpHash;
+          quotaReservationActorKey = quotaChargedActorKey;
           return Response.json({
             success: false,
             error: "blocked_by_bot_protection",
@@ -3087,8 +3301,8 @@ data: ${JSON.stringify(data)}
           headers: apiV1CorsHeaders
         });
       } finally {
-        if (quotaReservationIpHash) {
-          await releaseApiV1Quota(env22, quotaReservationIpHash);
+        if (quotaReservationActorKey) {
+          await releaseApiV1Quota(env22, quotaReservationActorKey);
         }
       }
     }

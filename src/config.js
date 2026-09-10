@@ -49,6 +49,9 @@ const CONFIG = {
   // NEW: Max requests/hour globally
   GLOBAL_DAILY_BROWSER_LIMIT: 1e4,
   // NEW: Max browser sessions/day
+  // #51 Paid keys keep a reserved slice of global capacity when the free pool is full.
+  PAID_RESERVED_HOURLY: 200,
+  PAID_RESERVED_DAILY_BROWSER: 1e3,
   // Caching
   CACHE_TTL_HOURS: 168,
   // 7 days cache
@@ -143,7 +146,18 @@ const DEV_ORIGINS = [
 
 const API_V1_LIMITS = {
   PER_IP_DAILY: 5,
-  GLOBAL_DAILY: 50
+  GLOBAL_DAILY: 50,
+  // Minted free keys get a modest bump; paid tiers match /pricing.
+  API_KEY_DAILY_BY_TIER: {
+    free: 25,
+    pro: 500,
+    agency: 2000
+  },
+  WEB_HOURLY_BY_TIER: {
+    free: 30,
+    pro: 200,
+    agency: 500
+  }
 };
 
 export { POPULAR_DOMAINS, CONFIG, VIEWPORTS, RUBRIC_CRITERIA, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS, API_V1_LIMITS };
