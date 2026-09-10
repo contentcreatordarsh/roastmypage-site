@@ -36,6 +36,9 @@ id = "a278379c19e0426298741337ed23a315"
 [vars]
 ENVIRONMENT = "development"
 BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
+# Identifiers, not credentials — GraphQL Analytics and URL Scanner need these
+# at request time. Access still requires ANALYTICS_API_TOKEN / URL_SCANNER_TOKEN
+# Worker secrets. Keep in [vars] so a missing secret cannot silently disable them.
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
 
@@ -79,6 +82,7 @@ id = "a0e0cee4c5e54235a12ee8dcc262f41a"
 [env.production.vars]
 ENVIRONMENT = "production"
 BASE_URL = "https://roastmypage.site"
+# Same identifiers as the default env (see comment on [vars] above).
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
 

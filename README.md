@@ -48,3 +48,12 @@ The application's source code in `src/` is separated into focused modules:
 ## Environment Setup
 
 The worker requires bindings for `DB` (D1), `SCREENSHOTS` (R2), `CONFIG` (KV), `BROWSER`, and `AI`. Ensure your `wrangler.toml` is configured with the corresponding namespace IDs for your Cloudflare account.
+
+`CF_ACCOUNT_TAG` and `CF_ZONE_TAG` in `[vars]` are Cloudflare account and zone identifiers, not credentials. They grant no access on their own — every call that uses them also requires an API token — and Analytics GraphQL / URL Scanner need them at request time. Keep them in committed wrangler `[vars]` (do not move them to secrets) so a missing Worker secret cannot silently disable analytics.
+
+Actual secrets stay out of the repo and are set with `wrangler secret put` (add `--env production` for production):
+
+- `ANALYTICS_API_TOKEN`
+- `URL_SCANNER_TOKEN`
+- `IP_HASH_SALT`
+- `RADAR_API_TOKEN`
