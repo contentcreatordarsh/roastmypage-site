@@ -110,13 +110,22 @@ for (const url of ["http://127.0.0.1", "http://169.254.169.254/", "file:///etc/p
 }
 
 // --- #147: the threat scanner must not be pointed at internal hosts ---------
+// These probes are free: with #147 in place the internal-target check returns
+// 400 before checkOperationRateLimit(..., "threat") is reached, so none of them
+// consume the 10/hour budget. A 429 here therefore means the ordering regressed
+// and the limiter now runs first — report it rather than asserting on a status
+// the SSRF check never produced.
 for (const domain of ["localhost", "127.0.0.1", "169.254.169.254", "10.0.0.1", "192.168.1.1", "172.16.0.5", "metadata.google.internal"]) {
   const r = await post("/api/threat-scan", { domain });
+  if (r.status === 429) {
+    ok(`#147 threat-scan domain ${domain} rate limited before the SSRF check`, false, "429 — validation is no longer short-circuiting");
+    continue;
+  }
   ok(`#147 threat-scan blocks domain ${domain}`, r.status === 400, `${r.status} ${(r.json?.error || "").slice(0, 40)}`);
 }
 for (const url of ["http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/", "http://192.168.0.5/admin"]) {
   const r = await post("/api/threat-scan", { url });
-  ok(`#147 threat-scan blocks url ${url}`, r.status >= 400 && r.status < 500, `${r.status} ${(r.json?.error || "").slice(0, 40)}`);
+  ok(`#147 threat-scan blocks url ${url}`, r.status >= 400 && r.status < 500 && r.status !== 429, `${r.status} ${(r.json?.error || "").slice(0, 40)}`);
 }
 
 // --- #148: the busy check must not mask a caller's own mistake --------------

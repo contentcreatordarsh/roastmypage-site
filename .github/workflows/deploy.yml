@@ -25,7 +25,7 @@ jobs:
     name: Unit tests + bundle validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -42,7 +42,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -74,7 +74,7 @@ jobs:
       name: staging
       url: https://roast-my-landing-page-test.falling-hall-ac41.workers.dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -97,7 +97,7 @@ jobs:
       name: production
       url: https://roastmypage.site
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
