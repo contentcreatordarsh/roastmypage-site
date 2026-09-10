@@ -2557,6 +2557,7 @@ data: ${JSON.stringify(data)}
         const body = await request.json();
         let targetDomain;
         let brandName;
+        let securityTargetUrl;
         if (body.url) {
           const sanitizedUrl = sanitizeUrl(body.url);
           if (!sanitizedUrl) {
@@ -2569,6 +2570,7 @@ data: ${JSON.stringify(data)}
             const parsedUrl = new URL(sanitizedUrl);
             targetDomain = parsedUrl.hostname.replace("www.", "").toLowerCase();
             brandName = sanitizeHtml(targetDomain.split(".")[0]).slice(0, 50);
+            securityTargetUrl = sanitizedUrl;
           } catch {
             return Response.json({ error: "Invalid URL" }, { status: 400, headers: corsHeaders });
           }
@@ -2579,6 +2581,10 @@ data: ${JSON.stringify(data)}
           }
           targetDomain = cleanDomain.replace("www.", "");
           brandName = sanitizeHtml(targetDomain.split(".")[0]).slice(0, 50);
+          securityTargetUrl = `https://${targetDomain}`;
+          if (!isUrlSafeForFetching(securityTargetUrl)) {
+            return Response.json({ error: "Cannot scan internal/private domains" }, { status: 400, headers: corsHeaders });
+          }
         } else {
           return Response.json({ error: "URL or domain required" }, { status: 400, headers: corsHeaders });
         }
@@ -2597,7 +2603,7 @@ data: ${JSON.stringify(data)}
             return checkDomainRegistrations(variations);
           })(),
           // 2. Security headers check
-          checkSecurityHeaders(body.url || `https://${targetDomain}`),
+          checkSecurityHeaders(securityTargetUrl),
           // 3. Social media imposter scan
           scanSocialMediaImposters(brandName, targetDomain)
         ]);
