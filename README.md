@@ -19,7 +19,8 @@ The system is deployed as a single Cloudflare Worker, but it is structured modul
 
 The application's source code in `src/` is separated into focused modules:
 
-- **`index.js`**: The main entry point. Handles routing, API endpoints, CORS headers, and request orchestration.
+- **`index.js`**: The Worker entry point. Applies CORS/origin checks and dispatches to `src/routes/` handlers.
+- **`routes/`**: Feature-domain HTTP handlers (`roast`, `compare`, `batch`, `gallery`, `social`, `watchlist`, `platform`, `badges`, `threats`, `apiV1`, `ssr-routes`). Each exports `handle(request, env, ctx, url, corsHeaders)` and returns a `Response` or `null`.
 - **`config.js`**: Centralized configuration, constants, industry benchmarks, and origin definitions.
 - **`ai.js`**: Prompts and AI integration logic. Handles interactions with Cloudflare AI and parsing the AI responses into structured reports.
 - **`db.js`**: Database operations, queries for the gallery/leaderboard, and rate limiting logic.
