@@ -62,7 +62,8 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
         return {
           bind() {
             return {
-              first: async () => sql.includes("SELECT id, url") ? legacyRoast : { count: 1 }
+              first: async () => sql.includes("SELECT id, url") ? legacyRoast : { count: 1 },
+              all: async () => ({ results: sql.includes("SELECT id, url") ? [legacyRoast] : [] })
             };
           }
         };
@@ -81,6 +82,86 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
   assert.equal(cached.id, "legacy-1");
   assert.equal(cached.seo, null);
   assert.equal(cached.performance, null);
+});
+
+test("getCachedRoast falls back past a newer stored challenge roast", async () => {
+  const url = "https://cache-shadow.example/";
+  const urlHash = "shared-hash";
+  const validSeo = JSON.stringify({
+    score: 92,
+    title: { text: "Acme — Ship faster", length: 18, status: "good" },
+    video: { present: false, count: 0 }
+  });
+  const rows = [
+    {
+      id: "newer-challenge",
+      url,
+      url_hash: urlHash,
+      created_at: "2026-09-07T10:00:00.000Z",
+      overall_score: 4.2,
+      hero_score: 4,
+      cta_score: 4,
+      trust_score: 4,
+      copy_score: 5,
+      design_score: 4,
+      roast_response: "Roast of an interstitial",
+      quick_wins: "[]",
+      seo_data: JSON.stringify({
+        score: 75,
+        title: { text: "Just a moment...", length: 16, status: "short" },
+        video: { present: false, count: 0 }
+      }),
+      performance_data: '{"loadTime":500}',
+      heatmap_data: null,
+      industry: "other"
+    },
+    {
+      id: "older-valid",
+      url,
+      url_hash: urlHash,
+      created_at: "2026-09-07T09:00:00.000Z",
+      overall_score: 8.1,
+      hero_score: 8,
+      cta_score: 8,
+      trust_score: 8,
+      copy_score: 8,
+      design_score: 9,
+      roast_response: "Valid landing-page roast",
+      quick_wins: '["Clarify the CTA"]',
+      seo_data: validSeo,
+      performance_data: '{"loadTime":700}',
+      heatmap_data: null,
+      industry: "other"
+    }
+  ];
+  const queryTrace = {};
+  const env = {
+    DB: {
+      prepare(sql) {
+        if (sql.includes("SELECT id, url")) queryTrace.sql = sql;
+        return {
+          bind(hash, expiry) {
+            queryTrace.bindings = [hash, expiry];
+            return {
+              async all() {
+                const candidates = rows
+                  .filter((row) => row.url_hash === hash && row.created_at > expiry)
+                  .sort((left, right) => right.created_at.localeCompare(left.created_at));
+                return { results: candidates };
+              },
+              first: async () => null
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const cached = await getCachedRoast(env, urlHash, url);
+
+  assert.match(queryTrace.sql, /ORDER BY created_at DESC/);
+  assert.doesNotMatch(queryTrace.sql, /LIMIT 1/);
+  assert.equal(cached?.id, "older-valid");
 });
 
 test("releaseApiV1Quota atomically restores a reserved daily quota", async () => {

@@ -112,10 +112,21 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
     }
   }
   const cacheExpiry = new Date(Date.now() - cacheTTLHours * 60 * 60 * 1e3);
-  const cached = await env22.DB.prepare(`
+  const candidates = await env22.DB.prepare(`
     SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry
-    FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC LIMIT 1
-  `).bind(urlHash, cacheExpiry.toISOString()).first();
+    FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC
+  `).bind(urlHash, cacheExpiry.toISOString()).all();
+  const cached = (candidates.results || []).find((candidate) => {
+    if (requireAuditData && (!candidate.seo_data || !candidate.performance_data)) return false;
+    if (isStoredChallengeRoast(candidate.seo_data)) return false;
+    if (!requireAuditData) return true;
+    try {
+      const seo = JSON.parse(candidate.seo_data);
+      return seo && Object.prototype.hasOwnProperty.call(seo, "video");
+    } catch {
+      return false;
+    }
+  });
   if (!cached) return null;
   // By default, self-heal legacy rows that would render blank audit cards.
   // Callers that cannot persist a recapture may opt into the incomplete row.

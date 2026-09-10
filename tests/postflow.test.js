@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CONFIG } from "../src/config.js";
 import { checkOperationRateLimit, getCachedRoast } from "../src/db.js";
+import worker from "../src/index.js";
 
 // #22 — integration-style coverage for the POST roast/compare/batch path. These exercise
 // the real db.js logic against a minimal D1 stub (no network, no live worker), so the
@@ -10,11 +11,15 @@ import { checkOperationRateLimit, getCachedRoast } from "../src/db.js";
 // Minimal D1 statement/DB stub: prepare().bind().run() / .first().
 // firstVal may be a value or a () => value factory (evaluated per .first() call).
 function makeStmt(firstVal) {
+  const value = () => (typeof firstVal === "function" ? firstVal() : firstVal);
   const stmt = {
     bind: () => stmt,
     run: async () => ({ success: true, meta: {} }),
-    first: async () => (typeof firstVal === "function" ? firstVal() : firstVal),
-    all: async () => ({ results: [] })
+    first: async () => value(),
+    all: async () => {
+      const result = value();
+      return { results: result == null ? [] : [result] };
+    }
   };
   return stmt;
 }
@@ -45,6 +50,81 @@ test("checkOperationRateLimit applies the tighter batch limit for the batch oper
   const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_BATCH_MAX + 1, window_start: new Date().toISOString() }) };
   const blocked = await checkOperationRateLimit(env, "ip-hash", "batch");
   assert.equal(blocked.allowed, false);
+});
+
+test("cached batch roasts do not consume the global browser-session budget", async () => {
+  const kvWrites = [];
+  const cachedRoast = {
+    id: "cached-batch",
+    url: "https://example.com/",
+    url_hash: "hash",
+    overall_score: 7.5,
+    hero_score: 8,
+    cta_score: 7,
+    trust_score: 7,
+    copy_score: 8,
+    design_score: 7.5,
+    roast_response: "Cached roast",
+    quick_wins: "[]",
+    seo_data: JSON.stringify({ score: 80, video: { present: false, count: 0 } }),
+    performance_data: JSON.stringify({ score: 75 }),
+    heatmap_data: "{}",
+    industry: "other"
+  };
+  const env = {
+    ENVIRONMENT: "development",
+    IP_HASH_SALT: "test-salt",
+    CONFIG: {
+      get: async () => "0",
+      put: async (...args) => kvWrites.push(args)
+    },
+    DB: {
+      prepare(sql) {
+        const stmt = {
+          bind() {
+            return stmt;
+          },
+          run: async () => ({ success: true }),
+          async all() {
+            if (sql.includes("SELECT id, url, url_hash")) return { results: [cachedRoast] };
+            throw new Error(`Unexpected all query: ${sql}`);
+          },
+          async first() {
+            if (sql.includes("SELECT request_count, window_start")) {
+              return { request_count: 1, window_start: new Date().toISOString() };
+            }
+            if (sql.includes("SELECT id, url, url_hash")) return cachedRoast;
+            if (sql.includes("SELECT COUNT(*) as count")) return { count: 1 };
+            throw new Error(`Unexpected query: ${sql}`);
+          }
+        };
+        return stmt;
+      }
+    }
+  };
+  const request = new Request("https://roastmypage.site/api/batch-roast", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "CF-Connecting-IP": "203.0.113.10"
+    },
+    body: JSON.stringify({
+      urls: ["https://example.com", "https://example.com", "https://example.com"]
+    })
+  });
+
+  const response = await worker.fetch(request, env, {
+    waitUntil() {
+      throw new Error("Cache hits must not schedule background work");
+    }
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.results.length, 3);
+  assert.equal(body.results.every((result) => result.cached), true);
+  assert.equal(kvWrites.length, 1);
+  assert.deepEqual(kvWrites[0][2], { expirationTtl: 7200 });
 });
 
 // --- getCachedRoast: self-heal (#89) — never serve an incomplete cached roast ---
@@ -97,4 +177,77 @@ test("getCachedRoast returns null on a genuine cache miss", async () => {
   const env = { DB: mockDb(null) };
   const result = await getCachedRoast(env, "h", "https://example.com");
   assert.equal(result, null);
+});
+
+test("invalid expensive POSTs do not consume the shared hourly capacity", async () => {
+  const globalWrites = [];
+  const env = {
+    DB: mockDb({ request_count: 0 }),
+    CONFIG: {
+      get: async () => "0",
+      put: async (...args) => globalWrites.push(args)
+    },
+    IP_HASH_SALT: "test-salt",
+    ENVIRONMENT: "development"
+  };
+  const cases = [
+    ["/api/roast", {}],
+    ["/api/compare", {}],
+    ["/api/batch-roast", { urls: [] }],
+    ["/api/roast-stream", {}],
+    ["/api/threat-scan", {}],
+    ["/api/tech-scan", {}],
+    ["/api/v1/roast", {}]
+  ];
+
+  for (const [pathname, body] of cases) {
+    const response = await worker.fetch(
+      new Request(`https://roastmypage.site${pathname}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "203.0.113.10"
+        },
+        body: JSON.stringify(body)
+      }),
+      env,
+      { waitUntil() {} }
+    );
+    assert.equal(response.status, 400, pathname);
+  }
+
+  assert.equal(globalWrites.length, 0);
+});
+
+test("per-IP throttling runs before the shared hourly capacity check", async () => {
+  const globalWrites = [];
+  const now = new Date().toISOString();
+  const env = {
+    DB: mockDb({
+      request_count: CONFIG.RATE_LIMIT_MAX_REQUESTS + 1,
+      window_start: now
+    }),
+    CONFIG: {
+      get: async () => "0",
+      put: async (...args) => globalWrites.push(args)
+    },
+    IP_HASH_SALT: "test-salt",
+    ENVIRONMENT: "development"
+  };
+
+  const response = await worker.fetch(
+    new Request("https://roastmypage.site/api/roast", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "CF-Connecting-IP": "203.0.113.10"
+      },
+      body: JSON.stringify({ url: "https://example.com" })
+    }),
+    env,
+    { waitUntil() {} }
+  );
+
+  assert.equal(response.status, 429);
+  assert.equal(globalWrites.length, 0);
 });

@@ -24,7 +24,10 @@ import {
 
 import { capturePageWithMetrics } from './puppeteer.js';
 
-import { isBotChallengeError, BOT_CHALLENGE_MESSAGE } from './botcheck.js';
+import {
+    isBotChallengeError, isStoredChallengeRoast, BOT_CHALLENGE_MESSAGE,
+    CHALLENGE_TITLE_PREFIXES
+} from './botcheck.js';
 
 import { getComparisonMetrics, hasMetricPair } from './compare.js';
 
@@ -62,6 +65,21 @@ const inFlightRequests = new Set();
 
 const OWNER_KEY_RE = /^[a-zA-Z0-9_-]{8,64}$/;
 
+function visibleStoredRoasts(rows = []) {
+  return rows
+    .filter((roast) => !isStoredChallengeRoast(roast?.seo_data))
+    .map(({ seo_data: _seoData, ...roast }) => roast);
+}
+
+function visibleStoredRoastSql(alias = "") {
+  const column = alias ? `${alias}.seo_data` : "seo_data";
+  const title = `LOWER(LTRIM(COALESCE(json_extract(${column}, '$.title.text'), '')))`;
+  const exclusions = CHALLENGE_TITLE_PREFIXES
+    .map((prefix) => `${title} NOT LIKE '${prefix.replaceAll("'", "''")}%'`)
+    .join(" AND ");
+  return `(CASE WHEN ${column} IS NULL OR json_valid(${column}) = 0 THEN 1 ELSE ${exclusions} END)`;
+}
+
 export default {
     async fetch(request, env22, ctx) {
     const url = new URL(request.url);
@@ -81,13 +99,6 @@ export default {
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
@@ -108,6 +119,13 @@ export default {
           return Response.json(
             { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
@@ -232,13 +250,6 @@ export default {
     }
     if (url.pathname === "/api/compare" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
@@ -259,6 +270,13 @@ export default {
           return Response.json(
             { error: `Compare rate limit exceeded (${CONFIG.RATE_LIMIT_COMPARE_MAX}/hour). Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: corsHeaders }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         const [hash1, hash2] = await Promise.all([
@@ -542,13 +560,6 @@ export default {
     }
     if (url.pathname === "/api/batch-roast" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
@@ -571,7 +582,13 @@ export default {
             { status: 429, headers: corsHeaders }
           );
         }
-        await trackBrowserUsage(env22, validUrls.length);
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
+          );
+        }
         const results = [];
         const errors = [];
         for (const targetUrl of validUrls) {
@@ -583,6 +600,7 @@ export default {
               continue;
             }
             const roastId = generateId();
+            await trackBrowserUsage(env22, 1);
             const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
             if (pageData.screenshot.length > CONFIG.MAX_SCREENSHOT_BYTES) throw new Error("Screenshot too large");
             const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
@@ -652,13 +670,6 @@ export default {
     }
     if (url.pathname === "/api/roast-stream" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
@@ -678,6 +689,13 @@ export default {
           return Response.json(
             { error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn },
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
+          );
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
@@ -821,7 +839,7 @@ data: ${JSON.stringify(data)}
         return Response.json({ error: "Invalid roast ID" }, { status: 400, headers: corsHeaders });
       }
       const roast = await env22.DB.prepare("SELECT * FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return Response.json({ error: "Roast not found" }, { status: 404, headers: corsHeaders });
       }
       if (roast.seo_data) {
@@ -839,9 +857,10 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/recent" && request.method === "GET") {
       const roasts = await env22.DB.prepare(
-        "SELECT id, url, overall_score, created_at FROM roasts ORDER BY created_at DESC LIMIT 10"
+        `SELECT id, url, overall_score, created_at, seo_data FROM roasts
+         WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT 10`
       ).all();
-      return Response.json(roasts.results, { headers: corsHeaders });
+      return Response.json(visibleStoredRoasts(roasts.results), { headers: corsHeaders });
     }
     if (url.pathname === "/api/gallery" && request.method === "GET") {
       const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
@@ -852,13 +871,13 @@ data: ${JSON.stringify(data)}
       const industryParam = url.searchParams.get("industry");
       const industryFilter = industryParam && INDUSTRY_KEYS.includes(industryParam) ? industryParam : null;
       const roasts = industryFilter ? await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
-        FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
+        FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(industryFilter, perPage, offset).all() : await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
-        FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
+        FROM roasts WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
       `).bind(perPage, offset).all();
-      const results = roasts.results.map((roast) => ({
+      const results = visibleStoredRoasts(roasts.results).map((roast) => ({
         ...roast,
         screenshotUrl: `/api/screenshot/${roast.id}`,
         hostname: new URL(roast.url).hostname
@@ -867,7 +886,8 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/stats" && request.method === "GET") {
       const stats = await env22.DB.prepare(`
-        SELECT COUNT(*) as total_roasts, AVG(overall_score) as avg_score, MAX(created_at) as last_roast FROM roasts
+        SELECT COUNT(*) as total_roasts, AVG(overall_score) as avg_score, MAX(created_at) as last_roast
+        FROM roasts WHERE ${visibleStoredRoastSql()}
       `).first();
       const visitorCountry = request.headers.get("CF-IPCountry") || "XX";
       let recentCountries = [];
@@ -898,12 +918,13 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/live-activity" && request.method === "GET") {
       try {
         const recentRoasts = await env22.DB.prepare(`
-          SELECT id, url, overall_score, country, created_at
+          SELECT id, url, overall_score, country, created_at, seo_data
           FROM roasts 
+          WHERE ${visibleStoredRoastSql()}
           ORDER BY created_at DESC 
           LIMIT 20
         `).all();
-        const activity = recentRoasts.results.map((roast) => {
+        const activity = visibleStoredRoasts(recentRoasts.results).map((roast) => {
           let hostname = "unknown";
           try {
             hostname = new URL(roast.url).hostname.replace(/^www\./, "");
@@ -933,6 +954,7 @@ data: ${JSON.stringify(data)}
             COUNT(*) as total,
             SUM(CASE WHEN created_at > datetime('now', '-24 hours') THEN 1 ELSE 0 END) as today
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         `).first();
         return Response.json({
           activity,
@@ -1089,6 +1111,11 @@ data: ${JSON.stringify(data)}
             error: "Webhook must be a Slack or Discord HTTPS webhook URL"
           }, { status: 400, headers: corsHeaders });
         }
+        if (email && (!env22.EMAIL || typeof env22.EMAIL.send !== "function")) {
+          return Response.json({
+            error: "Email alerts are not configured. Use a Slack or Discord webhook instead."
+          }, { status: 503, headers: corsHeaders });
+        }
         if (!email && !webhookUrl) {
           return Response.json({
             error: "Add an email and/or Slack/Discord webhook to receive score-change alerts"
@@ -1231,8 +1258,8 @@ data: ${JSON.stringify(data)}
       if (!isValidRoastIdLoose(roastId)) {
         return new Response("Invalid roast ID", { status: 400, headers: corsHeaders });
       }
-      const roast = await env22.DB.prepare("SELECT overall_score, url FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      const roast = await env22.DB.prepare("SELECT overall_score, url, seo_data FROM roasts WHERE id = ?").bind(roastId).first();
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = roast.overall_score;
@@ -1274,13 +1301,13 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/leaderboard" && request.method === "GET") {
       const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
         FROM roasts 
-        WHERE overall_score >= 7
+        WHERE overall_score >= 7 AND ${visibleStoredRoastSql()}
         ORDER BY overall_score DESC, created_at DESC 
         LIMIT 10
       `).all();
-      const results = roasts.results.map((roast) => ({
+      const results = visibleStoredRoasts(roasts.results).map((roast) => ({
         id: roast.id,
         hostname: new URL(roast.url).hostname,
         score: roast.overall_score,
@@ -1299,13 +1326,13 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/leaderboard/shame" && request.method === "GET") {
       try {
         const roasts = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
           FROM roasts 
-          WHERE overall_score <= 4
+          WHERE overall_score <= 4 AND ${visibleStoredRoastSql()}
           ORDER BY overall_score ASC, created_at DESC 
           LIMIT 20
         `).all();
-        const results = roasts.results.map((roast) => {
+        const results = visibleStoredRoasts(roasts.results).map((roast) => {
           let hostname = "unknown";
           try {
             hostname = new URL(roast.url).hostname.replace(/^www\./, "");
@@ -1338,13 +1365,16 @@ data: ${JSON.stringify(data)}
         const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 50);
         const offset = (page - 1) * limit;
         const roasts = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at, seo_data
           FROM roasts 
+          WHERE ${visibleStoredRoastSql()}
           ORDER BY created_at DESC 
           LIMIT ? OFFSET ?
         `).bind(limit, offset).all();
-        const total = await env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first();
-        const results = roasts.results.map((roast) => {
+        const total = await env22.DB.prepare(
+          `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
+        ).first();
+        const results = visibleStoredRoasts(roasts.results).map((roast) => {
           let hostname = "unknown";
           try {
             hostname = new URL(roast.url).hostname.replace(/^www\./, "");
@@ -1429,8 +1459,8 @@ data: ${JSON.stringify(data)}
           });
         }
       }
-      const roast = await env22.DB.prepare("SELECT overall_score, url, hero_score, cta_score, trust_score, copy_score, design_score FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      const roast = await env22.DB.prepare("SELECT overall_score, url, hero_score, cta_score, trust_score, copy_score, design_score, seo_data FROM roasts WHERE id = ?").bind(roastId).first();
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = roast.overall_score;
@@ -1525,9 +1555,9 @@ data: ${JSON.stringify(data)}
         return new Response("Invalid roast ID", { status: 400, headers: corsHeaders });
       }
       const roast = await env22.DB.prepare(
-        "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at FROM roasts WHERE id = ?"
+        "SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data FROM roasts WHERE id = ?"
       ).bind(roastId).first();
-      if (!roast) {
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = parseFloat(roast.overall_score) || 0;
@@ -1725,13 +1755,13 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/leaderboard/weekly" && request.method === "GET") {
       const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
         FROM roasts 
-        WHERE created_at > datetime('now', '-7 days')
+        WHERE created_at > datetime('now', '-7 days') AND ${visibleStoredRoastSql()}
         ORDER BY overall_score DESC, created_at DESC 
         LIMIT 20
       `).all();
-      const results = roasts.results.map((roast, index) => {
+      const results = visibleStoredRoasts(roasts.results).map((roast, index) => {
         let hostname = "unknown";
         try {
           hostname = new URL(roast.url).hostname.replace("www.", "");
@@ -1761,7 +1791,7 @@ data: ${JSON.stringify(data)}
           ROUND(AVG(overall_score), 1) as avg_score,
           MAX(overall_score) as top_score
         FROM roasts 
-        WHERE created_at > datetime('now', '-7 days')
+        WHERE created_at > datetime('now', '-7 days') AND ${visibleStoredRoastSql()}
       `).first();
       return Response.json({
         leaderboard: results,
@@ -1771,12 +1801,13 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/leaderboard/alltime" && request.method === "GET") {
       const roasts = await env22.DB.prepare(`
-        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
+        SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at, seo_data
         FROM roasts 
+        WHERE ${visibleStoredRoastSql()}
         ORDER BY overall_score DESC, created_at DESC 
         LIMIT 20
       `).all();
-      const results = roasts.results.map((roast, index) => {
+      const results = visibleStoredRoasts(roasts.results).map((roast, index) => {
         let hostname = "unknown";
         try {
           hostname = new URL(roast.url).hostname.replace("www.", "");
@@ -1810,7 +1841,7 @@ data: ${JSON.stringify(data)}
       const roasts = await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, created_at
         FROM roasts 
-        WHERE url_hash = ?
+        WHERE url_hash = ? AND ${visibleStoredRoastSql()}
         ORDER BY created_at ASC
       `).bind(urlHashParam).all();
       if (!roasts.results || roasts.results.length === 0) {
@@ -1869,6 +1900,7 @@ data: ${JSON.stringify(data)}
             ROW_NUMBER() OVER (PARTITION BY url_hash ORDER BY created_at ASC) as first_roast,
             ROW_NUMBER() OVER (PARTITION BY url_hash ORDER BY created_at DESC) as latest_roast
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         ),
         first_scores AS (
           SELECT url_hash, url, overall_score as first_score, id as first_id, created_at as first_date
@@ -1962,7 +1994,7 @@ data: ${JSON.stringify(data)}
       const likeClauses = featuredDomains.map(() => `(url LIKE ?)`).join(" OR ");
       const likeParams = featuredDomains.map((d) => `%${d}%`);
       const featured = await env22.DB.prepare(`
-        SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.created_at
+        SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.created_at, r.seo_data
         FROM roasts r
         INNER JOIN (
           SELECT url, MAX(created_at) as latest
@@ -1970,21 +2002,22 @@ data: ${JSON.stringify(data)}
           WHERE ${likeClauses}
           GROUP BY url
         ) latest ON r.url = latest.url AND r.created_at = latest.latest
+        WHERE ${visibleStoredRoastSql("r")}
         ORDER BY r.overall_score DESC
         LIMIT 12
       `).bind(...likeParams).all();
-      let results = featured.results || [];
+      let results = visibleStoredRoasts(featured.results);
       if (results.length < 6) {
         const existingIds = results.map((r) => r.id);
         const excludeClause = existingIds.length > 0 ? `AND id NOT IN (${existingIds.map(() => "?").join(",")})` : "";
         const padding = await env22.DB.prepare(`
-          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
           FROM roasts
-          WHERE overall_score > 0 ${excludeClause}
+          WHERE overall_score > 0 AND ${visibleStoredRoastSql()} ${excludeClause}
           ORDER BY overall_score DESC, created_at DESC
           LIMIT ?
         `).bind(...existingIds, 12 - results.length).all();
-        results = [...results, ...padding.results || []];
+        results = [...results, ...visibleStoredRoasts(padding.results)];
       }
       const formatted = results.map((r) => {
         let hostname = "";
@@ -2016,8 +2049,8 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname.match(/^\/api\/badge\/[^/]+\/large$/) && request.method === "GET") {
       const roastId = url.pathname.split("/")[3];
-      const roast = await env22.DB.prepare("SELECT overall_score, url FROM roasts WHERE id = ?").bind(roastId).first();
-      if (!roast) {
+      const roast = await env22.DB.prepare("SELECT overall_score, url, seo_data FROM roasts WHERE id = ?").bind(roastId).first();
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response("Roast not found", { status: 404, headers: corsHeaders });
       }
       const score = roast.overall_score;
@@ -2071,7 +2104,7 @@ data: ${JSON.stringify(data)}
               MAX(overall_score) as best_score,
               MIN(overall_score) as worst_score
             FROM roasts
-            WHERE industry IS NOT NULL
+            WHERE industry IS NOT NULL AND ${visibleStoredRoastSql()}
             GROUP BY industry
             ORDER BY count DESC
           `).all();
@@ -2084,6 +2117,7 @@ data: ${JSON.stringify(data)}
               WHERE industry = ?
               AND seo_data IS NOT NULL
               AND performance_data IS NOT NULL
+              AND ${visibleStoredRoastSql()}
             `).bind(ind).all();
             let seoSum = 0, perfSum = 0, a11ySum = 0, validCount = 0;
             for (const row of detailScores.results) {
@@ -2164,12 +2198,12 @@ data: ${JSON.stringify(data)}
             MAX(overall_score) as best_score,
             MIN(overall_score) as worst_score
           FROM roasts
-          WHERE industry = ?
+          WHERE industry = ? AND ${visibleStoredRoastSql()}
         `).bind(normalizedIndustry).first();
         const topPages = await env22.DB.prepare(`
           SELECT id, url, overall_score, created_at
           FROM roasts
-          WHERE industry = ? AND overall_score IS NOT NULL
+          WHERE industry = ? AND overall_score IS NOT NULL AND ${visibleStoredRoastSql()}
           ORDER BY overall_score DESC
           LIMIT 5
         `).bind(normalizedIndustry).all();
@@ -2179,6 +2213,7 @@ data: ${JSON.stringify(data)}
           WHERE industry = ?
           AND seo_data IS NOT NULL
           AND performance_data IS NOT NULL
+          AND ${visibleStoredRoastSql()}
         `).bind(normalizedIndustry).all();
         let seoSum = 0, perfSum = 0, a11ySum = 0, validCount = 0;
         for (const row of detailScores.results) {
@@ -2241,6 +2276,7 @@ data: ${JSON.stringify(data)}
             END as range,
             COUNT(*) as count
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
           GROUP BY range
           ORDER BY range DESC
         `).all();
@@ -2252,6 +2288,7 @@ data: ${JSON.stringify(data)}
             ROUND(AVG(copy_score), 1) as copy,
             ROUND(AVG(design_score), 1) as design
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         `).first();
         const topDomains = await env22.DB.prepare(`
           SELECT 
@@ -2260,6 +2297,7 @@ data: ${JSON.stringify(data)}
             ROUND(AVG(overall_score), 1) as avg_score,
             MAX(overall_score) as best_score
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
           GROUP BY url
           ORDER BY roast_count DESC
           LIMIT 10
@@ -2267,6 +2305,7 @@ data: ${JSON.stringify(data)}
         const recentActivity = await env22.DB.prepare(`
           SELECT id, url, overall_score, created_at
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
           ORDER BY created_at DESC
           LIMIT 10
         `).all();
@@ -2276,7 +2315,7 @@ data: ${JSON.stringify(data)}
             COUNT(*) as count,
             ROUND(AVG(overall_score), 1) as avg_score
           FROM roasts
-          WHERE created_at > datetime('now', '-7 days')
+          WHERE created_at > datetime('now', '-7 days') AND ${visibleStoredRoastSql()}
           GROUP BY DATE(created_at)
           ORDER BY date ASC
         `).all();
@@ -2288,12 +2327,15 @@ data: ${JSON.stringify(data)}
             MIN(overall_score) as lowest_score,
             COUNT(DISTINCT url) as unique_urls
           FROM roasts
+          WHERE ${visibleStoredRoastSql()}
         `).first();
         const bestPage = await env22.DB.prepare(`
-          SELECT url, overall_score FROM roasts ORDER BY overall_score DESC LIMIT 1
+          SELECT url, overall_score FROM roasts
+          WHERE ${visibleStoredRoastSql()} ORDER BY overall_score DESC LIMIT 1
         `).first();
         const worstPage = await env22.DB.prepare(`
-          SELECT url, overall_score FROM roasts ORDER BY overall_score ASC LIMIT 1
+          SELECT url, overall_score FROM roasts
+          WHERE ${visibleStoredRoastSql()} ORDER BY overall_score ASC LIMIT 1
         `).first();
         const formattedDomains = topDomains.results.map((d) => {
           try {
@@ -2515,15 +2557,12 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/threat-scan" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
         let targetDomain;
         let brandName;
+        let securityTargetUrl;
         if (body.url) {
           const sanitizedUrl = sanitizeUrl(body.url);
           if (!sanitizedUrl) {
@@ -2536,6 +2575,7 @@ data: ${JSON.stringify(data)}
             const parsedUrl = new URL(sanitizedUrl);
             targetDomain = parsedUrl.hostname.replace("www.", "").toLowerCase();
             brandName = sanitizeHtml(targetDomain.split(".")[0]).slice(0, 50);
+            securityTargetUrl = sanitizedUrl;
           } catch {
             return Response.json({ error: "Invalid URL" }, { status: 400, headers: corsHeaders });
           }
@@ -2546,12 +2586,20 @@ data: ${JSON.stringify(data)}
           }
           targetDomain = cleanDomain.replace("www.", "");
           brandName = sanitizeHtml(targetDomain.split(".")[0]).slice(0, 50);
+          securityTargetUrl = `https://${targetDomain}`;
+          if (!isUrlSafeForFetching(securityTargetUrl)) {
+            return Response.json({ error: "Cannot scan internal/private domains" }, { status: 400, headers: corsHeaders });
+          }
         } else {
           return Response.json({ error: "URL or domain required" }, { status: 400, headers: corsHeaders });
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
         if (!rateLimit.allowed) {
           return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const [typosquats, securityGrade, socialImposters] = await Promise.all([
           // 1. Generate and check typosquats
@@ -2560,7 +2608,7 @@ data: ${JSON.stringify(data)}
             return checkDomainRegistrations(variations);
           })(),
           // 2. Security headers check
-          checkSecurityHeaders(body.url || `https://${targetDomain}`),
+          checkSecurityHeaders(securityTargetUrl),
           // 3. Social media imposter scan
           scanSocialMediaImposters(brandName, targetDomain)
         ]);
@@ -2616,10 +2664,6 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/tech-scan" && request.method === "POST") {
       try {
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
-        }
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const ipHash = await hashIp(clientIp, env22.IP_HASH_SALT, env22.ENVIRONMENT);
         const body = await request.json();
@@ -2633,6 +2677,10 @@ data: ${JSON.stringify(data)}
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
         if (!rateLimit.allowed) {
           return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const cacheKey = `tech-scan:${await hashUrl(sanitizedUrl)}`;
         const cached = await env22.CONFIG.get(cacheKey);
@@ -2799,7 +2847,7 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
       let quotaReservationIpHash = null;
-      // Remembers a reservation we deliberately charged (once Browser Rendering
+      // Remembers the quota we deliberately charged (once Browser Rendering
       // started) so specific failure modes can still hand it back.
       let quotaChargedIpHash = null;
       try {
@@ -2831,17 +2879,6 @@ data: ${JSON.stringify(data)}
             }
           });
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({
-            success: false,
-            error: "service_busy",
-            message: "The roasting service is at capacity. Please try again in a few minutes."
-          }, {
-            status: 503,
-            headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
-          });
-        }
         const body = await request.json();
         const rawUrl = body.url;
         const device = ["desktop", "tablet", "mobile"].includes(body.device || "") ? body.device : "desktop";
@@ -2867,27 +2904,17 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
-        const quota = await consumeApiV1Quota(env22, ipHash);
-        if (!quota.allowed) {
-          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
           return Response.json({
             success: false,
-            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
-            message: quota.error,
-            limits: {
-              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
-              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
-            }
+            error: "service_busy",
+            message: "The roasting service is at capacity. Please try again in a few minutes."
           }, {
-            status: statusCode,
-            headers: {
-              ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
-              "Retry-After": String(secondsUntilMidnightUTC())
-            }
+            status: 503,
+            headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
           });
         }
-        quotaReservationIpHash = ipHash;
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
@@ -2917,19 +2944,37 @@ data: ${JSON.stringify(data)}
           }, {
             headers: {
               ...apiV1CorsHeaders,
-              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              ...apiV1RateLimitHeaders(rateLimits.ipCount, rateLimits.globalCount),
               "X-Cache": "HIT"
             }
           });
-          quotaReservationIpHash = null;
           return response;
         }
+        const quota = await consumeApiV1Quota(env22, ipHash);
+        if (!quota.allowed) {
+          const statusCode = quota.errorType === "global_limit" ? 503 : 429;
+          return Response.json({
+            success: false,
+            error: quota.errorType === "global_limit" ? "global_limit_exceeded" : "rate_limit_exceeded",
+            message: quota.error,
+            limits: {
+              perIp: { limit: API_V1_LIMITS.PER_IP_DAILY, used: quota.ipCount, remaining: Math.max(0, API_V1_LIMITS.PER_IP_DAILY - quota.ipCount) },
+              global: { limit: API_V1_LIMITS.GLOBAL_DAILY, used: quota.globalCount, remaining: Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - quota.globalCount) }
+            }
+          }, {
+            status: statusCode,
+            headers: {
+              ...apiV1CorsHeaders,
+              ...apiV1RateLimitHeaders(quota.ipCount, quota.globalCount),
+              "Retry-After": String(secondsUntilMidnightUTC())
+            }
+          });
+        }
         // A cache miss is about to consume Browser Rendering capacity. From this
-        // point the reservation counts as an attempted roast even if the target
-        // page times out or produces an oversized screenshot; otherwise callers
-        // can intentionally fail captures forever without using per-IP quota.
-        quotaChargedIpHash = quotaReservationIpHash;
-        quotaReservationIpHash = null;
+        // point the quota stays charged even if the target page times out or
+        // produces an oversized screenshot; otherwise callers can intentionally
+        // fail captures forever without using per-IP quota.
+        quotaChargedIpHash = ipHash;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
         const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
@@ -3007,15 +3052,13 @@ data: ${JSON.stringify(data)}
             "X-Cache": "MISS"
           }
         });
-        quotaReservationIpHash = null;
         return response;
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         if (isBotChallengeError(error32)) {
           // Bot protection is detected within a couple of seconds and the caller
           // can do nothing about it, so refund rather than burning one of their
-          // few daily requests. This does not reopen the free-capture-burn hole:
-          // every other capture failure still stays charged.
+          // few daily requests. Every other capture failure still stays charged.
           quotaReservationIpHash = quotaChargedIpHash;
           return Response.json({
             success: false,
@@ -3052,11 +3095,14 @@ data: ${JSON.stringify(data)}
     if (url.pathname === "/sitemap.xml" && request.method === "GET") {
       try {
         const BASE_URL_SM = PRODUCTION_ORIGINS[0];
-        const totalResult = await env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first();
+        const totalResult = await env22.DB.prepare(
+          `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
+        ).first();
         const totalRoasts = totalResult?.count || 0;
         const galleryPages = Math.ceil(totalRoasts / 24);
         const roasts = await env22.DB.prepare(
-          "SELECT id, created_at FROM roasts ORDER BY created_at DESC LIMIT 50000"
+          `SELECT id, created_at, seo_data FROM roasts
+           WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT 50000`
         ).all();
         const now = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
         let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -3083,7 +3129,7 @@ data: ${JSON.stringify(data)}
   </url>`;
         }
         if (roasts.results) {
-          for (const roast of roasts.results) {
+          for (const roast of visibleStoredRoasts(roasts.results)) {
             const created = roast.created_at || now;
             const hasZ = /Z$/.test(created);
             const lastmod = (/* @__PURE__ */ new Date(hasZ ? created : (created + "Z"))).toISOString().split("T")[0];
@@ -3123,7 +3169,7 @@ data: ${JSON.stringify(data)}
                roast_response, quick_wins, seo_data, performance_data, heatmap_data, country, industry, created_at
         FROM roasts WHERE id = ?
       `).bind(roastId).first();
-      if (!roast) {
+      if (!roast || isStoredChallengeRoast(roast.seo_data)) {
         return new Response(generateNotFoundPage(BASE_URL), {
           status: 404,
           headers: { "Content-Type": "text/html; charset=utf-8", ...getSecurityHeaders(origin, env22.ENVIRONMENT) }
@@ -3165,7 +3211,9 @@ data: ${JSON.stringify(data)}
       const scoreDiffNum = parseFloat(scoreDiff);
       const isAboveAvg = scoreDiffNum > 0;
       const isAtAvg = Math.abs(scoreDiffNum) < 0.3;
-      const industryCountRow = await env22.DB.prepare(`SELECT COUNT(*) as cnt FROM roasts WHERE industry = ?`).bind(roastIndustryKey).first();
+      const industryCountRow = await env22.DB.prepare(
+        `SELECT COUNT(*) as cnt FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()}`
+      ).bind(roastIndustryKey).first();
       const industrySampleSize = industryCountRow?.cnt || 0;
       const sections = {};
       if (roast.roast_response) {
@@ -3205,7 +3253,9 @@ data: ${JSON.stringify(data)}
       const ogDesc = `AI analysis: Hero ${roast.hero_score}/10, CTA ${roast.cta_score}/10, Trust ${roast.trust_score}/10, Copy ${roast.copy_score}/10, Design ${roast.design_score}/10. Get your free roast!`;
       const ogImage = `${BASE_URL}/api/card/${roastId}`;
       const pageUrl = `${BASE_URL}/roast/${roastId}`;
-      const screenshotUrl = `${BASE_URL}/api/screenshot/${roastId}`;
+      // Keep page images on the request origin. Production is reachable from
+      // both the custom domain and workers.dev, while CSP img-src is 'self'.
+      const screenshotUrl = `/api/screenshot/${roastId}`;
       const categories = [
         { key: "hero", label: "Hero Section", score: roast.hero_score, color: "#8B5CF6", gradFrom: "from-purple-500/10", gradTo: "to-purple-600/5", borderColor: "border-purple-500/20", emoji: "\u{1F9B8}", question: "Is your headline clear, benefit-driven, and immediately compelling?", description: "The first thing visitors see \u2014 your headline, subheadline, and hero image. It must communicate your value in under 5 seconds or visitors bounce." },
         { key: "cta", label: "Call to Action", score: roast.cta_score, color: "#F97316", gradFrom: "from-orange-500/10", gradTo: "to-red-600/5", borderColor: "border-orange-500/20", emoji: "\u{1F3AF}", question: "Are your buttons visible, urgent, and impossible to miss?", description: "Your conversion buttons and links. Great CTAs are visually distinct, use action-oriented copy, and create urgency. This is where visitors become customers." },
@@ -3636,23 +3686,27 @@ data: ${JSON.stringify(data)}
       if (validIndustry) {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
-            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, created_at
-            FROM roasts WHERE industry = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, created_at, seo_data
+            FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
           `).bind(validIndustry, perPage, offset).all(),
-          env22.DB.prepare("SELECT COUNT(*) as count FROM roasts WHERE industry = ?").bind(validIndustry).first()
+          env22.DB.prepare(
+            `SELECT COUNT(*) as count FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()}`
+          ).bind(validIndustry).first()
         ]);
       } else {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
-            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at
-            FROM roasts ORDER BY created_at DESC LIMIT ? OFFSET ?
+            SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at, seo_data
+            FROM roasts WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
           `).bind(perPage, offset).all(),
-          env22.DB.prepare("SELECT COUNT(*) as count FROM roasts").first()
+          env22.DB.prepare(
+            `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
+          ).first()
         ]);
       }
       const total = totalResult?.count || 0;
       const totalPages = Math.ceil(total / perPage);
-      const roasts = roastsResult.results || [];
+      const roasts = visibleStoredRoasts(roastsResult.results);
       const industryMeta = validIndustry ? INDUSTRY_BENCHMARKS[validIndustry] : null;
       const galleryHtml = renderGalleryPage({
           roasts, total, page, totalPages,
