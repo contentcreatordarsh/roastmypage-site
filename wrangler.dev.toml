@@ -32,3 +32,6 @@ ENVIRONMENT = "development"
 BASE_URL = "http://localhost:8787"
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
+# Local-only admin token so /admin can be exercised without Wrangler secrets.
+# Do not copy this into wrangler.toml or production.
+ADMIN_SECRET = "local-dev-admin"
