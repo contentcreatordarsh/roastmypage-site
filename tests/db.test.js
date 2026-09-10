@@ -160,7 +160,7 @@ test("getCachedRoast falls back past a newer stored challenge roast", async () =
   const cached = await getCachedRoast(env, urlHash, url);
 
   assert.match(queryTrace.sql, /ORDER BY created_at DESC/);
-  assert.doesNotMatch(queryTrace.sql, /LIMIT 1/);
+  assert.match(queryTrace.sql, /LIMIT 25/);
   assert.equal(cached?.id, "older-valid");
 });
 
