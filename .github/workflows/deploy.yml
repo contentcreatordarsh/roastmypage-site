@@ -1,0 +1,144 @@
+name: Deploy
+
+# Staging first, production only if staging passes its smoke suite, and an
+# automatic rollback if production fails its own. Runs on every push to main,
+# so merging a batch is what ships it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys race each other onto the same worker.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  STAGING_URL: https://roast-my-landing-page-test.falling-hall-ac41.workers.dev
+  PRODUCTION_URL: https://roast-my-landing-page.falling-hall-ac41.workers.dev
+
+jobs:
+  test:
+    name: Unit tests + bundle validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Validate staging bundle
+        run: npx wrangler deploy --dry-run --outdir /tmp/build-staging
+      - name: Validate production bundle
+        run: npx wrangler deploy --env production --dry-run --outdir /tmp/build-production
+
+  binding-gate:
+    name: Production binding gate
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm ci
+      # The one mistake that would be genuinely expensive: shipping a build that
+      # points production at the dev database, bucket or KV namespace. Fail the
+      # pipeline before anything is uploaded.
+      - name: Assert production build carries no dev bindings
+        run: |
+          npx wrangler deploy --env production --dry-run 2>&1 | tee /tmp/prod-dryrun.txt
+          if grep -qE 'roast-db-dev|roast-screenshots-dev|a278379c19e0426298741337ed23a315|roast-my-landing-page-test' /tmp/prod-dryrun.txt; then
+            echo "::error::Dev binding found in the production build — refusing to deploy"
+            grep -nE 'roast-db-dev|roast-screenshots-dev|a278379c19e0426298741337ed23a315|roast-my-landing-page-test' /tmp/prod-dryrun.txt
+            exit 1
+          fi
+          for expected in 'roast-db (7b59df5c-8185-4562-b149-ae28ebf65dca)' 'roast-screenshots' 'a0e0cee4c5e54235a12ee8dcc262f41a' 'ENVIRONMENT: "production"'; do
+            grep -qF "$expected" /tmp/prod-dryrun.txt || { echo "::error::Expected production binding missing: $expected"; exit 1; }
+          done
+          echo "Production bindings verified."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  staging:
+    name: Deploy staging + smoke
+    needs: binding-gate
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://roast-my-landing-page-test.falling-hall-ac41.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Deploy staging worker
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Wait for propagation
+        run: sleep 15
+      - name: Smoke test staging
+        run: node scripts/smoke.mjs "$STAGING_URL"
+
+  production:
+    name: Deploy production + smoke
+    needs: staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://roastmypage.site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm ci
+
+      # Remember where to go back to before changing anything.
+      - name: Record rollback target
+        id: rollback
+        run: |
+          npx wrangler deployments list --env production > /tmp/deployments.txt 2>&1 || true
+          PREVIOUS=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/deployments.txt | tail -1)
+          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "Rollback target: ${PREVIOUS:-<none found>}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy production worker
+        run: npx wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Wait for propagation
+        run: sleep 15
+
+      # Smoke the worker through its workers.dev hostname, never roastmypage.site:
+      # the zone is behind bot protection that 403s CI, and a challenge 403 is
+      # indistinguishable from a real 4xx block — false failures and false passes.
+      - name: Smoke test production
+        id: smoke
+        run: node scripts/smoke.mjs "$PRODUCTION_URL"
+
+      - name: Roll back on smoke failure
+        if: failure() && steps.smoke.outcome == 'failure' && steps.rollback.outputs.previous != ''
+        run: |
+          echo "::error::Production smoke failed — rolling back to ${{ steps.rollback.outputs.previous }}"
+          npx wrangler rollback "${{ steps.rollback.outputs.previous }}" --env production --yes \
+            --message "Automatic rollback: post-deploy smoke suite failed on ${{ github.sha }}"
+          sleep 15
+          node scripts/smoke.mjs "$PRODUCTION_URL" || echo "::warning::Rollback target also fails smoke — investigate manually"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
