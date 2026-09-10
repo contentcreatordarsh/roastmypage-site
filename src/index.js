@@ -9,7 +9,8 @@ import {
     hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, 
     fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, 
     sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, secondsUntilMidnightUTC,
-    getAllowedOrigins, getSecurityHeaders
+    getAllowedOrigins, getSecurityHeaders, cloudflareAccountTag, cloudflareZoneTag,
+    hasCloudflareAnalyticsConfig
 } from './utils.js';
 
 import {
@@ -2423,31 +2424,35 @@ data: ${JSON.stringify(data)}
           }
         `;
         let cdnCurrent = null, cdnPrevious = null, workerCurrent = null, workerPrevious = null;
-        if (env22.ANALYTICS_API_TOKEN) {
+        if (hasCloudflareAnalyticsConfig(env22)) {
+          const zoneTag = cloudflareZoneTag(env22);
+          const accountTag = cloudflareAccountTag(env22);
           try {
             [cdnCurrent, cdnPrevious, workerCurrent, workerPrevious] = await Promise.all([
               queryCloudflareGraphQL(cdnQuery, {
-                zoneTag: env22.CF_ZONE_TAG || "",
+                zoneTag,
                 start: startTime24h,
                 end: endTime
               }, env22.ANALYTICS_API_TOKEN),
               queryCloudflareGraphQL(cdnQuery, {
-                zoneTag: env22.CF_ZONE_TAG || "",
+                zoneTag,
                 start: startTime48h,
                 end: startTime24h
               }, env22.ANALYTICS_API_TOKEN),
               queryCloudflareGraphQL(workerQuery, {
-                accountTag: env22.CF_ACCOUNT_TAG || "",
+                accountTag,
                 start: startTime24h,
                 end: endTime
               }, env22.ANALYTICS_API_TOKEN),
               queryCloudflareGraphQL(workerQuery, {
-                accountTag: env22.CF_ACCOUNT_TAG || "",
+                accountTag,
                 start: startTime48h,
                 end: startTime24h
               }, env22.ANALYTICS_API_TOKEN)
             ]);
           } catch(e) { console.error('CF GraphQL Error', e); }
+        } else if (env22.ANALYTICS_API_TOKEN) {
+          console.error("Skipping Cloudflare GraphQL analytics: CF_ACCOUNT_TAG / CF_ZONE_TAG missing");
         }
         const cdnRequests24h = cdnCurrent?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups?.[0]?.sum?.requests || 0;
         const cdnRequestsPrevious = cdnPrevious?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups?.[0]?.sum?.requests || 0;
@@ -2694,7 +2699,11 @@ data: ${JSON.stringify(data)}
         if (!env22.URL_SCANNER_TOKEN) {
           return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
         }
-        const accountId = env22.CF_ACCOUNT_TAG || "";
+        const accountId = cloudflareAccountTag(env22);
+        if (!accountId) {
+          console.error("URL Scanner skipped: CF_ACCOUNT_TAG missing");
+          return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
+        }
         const scanResponse = await fetch(
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/urlscanner/v2/scan`,
           {
@@ -2741,7 +2750,11 @@ data: ${JSON.stringify(data)}
         if (!env22.URL_SCANNER_TOKEN) {
           return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
         }
-        const accountId = env22.CF_ACCOUNT_TAG || "";
+        const accountId = cloudflareAccountTag(env22);
+        if (!accountId) {
+          console.error("URL Scanner skipped: CF_ACCOUNT_TAG missing");
+          return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
+        }
         const resultResponse = await fetch(
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/urlscanner/v2/result/${scanId}`,
           {

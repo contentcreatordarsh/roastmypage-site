@@ -361,5 +361,17 @@ function isUrlSafeForFetching(urlString) {
       const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
       return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
     }
+
+    // CF_ACCOUNT_TAG / CF_ZONE_TAG are identifiers, not credentials. Trim so a
+    // blank wrangler var cannot be treated as configured.
+    function cloudflareAccountTag(env22) {
+      return String(env22?.CF_ACCOUNT_TAG || "").trim();
+    }
+    function cloudflareZoneTag(env22) {
+      return String(env22?.CF_ZONE_TAG || "").trim();
+    }
+    function hasCloudflareAnalyticsConfig(env22) {
+      return Boolean(env22?.ANALYTICS_API_TOKEN && cloudflareAccountTag(env22) && cloudflareZoneTag(env22));
+    }
     
-export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, buildContentSecurityPolicy, getSecurityHeaders };
+export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, buildContentSecurityPolicy, getSecurityHeaders, cloudflareAccountTag, cloudflareZoneTag, hasCloudflareAnalyticsConfig };
