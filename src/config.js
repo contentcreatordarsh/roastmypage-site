@@ -41,6 +41,8 @@ const CONFIG = {
   // Threat scans per hour
   RATE_LIMIT_WATCHLIST_MAX: 30,
   // Watchlist add/check operations per hour
+  RATE_LIMIT_API_KEY_MAX: 5,
+  // API key minting per hour per IP
   MAX_WATCHLIST_ITEMS: 25,
   // Max competitor URLs per owner_key
   RATE_LIMIT_WINDOW_MINUTES: 60,
@@ -143,7 +145,13 @@ const DEV_ORIGINS = [
 
 const API_V1_LIMITS = {
   PER_IP_DAILY: 5,
-  GLOBAL_DAILY: 50
+  GLOBAL_DAILY: 50,
+  API_KEY_DAILY: 50,
+  API_KEY_DAILY_BY_TIER: {
+    free: 50,
+    pro: 250,
+    agency: 1000
+  }
 };
 
 export { POPULAR_DOMAINS, CONFIG, VIEWPORTS, RUBRIC_CRITERIA, INDUSTRY_BENCHMARKS, INDUSTRY_KEYS, PRODUCTION_ORIGINS, DEV_ORIGINS, API_V1_LIMITS };

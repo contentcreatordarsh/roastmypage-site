@@ -61,6 +61,35 @@ CREATE TABLE IF NOT EXISTS feedback (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Public API keys. The plaintext key is shown once at mint time; only the
+-- SHA-256 hash is stored. Anonymous v1 traffic still uses IP quotas below.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  key_hash TEXT NOT NULL UNIQUE,
+  key_prefix TEXT NOT NULL,
+  email TEXT NOT NULL,
+  tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro', 'agency')),
+  label TEXT,
+  daily_limit INTEGER NOT NULL DEFAULT 50,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_email ON api_keys(email);
+CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active);
+
+-- Per-key daily usage, kept separate from anonymous IP counters so keyed
+-- traffic does not consume the shared 50/day global anonymous pool.
+CREATE TABLE IF NOT EXISTS api_usage (
+  key_id TEXT NOT NULL,
+  day_key TEXT NOT NULL,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (key_id, day_key)
+);
+CREATE INDEX IF NOT EXISTS idx_api_usage_day ON api_usage(day_key);
+
 -- API v1 daily quotas are kept in D1 so increments and limit checks happen
 -- atomically. Old days remain queryable for audits and can be pruned safely.
 CREATE TABLE IF NOT EXISTS api_v1_counters (

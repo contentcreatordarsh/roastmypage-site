@@ -58,7 +58,8 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
     feedback: CONFIG.RATE_LIMIT_FEEDBACK_MAX,
     subscribe: CONFIG.RATE_LIMIT_SUBSCRIBE_MAX,
     threat: CONFIG.RATE_LIMIT_THREAT_MAX,
-    watchlist: CONFIG.RATE_LIMIT_WATCHLIST_MAX
+    watchlist: CONFIG.RATE_LIMIT_WATCHLIST_MAX,
+    apikey: CONFIG.RATE_LIMIT_API_KEY_MAX
   };
   const maxRequests = limits2[operation];
   const now = /* @__PURE__ */ new Date();
@@ -206,26 +207,28 @@ async function getApiV1Counts(env, ipHash) {
   };
 }
 
-function deniedApiV1Result(ipCount, globalCount) {
-  if (globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
+function deniedApiV1Result(ipCount, globalCount, { dailyLimit = API_V1_LIMITS.PER_IP_DAILY, includeGlobal = true } = {}) {
+  if (includeGlobal && globalCount >= API_V1_LIMITS.GLOBAL_DAILY) {
     return {
       allowed: false,
+      actorCount: ipCount,
       ipCount,
       globalCount,
       error: `The API has reached its daily capacity of ${API_V1_LIMITS.GLOBAL_DAILY} roasts. Please try again tomorrow.`,
       errorType: "global_limit"
     };
   }
-  if (ipCount >= API_V1_LIMITS.PER_IP_DAILY) {
+  if (ipCount >= dailyLimit) {
     return {
       allowed: false,
+      actorCount: ipCount,
       ipCount,
       globalCount,
-      error: `You've reached the daily limit of ${API_V1_LIMITS.PER_IP_DAILY} roasts. Please try again tomorrow.`,
-      errorType: "ip_limit"
+      error: `You've reached the daily limit of ${dailyLimit} roasts. Please try again tomorrow.`,
+      errorType: "daily_limit"
     };
   }
-  return { allowed: true, ipCount, globalCount };
+  return { allowed: true, actorCount: ipCount, ipCount, globalCount };
 }
 
 async function checkApiV1RateLimits(env, ipHash) {
@@ -236,11 +239,91 @@ async function checkApiV1RateLimits(env, ipHash) {
     console.error("API v1 rate limit check failed:", error);
     return {
       allowed: false,
+      actorCount: 0,
       ipCount: 0,
       globalCount: 0,
       error: "Rate limiting unavailable. Please try again later.",
       errorType: "global_limit"
     };
+  }
+}
+
+function getApiKeyDailyLimit(apiKey) {
+  if (!apiKey) return API_V1_LIMITS.PER_IP_DAILY;
+  if (Number(apiKey.dailyLimit) > 0) return Number(apiKey.dailyLimit);
+  return API_V1_LIMITS.API_KEY_DAILY_BY_TIER[apiKey.tier] || API_V1_LIMITS.API_KEY_DAILY;
+}
+
+async function getApiKeyUsageCount(env, keyId) {
+  const dayKey = getApiDayKey();
+  const row = await env.DB.prepare(
+    "SELECT request_count FROM api_usage WHERE key_id = ? AND day_key = ?"
+  ).bind(keyId, dayKey).first();
+  return Number(row?.request_count || 0);
+}
+
+async function checkApiKeyRateLimits(env, keyId, dailyLimit = API_V1_LIMITS.API_KEY_DAILY) {
+  try {
+    const used = await getApiKeyUsageCount(env, keyId);
+    return deniedApiV1Result(used, 0, { dailyLimit, includeGlobal: false });
+  } catch (error) {
+    console.error("API key rate limit check failed:", error);
+    return {
+      allowed: false,
+      actorCount: 0,
+      ipCount: 0,
+      globalCount: 0,
+      error: "Rate limiting unavailable. Please try again later.",
+      errorType: "global_limit"
+    };
+  }
+}
+
+async function consumeApiKeyQuota(env, keyId, dailyLimit = API_V1_LIMITS.API_KEY_DAILY) {
+  const dayKey = getApiDayKey();
+  try {
+    const reserved = await env.DB.prepare(`
+      INSERT INTO api_usage (key_id, day_key, request_count, updated_at)
+      VALUES (?, ?, 1, datetime('now'))
+      ON CONFLICT(key_id, day_key) DO UPDATE SET
+        request_count = api_usage.request_count + 1,
+        updated_at = datetime('now')
+      WHERE api_usage.request_count < ?
+      RETURNING request_count
+    `).bind(keyId, dayKey, dailyLimit).first();
+    const used = reserved
+      ? Number(reserved.request_count)
+      : await getApiKeyUsageCount(env, keyId);
+    if (!reserved) return deniedApiV1Result(used, 0, { dailyLimit, includeGlobal: false });
+    return { allowed: true, actorCount: used, ipCount: used, globalCount: 0 };
+  } catch (error) {
+    console.error("API key quota reservation failed:", error);
+    return {
+      allowed: false,
+      actorCount: 0,
+      ipCount: 0,
+      globalCount: 0,
+      error: "Rate limiting unavailable. Please try again later.",
+      errorType: "global_limit"
+    };
+  }
+}
+
+async function releaseApiKeyQuota(env, keyId) {
+  const dayKey = getApiDayKey();
+  try {
+    const result = await env.DB.prepare(`
+      UPDATE api_usage
+      SET request_count = request_count - 1,
+          updated_at = datetime('now')
+      WHERE key_id = ?
+        AND day_key = ?
+        AND request_count > 0
+    `).bind(keyId, dayKey).run();
+    return Number(result.meta?.changes || 0) > 0;
+  } catch (error) {
+    console.error("API key quota release failed:", error);
+    return false;
   }
 }
 
@@ -279,11 +362,12 @@ async function consumeApiV1Quota(env, ipHash) {
 
     const { ipCount, globalCount } = await getApiV1Counts(env, ipHash);
     if (!reserved) return deniedApiV1Result(ipCount, globalCount);
-    return { allowed: true, ipCount, globalCount };
+    return { allowed: true, actorCount: ipCount, ipCount, globalCount };
   } catch (error) {
     console.error("API v1 quota reservation failed:", error);
     return {
       allowed: false,
+      actorCount: 0,
       ipCount: 0,
       globalCount: 0,
       error: "Rate limiting unavailable. Please try again later.",
@@ -292,7 +376,10 @@ async function consumeApiV1Quota(env, ipHash) {
   }
 }
 
-async function releaseApiV1Quota(env, ipHash) {
+async function releaseApiV1Quota(env, actorKey) {
+  if (String(actorKey || "").startsWith("key:")) {
+    return releaseApiKeyQuota(env, actorKey.slice(4));
+  }
   const dayKey = getApiDayKey();
   try {
     const result = await env.DB.prepare(`
@@ -302,7 +389,7 @@ async function releaseApiV1Quota(env, ipHash) {
       WHERE day_key = ?
         AND ip_hash = ?
         AND request_count > 0
-    `).bind(dayKey, ipHash).run();
+    `).bind(dayKey, actorKey).run();
     return Number(result.meta?.changes || 0) > 0;
   } catch (error) {
     console.error("API v1 quota release failed:", error);
@@ -310,16 +397,34 @@ async function releaseApiV1Quota(env, ipHash) {
   }
 }
 
-function apiV1RateLimitHeaders(ipCount, globalCount) {
+function apiV1RateLimitHeaders(actorCount, globalCount, { dailyLimit = API_V1_LIMITS.PER_IP_DAILY, includeGlobal = true, tier } = {}) {
   const resetAt = /* @__PURE__ */ new Date();
   resetAt.setUTCHours(24, 0, 0, 0);
-  return {
-    "X-RateLimit-Limit": String(API_V1_LIMITS.PER_IP_DAILY),
-    "X-RateLimit-Remaining": String(Math.max(0, API_V1_LIMITS.PER_IP_DAILY - ipCount)),
+  const headers = {
+    "X-RateLimit-Limit": String(dailyLimit),
+    "X-RateLimit-Remaining": String(Math.max(0, dailyLimit - actorCount)),
     "X-RateLimit-Reset": String(Math.floor(resetAt.getTime() / 1e3)),
-    "X-RateLimit-Global-Limit": String(API_V1_LIMITS.GLOBAL_DAILY),
-    "X-RateLimit-Global-Remaining": String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount))
+    ...(tier ? { "X-RateLimit-Tier": tier } : {})
   };
+  if (includeGlobal) {
+    headers["X-RateLimit-Global-Limit"] = String(API_V1_LIMITS.GLOBAL_DAILY);
+    headers["X-RateLimit-Global-Remaining"] = String(Math.max(0, API_V1_LIMITS.GLOBAL_DAILY - globalCount));
+  }
+  return headers;
 }
 
-export { checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders };
+export {
+  checkGlobalRateLimit,
+  trackBrowserUsage,
+  deduplicatedRoast,
+  checkOperationRateLimit,
+  getCachedRoast,
+  checkApiV1RateLimits,
+  checkApiKeyRateLimits,
+  consumeApiV1Quota,
+  consumeApiKeyQuota,
+  releaseApiV1Quota,
+  apiV1RateLimitHeaders,
+  getApiKeyDailyLimit,
+  getApiKeyUsageCount
+};
