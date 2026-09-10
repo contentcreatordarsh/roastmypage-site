@@ -85,6 +85,10 @@ test("cached batch roasts do not consume the global browser-session budget", asy
             return stmt;
           },
           run: async () => ({ success: true }),
+          async all() {
+            if (sql.includes("SELECT id, url, url_hash")) return { results: [cachedRoast] };
+            throw new Error(`Unexpected all query: ${sql}`);
+          },
           async first() {
             if (sql.includes("SELECT request_count, window_start")) {
               return { request_count: 1, window_start: new Date().toISOString() };
