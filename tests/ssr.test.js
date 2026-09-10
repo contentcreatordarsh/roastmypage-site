@@ -53,6 +53,7 @@ test("renderRoastPage includes persisted video analysis", () => {
     hasHeroVideo: true,
     hasAutoplay: true,
     hasUnmutedAutoplay: false,
+    hasLoopingNoPause: true,
     conversion: {
       score: 95,
       issues: ["Keep the CTA visible over motion <script>alert(1)</script>"],
@@ -64,7 +65,7 @@ test("renderRoastPage includes persisted video analysis", () => {
     },
     accessibility: {
       score: 70,
-      issues: ["Add captions"]
+      issues: ["Provide a pause/stop control for looping autoplay video — WCAG 2.2.2."]
     },
     recommendations: ["Provide a pause control"]
   });
@@ -72,7 +73,8 @@ test("renderRoastPage includes persisted video analysis", () => {
   assert.match(html, /data-tab="video"/);
   assert.match(html, /id="tab-video"/);
   assert.match(html, /Video Analysis/);
-  assert.match(html, /Provide a pause control/);
+  assert.match(html, /looping without pause control/);
+  assert.match(html, /WCAG 2\.2\.2/);
   assert.match(html, /Keep the CTA visible over motion &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
 });

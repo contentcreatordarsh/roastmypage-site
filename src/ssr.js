@@ -415,7 +415,7 @@ Get yours \u2192`)}&url=${encodeURIComponent(pageUrl)}"
           <div>
             <h2 class="text-lg font-semibold text-white">Video Analysis</h2>
             <p class="text-xs text-[#6e6e73] mt-1">${Number.isFinite(Number(video.count)) ? Number(video.count) : 0} video${Number(video.count) === 1 ? "" : "s"} detected${video.hasHeroVideo ? " — including hero or above-fold video" : ""}.</p>
-            <div class="text-xs mt-2" style="color:${videoScoreColor}">${video.hasAutoplay ? (video.hasUnmutedAutoplay ? "Autoplay with sound needs attention" : "Muted autoplay detected") : "No autoplay detected"}</div>
+            <div class="text-xs mt-2" style="color:${videoScoreColor}">${video.hasAutoplay ? (video.hasUnmutedAutoplay ? "Autoplay with sound needs attention" : "Muted autoplay detected") : "No autoplay detected"}${video.hasLoopingNoPause ? " · looping without pause control" : ""}</div>
           </div>
         </div>
       </div>

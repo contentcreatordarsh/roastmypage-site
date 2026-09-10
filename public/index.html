@@ -3400,6 +3400,13 @@
                                 <p class="text-xs text-[#6e6e73]">One odd field in the AI response used to throw away an otherwise-complete roast. Every field is now checked and filled in, so you keep the scorecard.</p>
                             </div>
                         </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-sm mt-0.5">🔊</span>
+                            <div>
+                                <div class="text-sm font-medium">Sharper Autoplay-With-Sound Detection</div>
+                                <p class="text-xs text-[#6e6e73]">A YouTube, Vimeo or Cloudflare Stream hero set to <code>autoplay=1</code> without mute is now scored as autoplay <em>with sound</em> &mdash; previously every autoplaying embed was assumed to be muted, so the loudest pages got the gentlest feedback. Looping clips with no pause control now show up as an accessibility finding too.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -4808,6 +4815,8 @@
                     ];
                     if (item.kind === 'video') bits.push(item.hasCaptions ? 'captions' : 'no captions');
                     if (item.poster) bits.push('has poster');
+                    if (item.loop) bits.push('looping');
+                    if (item.autoplay && item.loop && !item.controls) bits.push('no pause control');
                     return `<div class="p-3 rounded-xl bg-white/[0.03] border border-white/[0.04] flex flex-wrap gap-2 items-center">
                         <span class="text-[#d1d1d6] font-medium capitalize">${sanitizeHtml(bits[0])}</span>
                         ${bits.slice(1).map((b) => `<span class="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.04] text-[#a1a1a6]">${sanitizeHtml(b)}</span>`).join('')}
