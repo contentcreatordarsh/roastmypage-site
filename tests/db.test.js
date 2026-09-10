@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import {
+  apiV1RateLimitHeaders,
+  checkGlobalRateLimit,
+  getApiKeyDailyLimit,
+  getCachedRoast,
+  releaseApiV1Quota
+} from "../src/db.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -208,4 +214,43 @@ test("releaseApiV1Quota does not mask the original request failure", async () =>
   } finally {
     console.error = originalError;
   }
+});
+
+test("API key quota headers use tier daily limit without anonymous global headers", () => {
+  const dailyLimit = getApiKeyDailyLimit({ tier: "pro", dailyLimit: 250 });
+  const headers = apiV1RateLimitHeaders(12, 99, {
+    dailyLimit,
+    includeGlobal: false,
+    tier: "pro"
+  });
+
+  assert.equal(dailyLimit, 250);
+  assert.equal(headers["X-RateLimit-Limit"], "250");
+  assert.equal(headers["X-RateLimit-Remaining"], "238");
+  assert.equal(headers["X-RateLimit-Tier"], "pro");
+  assert.equal(headers["X-RateLimit-Global-Limit"], undefined);
+});
+
+test("releaseApiV1Quota routes key actors to api_usage", async () => {
+  let sql;
+  let bindings;
+  const env = {
+    DB: {
+      prepare: (statement) => {
+        sql = statement;
+        return {
+          bind: (...values) => {
+            bindings = values;
+            return { run: async () => ({ meta: { changes: 1 } }) };
+          }
+        };
+      }
+    }
+  };
+
+  const released = await releaseApiV1Quota(env, "key:abc-123");
+
+  assert.equal(released, true);
+  assert.match(sql, /UPDATE api_usage/);
+  assert.equal(bindings[0], "abc-123");
 });
