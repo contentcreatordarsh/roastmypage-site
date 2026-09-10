@@ -589,7 +589,6 @@ export default {
             { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
         }
-        await trackBrowserUsage(env22, validUrls.length);
         const results = [];
         const errors = [];
         for (const targetUrl of validUrls) {
@@ -601,6 +600,7 @@ export default {
               continue;
             }
             const roastId = generateId();
+            await trackBrowserUsage(env22, 1);
             const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
             if (pageData.screenshot.length > CONFIG.MAX_SCREENSHOT_BYTES) throw new Error("Screenshot too large");
             const base64Screenshot = uint8ArrayToBase64(pageData.screenshot);
