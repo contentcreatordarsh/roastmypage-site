@@ -1,5 +1,9 @@
 -- #49 Competitor watchlists with score change alerts
--- Apply with:
+-- Incremental migration after 0000_initial.sql. Prefer:
+--   npx wrangler d1 migrations apply roast-db-dev --local
+--   npx wrangler d1 migrations apply roast-db-dev --remote
+--   npx wrangler d1 migrations apply roast-db --remote --env production
+-- Manual apply (legacy):
 --   npx wrangler d1 execute roast-db-dev --remote --file migrations/001_watchlist.sql
 --   npx wrangler d1 execute roast-db --remote --env production --file migrations/001_watchlist.sql
 

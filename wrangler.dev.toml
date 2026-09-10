@@ -18,6 +18,7 @@ binding = "AI"
 binding = "DB"
 database_name = "roast-db-dev"
 database_id = "f287a4d6-cffa-4ee7-8775-e130a567d9ff"
+migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "SCREENSHOTS"
