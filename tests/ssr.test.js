@@ -138,3 +138,37 @@ test("roast route keeps screenshots same-origin on the workers.dev hostname", as
   assert.match(html, /src="\/api\/screenshot\/deadbeef"/);
   assert.doesNotMatch(html, /src="https:\/\/roastmypage\.site\/api\/screenshot\/deadbeef"/);
 });
+
+// --- /robots.txt (#robots) ---
+
+const robotsEnv = { BASE_URL: "https://example.test" };
+
+test("robots.txt advertises the sitemap for the current environment", async () => {
+  const res = await worker.fetch(new Request("https://example.test/robots.txt"), robotsEnv, { waitUntil() {} });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") || "", /text\/plain/);
+  const body = await res.text();
+  assert.match(body, /^Sitemap: https:\/\/example\.test\/sitemap\.xml$/m);
+  assert.match(body, /^User-agent: \*$/m);
+  assert.match(body, /^Allow: \/$/m);
+  assert.match(body, /^Disallow: \/api\/$/m);
+});
+
+test("robots.txt falls back to the production origin without BASE_URL", async () => {
+  const res = await worker.fetch(new Request("https://roastmypage.site/robots.txt"), {}, { waitUntil() {} });
+  const body = await res.text();
+  assert.match(body, /^Sitemap: https:\/\/roastmypage\.site\/sitemap\.xml$/m);
+});
+
+test("robots.txt keeps the content-signal policy and AI crawler blocks", async () => {
+  // A Worker route replaces Cloudflare's managed robots.txt rather than
+  // appending to it, so this response must carry the whole policy or shipping
+  // it would unblock every AI crawler the managed block denies.
+  const res = await worker.fetch(new Request("https://example.test/robots.txt"), robotsEnv, { waitUntil() {} });
+  const body = await res.text();
+  assert.match(body, /ARTICLE 4 OF THE EUROPEAN UNION DIRECTIVE 2019\/790/);
+  assert.match(body, /^Content-Signal: search=yes,ai-train=no,use=reference$/m);
+  for (const crawler of ["Amazonbot", "Applebot-Extended", "Bytespider", "CCBot", "ClaudeBot", "Google-Extended", "GPTBot", "meta-externalagent"]) {
+    assert.match(body, new RegExp(`^User-agent: ${crawler}$`, "m"), `${crawler} must stay blocked`);
+  }
+});

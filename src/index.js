@@ -3099,6 +3099,65 @@ data: ${JSON.stringify(data)}
         }
       }
     }
+    if (url.pathname === "/robots.txt" && request.method === "GET") {
+      // Cloudflare serves a managed robots.txt for this zone. A Worker route
+      // REPLACES it rather than appending — verified on the dev worker, where
+      // this route returned 197 bytes and the managed preamble disappeared.
+      // So this response has to carry the whole policy itself, otherwise
+      // shipping it would silently unblock GPTBot/CCBot/ClaudeBot/etc and drop
+      // the Article 4 rights reservation. The crawler list mirrors the managed
+      // block as configured; keep the two in step if you change it in the
+      // Cloudflare dashboard.
+      const robotsBase = env22.BASE_URL || PRODUCTION_ORIGINS[0];
+      const blockedAiCrawlers = [
+        "Amazonbot",
+        "Applebot-Extended",
+        "Bytespider",
+        "CCBot",
+        "ClaudeBot",
+        "CloudflareBrowserRenderingCrawler",
+        "Google-Extended",
+        "GPTBot",
+        "meta-externalagent"
+      ];
+      const robots = [
+        "# As a condition of accessing this website, you agree to abide by the following",
+        "# content signals:",
+        "#",
+        "# (a)  If a Content-Signal = yes, you may collect content for the corresponding use.",
+        "# (b)  If a Content-Signal = no, you may not collect content for the corresponding use.",
+        "# (c)  If the website operator does not include a Content-Signal for a corresponding",
+        "#      use, the website operator neither grants nor restricts permission via",
+        "#      Content-Signal with respect to the corresponding use.",
+        "#",
+        "# search:   building a search index and providing search results. Search does not",
+        "#           include providing AI-generated search summaries.",
+        "# ai-input: inputting content into one or more AI models.",
+        "# ai-train: training or fine-tuning AI models.",
+        "#",
+        "# ANY RESTRICTIONS EXPRESSED VIA CONTENT SIGNALS ARE EXPRESS RESERVATIONS OF",
+        "# RIGHTS UNDER ARTICLE 4 OF THE EUROPEAN UNION DIRECTIVE 2019/790 ON COPYRIGHT",
+        "# AND RELATED RIGHTS IN THE DIGITAL SINGLE MARKET.",
+        "",
+        "User-agent: *",
+        "Content-Signal: search=yes,ai-train=no,use=reference",
+        "Allow: /",
+        "# The API returns JSON with no crawlable content and spends rate limit.",
+        "Disallow: /api/",
+        ""
+      ];
+      for (const crawler of blockedAiCrawlers) {
+        robots.push(`User-agent: ${crawler}`, "Disallow: /", "");
+      }
+      robots.push(`Sitemap: ${robotsBase}/sitemap.xml`, "");
+      return new Response(robots.join("\n"), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "public, max-age=3600"
+        }
+      });
+    }
     if (url.pathname === "/sitemap.xml" && request.method === "GET") {
       try {
         const BASE_URL_SM = PRODUCTION_ORIGINS[0];
