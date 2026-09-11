@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkGlobalRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import { checkGlobalRateLimit, checkOperationRateLimit, getCachedRoast, releaseApiV1Quota } from "../src/db.js";
+import { CONFIG } from "../src/config.js";
 
 test("checkGlobalRateLimit fails closed when KV is unavailable", async () => {
   const env = {
@@ -208,4 +209,66 @@ test("releaseApiV1Quota does not mask the original request failure", async () =>
   } finally {
     console.error = originalError;
   }
+});
+
+// --- scan rate limits: each feature gets its own allowance ---
+
+/** Minimal rate_limits table: one counter row per ip_hash key. */
+function rateLimitDb() {
+  const rows = new Map();
+  return {
+    rows,
+    prepare(sql) {
+      return {
+        bind(...args) {
+          return {
+            async run() {
+              if (!sql.includes("INSERT INTO rate_limits")) throw new Error(`Unexpected run: ${sql}`);
+              const key = args[0];
+              const existing = rows.get(key);
+              rows.set(key, {
+                request_count: existing ? existing.request_count + 1 : 1,
+                window_start: existing ? existing.window_start : args[1]
+              });
+              return { success: true };
+            },
+            async first() {
+              if (!sql.includes("FROM rate_limits")) throw new Error(`Unexpected first: ${sql}`);
+              return rows.get(args[0]) || null;
+            }
+          };
+        }
+      };
+    }
+  };
+}
+
+test("threat and tech scans draw from separate rate-limit buckets", async () => {
+  const db = rateLimitDb();
+  const env = { DB: db };
+
+  // Spend the whole threat allowance.
+  let threat;
+  for (let i = 0; i < CONFIG.RATE_LIMIT_THREAT_MAX; i += 1) {
+    threat = await checkOperationRateLimit(env, "ip-a", "threat");
+    assert.equal(threat.allowed, true, `threat request ${i + 1} should be allowed`);
+  }
+  const overThreat = await checkOperationRateLimit(env, "ip-a", "threat");
+  assert.equal(overThreat.allowed, false, "one past the limit is blocked");
+
+  // A tech scan from the same IP must be unaffected — these were one bucket,
+  // so the two scan features used to exhaust each other.
+  const tech = await checkOperationRateLimit(env, "ip-a", "tech");
+  assert.equal(tech.allowed, true);
+  assert.equal(tech.remaining, CONFIG.RATE_LIMIT_TECH_MAX - 1);
+
+  assert.ok(db.rows.has("ip-a_threat"));
+  assert.ok(db.rows.has("ip-a_tech"));
+});
+
+test("scan allowances are not stricter than a full roast", async () => {
+  // A scan is a few fetches; a roast spends Browser Rendering and AI. The scan
+  // limits sat at 10 against roast's 30, which is backwards.
+  assert.ok(CONFIG.RATE_LIMIT_THREAT_MAX >= CONFIG.RATE_LIMIT_MAX_REQUESTS);
+  assert.ok(CONFIG.RATE_LIMIT_TECH_MAX >= CONFIG.RATE_LIMIT_MAX_REQUESTS);
 });

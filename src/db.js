@@ -58,6 +58,7 @@ async function checkOperationRateLimit(env22, ipHash, operation) {
     feedback: CONFIG.RATE_LIMIT_FEEDBACK_MAX,
     subscribe: CONFIG.RATE_LIMIT_SUBSCRIBE_MAX,
     threat: CONFIG.RATE_LIMIT_THREAT_MAX,
+    tech: CONFIG.RATE_LIMIT_TECH_MAX,
     watchlist: CONFIG.RATE_LIMIT_WATCHLIST_MAX
   };
   const maxRequests = limits2[operation];

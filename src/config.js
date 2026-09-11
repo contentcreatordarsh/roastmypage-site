@@ -37,8 +37,15 @@ const CONFIG = {
   // Feedback submissions per hour
   RATE_LIMIT_SUBSCRIBE_MAX: 10,
   // Email subscribe per hour
-  RATE_LIMIT_THREAT_MAX: 10,
+  // Threat and tech scans are a handful of fetches — no Browser Rendering, no
+  // AI — so they were the cheapest operation carrying the tightest limit, and
+  // they shared one bucket, meaning the two scan features competed with each
+  // other. Separate buckets, sized against roast (30) rather than below it.
+  RATE_LIMIT_THREAT_MAX: 30,
   // Threat scans per hour
+  RATE_LIMIT_TECH_MAX: 30,
+  // Tech-stack scans per hour — its own bucket so the two scan features on the
+  // page do not consume each other's allowance
   RATE_LIMIT_WATCHLIST_MAX: 30,
   // Watchlist add/check operations per hour
   MAX_WATCHLIST_ITEMS: 25,

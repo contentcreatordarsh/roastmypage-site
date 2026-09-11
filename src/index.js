@@ -2595,7 +2595,8 @@ data: ${JSON.stringify(data)}
         }
         const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
         if (!rateLimit.allowed) {
-          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
+          const waitMins = Math.max(1, Math.ceil(rateLimit.resetIn / 60));
+          return Response.json({ error: `Rate limit exceeded. Try again in ${waitMins} minute${waitMins === 1 ? "" : "s"}.`, retryAfter: Math.max(60, rateLimit.resetIn) }, { status: 429, headers: corsHeaders });
         }
         const globalLimit = await checkGlobalRateLimit(env22);
         if (!globalLimit.allowed) {
@@ -2674,14 +2675,7 @@ data: ${JSON.stringify(data)}
         if (!sanitizedUrl || !isUrlSafeForFetching(sanitizedUrl)) {
           return Response.json({ error: "Invalid or unsafe URL" }, { status: 400, headers: corsHeaders });
         }
-        const rateLimit = await checkOperationRateLimit(env22, ipHash, "threat");
-        if (!rateLimit.allowed) {
-          return Response.json({ error: `Rate limit exceeded. Try again in ${Math.ceil(rateLimit.resetIn / 60)} minutes.`, retryAfter: rateLimit.resetIn }, { status: 429, headers: corsHeaders });
-        }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
-        }
+        // A cache hit does no outbound work, so it costs no quota.
         const cacheKey = `tech-scan:${await hashUrl(sanitizedUrl)}`;
         const cached = await env22.CONFIG.get(cacheKey);
         if (cached) {
@@ -2691,8 +2685,21 @@ data: ${JSON.stringify(data)}
             ...JSON.parse(cached)
           }, { headers: corsHeaders });
         }
+        // Fail before the limiters. This check used to sit after them, so on a
+        // deployment without URL_SCANNER_TOKEN every attempt spent a rate-limit
+        // credit and a global slot only to return 503 — the scan feature could
+        // exhaust a user's allowance without ever performing a scan.
         if (!env22.URL_SCANNER_TOKEN) {
           return Response.json({ error: "URL Scanner not configured" }, { status: 503, headers: corsHeaders });
+        }
+        const rateLimit = await checkOperationRateLimit(env22, ipHash, "tech");
+        if (!rateLimit.allowed) {
+          const waitMins = Math.max(1, Math.ceil(rateLimit.resetIn / 60));
+          return Response.json({ error: `Rate limit exceeded. Try again in ${waitMins} minute${waitMins === 1 ? "" : "s"}.`, retryAfter: Math.max(60, rateLimit.resetIn) }, { status: 429, headers: corsHeaders });
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json({ error: globalLimit.reason, retryAfter: 300 }, { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } });
         }
         const accountId = env22.CF_ACCOUNT_TAG || "";
         const scanResponse = await fetch(
