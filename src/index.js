@@ -19,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -2853,10 +2853,6 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
-      let quotaReservationIpHash = null;
-      // Remembers the quota we deliberately charged (once Browser Rendering
-      // started) so specific failure modes can still hand it back.
-      let quotaChargedIpHash = null;
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
@@ -2981,7 +2977,6 @@ data: ${JSON.stringify(data)}
         // point the quota stays charged even if the target page times out or
         // produces an oversized screenshot; otherwise callers can intentionally
         // fail captures forever without using per-IP quota.
-        quotaChargedIpHash = ipHash;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
         const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
@@ -3063,10 +3058,10 @@ data: ${JSON.stringify(data)}
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         if (isBotChallengeError(error32)) {
-          // Bot protection is detected within a couple of seconds and the caller
-          // can do nothing about it, so refund rather than burning one of their
-          // few daily requests. Every other capture failure still stays charged.
-          quotaReservationIpHash = quotaChargedIpHash;
+          // The target controls its response and can deliberately look like a
+          // bot challenge. Keep the quota charged once Browser Rendering starts
+          // so repeated challenge responses cannot consume browser capacity for
+          // free.
           return Response.json({
             success: false,
             error: "blocked_by_bot_protection",
@@ -3093,10 +3088,6 @@ data: ${JSON.stringify(data)}
           status: statusCode,
           headers: apiV1CorsHeaders
         });
-      } finally {
-        if (quotaReservationIpHash) {
-          await releaseApiV1Quota(env22, quotaReservationIpHash);
-        }
       }
     }
     if (url.pathname === "/robots.txt" && request.method === "GET") {
