@@ -24,6 +24,7 @@ binding = "BROWSER"
 binding = "DB"
 database_name = "roast-db-dev"
 database_id = "f287a4d6-cffa-4ee7-8775-e130a567d9ff"
+migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "SCREENSHOTS"
@@ -67,6 +68,7 @@ binding = "BROWSER"
 binding = "DB"
 database_name = "roast-db"
 database_id = "7b59df5c-8185-4562-b149-ae28ebf65dca"
+migrations_dir = "migrations"
 
 [[env.production.r2_buckets]]
 binding = "SCREENSHOTS"

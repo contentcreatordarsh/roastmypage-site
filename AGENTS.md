@@ -25,7 +25,9 @@ stays but only connects when actually invoked, so startup succeeds:
 
 ```
 # one-time per fresh VM: create the local D1 tables (.wrangler/ is gitignored)
+# Either the full snapshot or the versioned migrations in migrations/ work.
 npx wrangler d1 execute roast-db-dev --local --file schema.sql
+# npx wrangler d1 migrations apply roast-db-dev --local -c wrangler.dev.toml
 
 # run the dev server (serves http://localhost:8787)
 npx wrangler dev -c wrangler.dev.toml --local --port 8787
