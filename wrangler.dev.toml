@@ -3,7 +3,7 @@ main = "src/index.js"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Local-only dev config (NOT committed). Mirrors wrangler.toml's default (dev)
+# Local dev config. Mirrors wrangler.toml's default (dev)
 # environment but omits the [browser] binding, which Wrangler v3 cannot simulate
 # locally. AI/Browser-backed roasting still needs Cloudflare credentials + --remote;
 # everything else (pages, D1/R2/KV-backed APIs) runs fully locally.
