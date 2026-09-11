@@ -3158,7 +3158,7 @@ data: ${JSON.stringify(data)}
         const totalRoasts = totalResult?.count || 0;
         const galleryPages = Math.ceil(totalRoasts / 24);
         const roasts = await env22.DB.prepare(
-          `SELECT id, created_at, seo_data FROM roasts
+          `SELECT id, created_at FROM roasts
            WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT 50000`
         ).all();
         const now = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
@@ -3186,7 +3186,9 @@ data: ${JSON.stringify(data)}
   </url>`;
         }
         if (roasts.results) {
-          for (const roast of visibleStoredRoasts(roasts.results)) {
+          // The SQL predicate already excludes stored challenge pages. Avoid
+          // returning their complete seo_data payloads for every sitemap row.
+          for (const roast of roasts.results) {
             const created = roast.created_at || now;
             const hasZ = /Z$/.test(created);
             const lastmod = (/* @__PURE__ */ new Date(hasZ ? created : (created + "Z"))).toISOString().split("T")[0];
