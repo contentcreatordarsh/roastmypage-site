@@ -94,11 +94,14 @@ export async function sendWatchlistEmail(env, { to, subject, html, text }) {
  */
 export async function lookupLatestRoastScore(env, { url, urlHash }) {
   if (urlHash) {
-    const byHash = await env.DB.prepare(
+    const byHashCandidates = await env.DB.prepare(
       `SELECT id, url, overall_score, created_at, seo_data FROM roasts
-       WHERE url_hash = ? ORDER BY created_at DESC LIMIT 1`
-    ).bind(urlHash).first();
-    if (byHash) return isStoredChallengeRoast(byHash.seo_data) ? null : byHash;
+       WHERE url_hash = ? ORDER BY created_at DESC LIMIT 25`
+    ).bind(urlHash).all();
+    const byHash = (byHashCandidates.results || []).find(
+      (candidate) => !isStoredChallengeRoast(candidate.seo_data)
+    );
+    if (byHash) return byHash;
   }
   // #142: exact URL match (plus the trailing-slash variant) instead of a
   // hostname LIKE prefix, which matched any page on the host and also
@@ -120,12 +123,14 @@ export async function lookupLatestRoastScore(env, { url, urlHash }) {
   } catch {
     return null;
   }
-  const byUrl = await env.DB.prepare(
+  const byUrlCandidates = await env.DB.prepare(
     `SELECT id, url, overall_score, created_at, seo_data FROM roasts
      WHERE url = ? OR url = ?
-     ORDER BY created_at DESC LIMIT 1`
-  ).bind(canonicalUrl, trailingSlashVariant).first();
-  return byUrl && !isStoredChallengeRoast(byUrl.seo_data) ? byUrl : null;
+     ORDER BY created_at DESC LIMIT 25`
+  ).bind(canonicalUrl, trailingSlashVariant).all();
+  return (byUrlCandidates.results || []).find(
+    (candidate) => !isStoredChallengeRoast(candidate.seo_data)
+  ) || null;
 }
 
 /**

@@ -80,16 +80,18 @@ test("lookupLatestRoastScore never falls back to another path on the same host",
         return {
           bind(...binds) {
             return {
-              async first() {
+              async all() {
                 queries.push({ sql, binds });
-                if (sql.includes("url_hash")) return null;
+                if (sql.includes("url_hash")) return { results: [] };
                 const siblingRoast = {
                   id: "homepage",
                   url: "https://competitor.com/",
                   overall_score: 9,
                   created_at: "2026-08-01T00:00:00Z"
                 };
-                return binds.includes(siblingRoast.url) ? siblingRoast : null;
+                return {
+                  results: binds.includes(siblingRoast.url) ? [siblingRoast] : []
+                };
               }
             };
           }
@@ -114,15 +116,17 @@ test("lookupLatestRoastScore exact fallback tolerates a trailing slash", async (
         return {
           bind(...binds) {
             return {
-              async first() {
-                if (sql.includes("url_hash")) return null;
+              async all() {
+                if (sql.includes("url_hash")) return { results: [] };
                 const exactRoast = {
                   id: "pricing",
                   url: "https://competitor.com/pricing/",
                   overall_score: 7.2,
                   created_at: "2026-08-01T00:00:00Z"
                 };
-                return binds.includes(exactRoast.url) ? exactRoast : null;
+                return {
+                  results: binds.includes(exactRoast.url) ? [exactRoast] : []
+                };
               }
             };
           }
@@ -138,6 +142,91 @@ test("lookupLatestRoastScore exact fallback tolerates a trailing slash", async (
 
   assert.equal(result?.id, "pricing");
   assert.equal(result?.overall_score, 7.2);
+});
+
+test("lookupLatestRoastScore skips newer challenge candidates for hash and exact URL fallback", async () => {
+  const roasts = [
+    {
+      id: "hash-challenge",
+      url: "https://hash.example/pricing",
+      url_hash: "shared-hash",
+      overall_score: 2,
+      created_at: "2026-09-12T10:00:00Z",
+      seo_data: JSON.stringify({ title: { text: "Just a moment..." } })
+    },
+    {
+      id: "hash-valid",
+      url: "https://hash.example/pricing",
+      url_hash: "shared-hash",
+      overall_score: 8,
+      created_at: "2026-09-11T10:00:00Z",
+      seo_data: JSON.stringify({ title: { text: "Hash Inc." } })
+    },
+    {
+      id: "exact-challenge",
+      url: "https://exact.example/pricing/",
+      url_hash: "other-hash",
+      overall_score: 3,
+      created_at: "2026-09-12T09:00:00Z",
+      seo_data: JSON.stringify({ title: { text: "Checking your browser" } })
+    },
+    {
+      id: "exact-valid",
+      url: "https://exact.example/pricing",
+      url_hash: "older-hash",
+      overall_score: 7,
+      created_at: "2026-09-11T09:00:00Z",
+      seo_data: JSON.stringify({ title: { text: "Exact Inc." } })
+    },
+    {
+      id: "sibling-path",
+      url: "https://exact.example/",
+      url_hash: "sibling-hash",
+      overall_score: 9,
+      created_at: "2026-09-13T09:00:00Z",
+      seo_data: JSON.stringify({ title: { text: "Sibling path" } })
+    }
+  ];
+  const queries = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...binds) {
+            return {
+              async all() {
+                queries.push({ sql, binds });
+                const matching = sql.includes("url_hash")
+                  ? roasts.filter((row) => row.url_hash === binds[0])
+                  : roasts.filter((row) => binds.includes(row.url));
+                return {
+                  results: /LIMIT\s+1/i.test(sql) ? matching.slice(0, 1) : matching
+                };
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+
+  const byHash = await lookupLatestRoastScore(env, {
+    url: "https://hash.example/pricing",
+    urlHash: "shared-hash"
+  });
+  const byExactUrl = await lookupLatestRoastScore(env, {
+    url: "https://exact.example/pricing",
+    urlHash: "missing-hash"
+  });
+
+  assert.equal(byHash?.id, "hash-valid");
+  assert.equal(byExactUrl?.id, "exact-valid");
+  assert.equal(queries.some(({ sql }) => sql.includes("LIKE")), false);
+  assert.equal(queries.every(({ sql }) => /LIMIT\s+25/i.test(sql)), true);
+  assert.equal(
+    queries.some(({ binds }) => binds.includes("https://exact.example/")),
+    false
+  );
 });
 
 test("processWatchlistAlerts emits alert when score moves and updates row", async () => {
@@ -165,23 +254,21 @@ test("processWatchlistAlerts emits alert when score moves and updates row", asyn
             return this;
           },
           async all() {
-            calls.push({ type: "all", sql });
+            calls.push({ type: "all", sql, binds: this._binds });
             if (sql.includes("FROM watchlist WHERE active")) {
               return { results: watchRows };
             }
-            return { results: [] };
-          },
-          async first() {
-            calls.push({ type: "first", sql, binds: this._binds });
             if (sql.includes("FROM roasts") && sql.includes("url_hash")) {
               return {
-                id: "r-new",
-                url: "https://competitor.com",
-                overall_score: 7.5,
-                created_at: "2026-08-01T00:00:00Z"
+                results: [{
+                  id: "r-new",
+                  url: "https://competitor.com",
+                  overall_score: 7.5,
+                  created_at: "2026-08-01T00:00:00Z"
+                }]
               };
             }
-            return null;
+            return { results: [] };
           },
           async run() {
             calls.push({ type: "run", sql, binds: this._binds });
@@ -229,10 +316,9 @@ test("processWatchlistAlerts skips when score is unchanged", async () => {
                 }]
               };
             }
-            return { results: [] };
-          },
-          async first() {
-            return { id: "r1", url: "https://a.com", overall_score: 8.02, created_at: "x" };
+            return {
+              results: [{ id: "r1", url: "https://a.com", overall_score: 8.02, created_at: "x" }]
+            };
           },
           async run() {
             runs.push(sql);
@@ -262,6 +348,7 @@ test("processWatchlistAlerts rotates rows that have no roast yet", async () => {
             return this;
           },
           async all() {
+            if (sql.includes("FROM roasts")) return { results: [] };
             return {
               results: [{
                 id: "no-roast",
@@ -274,9 +361,6 @@ test("processWatchlistAlerts rotates rows that have no roast yet", async () => {
                 last_roast_id: null
               }]
             };
-          },
-          async first() {
-            return null;
           },
           async run() {
             runs.push({ sql, binds: this._binds });
@@ -313,6 +397,16 @@ test("processWatchlistAlerts preserves a score change when webhook delivery fail
             return this;
           },
           async all() {
+            if (sql.includes("FROM roasts")) {
+              return {
+                results: [{
+                  id: "new",
+                  url: "https://competitor.example",
+                  overall_score: 8,
+                  created_at: "2026-08-25T00:00:00Z"
+                }]
+              };
+            }
             return {
               results: [{
                 id: "retry-me",
@@ -324,14 +418,6 @@ test("processWatchlistAlerts preserves a score change when webhook delivery fail
                 last_score: 6,
                 last_roast_id: "old"
               }]
-            };
-          },
-          async first() {
-            return {
-              id: "new",
-              url: "https://competitor.example",
-              overall_score: 8,
-              created_at: "2026-08-25T00:00:00Z"
             };
           },
           async run() {
@@ -369,6 +455,17 @@ test("processWatchlistAlerts ignores stored bot-challenge scores", async () => {
         const stmt = {
           bind() { return this; },
           async all() {
+            if (sql.includes("FROM roasts")) {
+              return {
+                results: [{
+                  id: "challenge-roast",
+                  url: "https://blocked.example",
+                  overall_score: 2.0,
+                  created_at: "2026-08-01T00:00:00Z",
+                  seo_data: JSON.stringify({ title: { text: "Just a moment..." } })
+                }]
+              };
+            }
             if (sql.includes("FROM watchlist WHERE active")) {
               return {
                 results: [{
@@ -384,15 +481,6 @@ test("processWatchlistAlerts ignores stored bot-challenge scores", async () => {
               };
             }
             return { results: [] };
-          },
-          async first() {
-            return {
-              id: "challenge-roast",
-              url: "https://blocked.example",
-              overall_score: 2.0,
-              created_at: "2026-08-01T00:00:00Z",
-              seo_data: JSON.stringify({ title: { text: "Just a moment..." } })
-            };
           },
           async run() {
             runs.push(sql);
