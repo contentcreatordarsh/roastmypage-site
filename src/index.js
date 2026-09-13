@@ -19,7 +19,7 @@ import {
 import {
     checkGlobalRateLimit, trackBrowserUsage, deduplicatedRoast, 
     checkOperationRateLimit, getCachedRoast, checkApiV1RateLimits, 
-    consumeApiV1Quota, releaseApiV1Quota, apiV1RateLimitHeaders
+    consumeApiV1Quota, apiV1RateLimitHeaders
 } from './db.js';
 
 import { capturePageWithMetrics } from './puppeteer.js';
@@ -2853,10 +2853,6 @@ data: ${JSON.stringify(data)}
     }
     if (url.pathname === "/api/v1/roast" && request.method === "POST") {
       const startTime = Date.now();
-      let quotaReservationIpHash = null;
-      // Remembers the quota we deliberately charged (once Browser Rendering
-      // started) so specific failure modes can still hand it back.
-      let quotaChargedIpHash = null;
       try {
         const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
         const clientCountry = request.headers.get("CF-IPCountry") || "XX";
@@ -2981,7 +2977,6 @@ data: ${JSON.stringify(data)}
         // point the quota stays charged even if the target page times out or
         // produces an oversized screenshot; otherwise callers can intentionally
         // fail captures forever without using per-IP quota.
-        quotaChargedIpHash = ipHash;
         await trackBrowserUsage(env22, 1);
         const roastId = generateId();
         const pageData = await capturePageWithMetrics(env22, targetUrl, { device });
@@ -3063,10 +3058,10 @@ data: ${JSON.stringify(data)}
       } catch (error32) {
         safeLogError("API v1 roast failed:", error32);
         if (isBotChallengeError(error32)) {
-          // Bot protection is detected within a couple of seconds and the caller
-          // can do nothing about it, so refund rather than burning one of their
-          // few daily requests. Every other capture failure still stays charged.
-          quotaReservationIpHash = quotaChargedIpHash;
+          // The target controls its response and can deliberately look like a
+          // bot challenge. Keep the quota charged once Browser Rendering starts
+          // so repeated challenge responses cannot consume browser capacity for
+          // free.
           return Response.json({
             success: false,
             error: "blocked_by_bot_protection",
@@ -3093,63 +3088,32 @@ data: ${JSON.stringify(data)}
           status: statusCode,
           headers: apiV1CorsHeaders
         });
-      } finally {
-        if (quotaReservationIpHash) {
-          await releaseApiV1Quota(env22, quotaReservationIpHash);
-        }
       }
     }
     if (url.pathname === "/robots.txt" && request.method === "GET") {
-      // Cloudflare serves a managed robots.txt for this zone. A Worker route
-      // REPLACES it rather than appending — verified on the dev worker, where
-      // this route returned 197 bytes and the managed preamble disappeared.
-      // So this response has to carry the whole policy itself, otherwise
-      // shipping it would silently unblock GPTBot/CCBot/ClaudeBot/etc and drop
-      // the Article 4 rights reservation. The crawler list mirrors the managed
-      // block as configured; keep the two in step if you change it in the
-      // Cloudflare dashboard.
-      const robotsBase = env22.BASE_URL || PRODUCTION_ORIGINS[0];
-      const blockedAiCrawlers = [
-        "Amazonbot",
-        "Applebot-Extended",
-        "Bytespider",
-        "CCBot",
-        "ClaudeBot",
-        "CloudflareBrowserRenderingCrawler",
-        "Google-Extended",
-        "GPTBot",
-        "meta-externalagent"
-      ];
-      const robots = [
-        "# As a condition of accessing this website, you agree to abide by the following",
-        "# content signals:",
-        "#",
-        "# (a)  If a Content-Signal = yes, you may collect content for the corresponding use.",
-        "# (b)  If a Content-Signal = no, you may not collect content for the corresponding use.",
-        "# (c)  If the website operator does not include a Content-Signal for a corresponding",
-        "#      use, the website operator neither grants nor restricts permission via",
-        "#      Content-Signal with respect to the corresponding use.",
-        "#",
-        "# search:   building a search index and providing search results. Search does not",
-        "#           include providing AI-generated search summaries.",
-        "# ai-input: inputting content into one or more AI models.",
-        "# ai-train: training or fine-tuning AI models.",
-        "#",
-        "# ANY RESTRICTIONS EXPRESSED VIA CONTENT SIGNALS ARE EXPRESS RESERVATIONS OF",
-        "# RIGHTS UNDER ARTICLE 4 OF THE EUROPEAN UNION DIRECTIVE 2019/790 ON COPYRIGHT",
-        "# AND RELATED RIGHTS IN THE DIGITAL SINGLE MARKET.",
-        "",
-        "User-agent: *",
-        "Content-Signal: search=yes,ai-train=no,use=reference",
-        "Allow: /",
-        "# The API returns JSON with no crawlable content and spends rate limit.",
-        "Disallow: /api/",
-        ""
-      ];
-      for (const crawler of blockedAiCrawlers) {
-        robots.push(`User-agent: ${crawler}`, "Disallow: /", "");
-      }
-      robots.push(`Sitemap: ${robotsBase}/sitemap.xml`, "");
+      // Cloudflare splices its managed content-signal block (the Article 4 /
+      // EU 2019/790 reservation and the AI-crawler denials) ahead of whatever
+      // the origin returns on the production zone — verified against the live
+      // file after deploy. So this only needs to add what the managed block
+      // lacks, and must NOT restate it: doing so produced two User-agent: *
+      // groups and a doubled crawler list.
+      const isProduction = env22.ENVIRONMENT === "production";
+      const robots = isProduction
+        ? [
+            "User-agent: *",
+            "# JSON only, nothing crawlable, and requests spend rate limit.",
+            "Disallow: /api/",
+            "",
+            `Sitemap: ${env22.BASE_URL || PRODUCTION_ORIGINS[0]}/sitemap.xml`,
+            ""
+          ]
+        : [
+            "# Non-production worker: publicly reachable and serves the same",
+            "# content as production, so keep it out of the index entirely.",
+            "User-agent: *",
+            "Disallow: /",
+            ""
+          ];
       return new Response(robots.join("\n"), {
         headers: {
           ...corsHeaders,
@@ -3167,7 +3131,7 @@ data: ${JSON.stringify(data)}
         const totalRoasts = totalResult?.count || 0;
         const galleryPages = Math.ceil(totalRoasts / 24);
         const roasts = await env22.DB.prepare(
-          `SELECT id, created_at, seo_data FROM roasts
+          `SELECT id, created_at FROM roasts
            WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT 50000`
         ).all();
         const now = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
@@ -3195,7 +3159,9 @@ data: ${JSON.stringify(data)}
   </url>`;
         }
         if (roasts.results) {
-          for (const roast of visibleStoredRoasts(roasts.results)) {
+          // The SQL predicate already excludes stored challenge pages. Avoid
+          // returning their complete seo_data payloads for every sitemap row.
+          for (const roast of roasts.results) {
             const created = roast.created_at || now;
             const hasZ = /Z$/.test(created);
             const lastmod = (/* @__PURE__ */ new Date(hasZ ? created : (created + "Z"))).toISOString().split("T")[0];

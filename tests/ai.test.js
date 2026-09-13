@@ -97,7 +97,15 @@ test("AI retries share one timeout budget", async () => {
   const originalRetryBase = CONFIG.AI_RETRY_BASE_MS;
   const originalAttempts = CONFIG.AI_MAX_ATTEMPTS;
 
-  CONFIG.AI_TIMEOUT_MS = 100;
+  // Sized so the shared-vs-fresh budget difference is hundreds of milliseconds
+  // rather than ~10ms. The previous 100ms budget flaked under the parallel test
+  // runner: event-loop starvation let the whole budget expire before the first
+  // retry, so only one call happened. Timeline with a shared deadline:
+  //   attempt 1 fails at ~300ms, attempt 2 fails at ~610ms, attempt 3 starts
+  //   at ~630ms with ~370ms left, so its 600ms call is cut off.
+  // With a fresh budget per attempt the third call would get the full 1000ms,
+  // finish its 600ms, and return a real analysis instead.
+  CONFIG.AI_TIMEOUT_MS = 1000;
   CONFIG.AI_RETRY_BASE_MS = 10;
   CONFIG.AI_MAX_ATTEMPTS = 3;
 
@@ -110,9 +118,10 @@ test("AI retries share one timeout budget", async () => {
       run: async () => {
         calls++;
         if (calls < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
           throw new Error("503 overloaded");
         }
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        await new Promise((resolve) => setTimeout(resolve, 600));
         return {
           response: JSON.stringify({
             overallScore: 7,
@@ -131,8 +140,11 @@ test("AI retries share one timeout budget", async () => {
     const elapsedMs = Date.now() - startedAt;
 
     assert.equal(calls, 3);
+    // The discriminating assertion: only a deadline shared across retries cuts
+    // the third call off. A fresh per-attempt budget would let it succeed.
     assert.equal(result.analysis.aiUnavailable, true);
-    assert.ok(elapsedMs < 140, `expected one 100ms budget, took ${elapsedMs}ms`);
+    // Hang guard only. Correctness is proven above, not by wall-clock timing.
+    assert.ok(elapsedMs < 5000, `retries should stop at the shared deadline, took ${elapsedMs}ms`);
   } finally {
     CONFIG.AI_TIMEOUT_MS = originalTimeout;
     CONFIG.AI_RETRY_BASE_MS = originalRetryBase;

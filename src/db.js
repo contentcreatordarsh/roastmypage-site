@@ -116,6 +116,7 @@ async function getCachedRoast(env22, urlHash, url, { requireAuditData = true } =
   const candidates = await env22.DB.prepare(`
     SELECT id, url, url_hash, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, roast_response, quick_wins, seo_data, performance_data, heatmap_data, industry
     FROM roasts WHERE url_hash = ? AND created_at > ? ORDER BY created_at DESC
+    LIMIT 25
   `).bind(urlHash, cacheExpiry.toISOString()).all();
   const cached = (candidates.results || []).find((candidate) => {
     if (requireAuditData && (!candidate.seo_data || !candidate.performance_data)) return false;

@@ -29,9 +29,10 @@ const legitimateRoast = {
   })
 };
 
-function mockDb({ first = challengeRoast, rows = [challengeRoast, legitimateRoast] } = {}) {
+function mockDb({ first = challengeRoast, rows = [challengeRoast, legitimateRoast], queries = [] } = {}) {
   return {
     prepare(sql) {
+      queries.push(sql);
       const statement = {
         bind() {
           return statement;
@@ -105,7 +106,8 @@ test("legitimate stored roasts remain available by ID", async () => {
 });
 
 test("public discovery routes omit stored challenge roasts and internal SEO data", async () => {
-  const env = envWithDb(mockDb());
+  const queries = [];
+  const env = envWithDb(mockDb({ queries }));
 
   const galleryResponse = await worker.fetch(
     new Request("https://roastmypage.site/api/gallery"),
@@ -163,4 +165,12 @@ test("public discovery routes omit stored challenge roasts and internal SEO data
   assert.equal(feed.pagination.total, 1);
   assert.equal(improvement.totalRoasts, 1);
   assert.equal(improvement.firstRoast.id, "legitimate123");
+  const sitemapRowsQuery = queries.find((sql) =>
+    /SELECT id, created_at FROM roasts/.test(sql) && /LIMIT 50000/.test(sql)
+  );
+  assert.ok(sitemapRowsQuery, "sitemap should select only fields used in XML");
+  assert.doesNotMatch(
+    sitemapRowsQuery.slice(0, sitemapRowsQuery.indexOf("FROM")),
+    /seo_data/i
+  );
 });
