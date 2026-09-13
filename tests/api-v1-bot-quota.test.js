@@ -77,7 +77,7 @@ function roastRequest() {
   });
 }
 
-test("API v1 refunds quota for bot challenges but keeps other failures charged", async () => {
+test("API v1 charges quota for bot challenges after Browser Rendering starts", async () => {
   const quota = quotaDb();
   const env = quotaEnv(quota);
   const challenges = [
@@ -95,11 +95,11 @@ test("API v1 refunds quota for bot challenges but keeps other failures charged",
       assert.equal(body2.error, "blocked_by_bot_protection");
     }
 
-    // Quota is consumed at the capture point and handed straight back: the
-    // caller cannot influence whether a target sits behind bot protection.
+    // The target controls these responses, so each expensive browser launch
+    // must remain charged or one caller can repeat challenges without limit.
     assert.equal(browserLaunches(), challenges.length);
-    assert.equal(quota.state.releases, challenges.length);
-    assert.equal(quota.state.count, 0);
+    assert.equal(quota.state.releases, 0);
+    assert.equal(quota.state.count, challenges.length);
 
     // Every other capture failure stays charged, so a caller cannot burn
     // Browser Rendering capacity for free by forcing captures to fail.
@@ -109,8 +109,8 @@ test("API v1 refunds quota for bot challenges but keeps other failures charged",
     assert.equal(failed.status, 500);
     assert.equal(failedBody.error, "roast_failed");
     assert.ok(browserLaunches() > challenges.length, "capture was attempted");
-    assert.equal(quota.state.releases, challenges.length);
-    assert.equal(quota.state.count, 1);
+    assert.equal(quota.state.releases, 0);
+    assert.equal(quota.state.count, challenges.length + 1);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
@@ -121,6 +121,6 @@ test("API v1 refunds quota for bot challenges but keeps other failures charged",
   ), env, { waitUntil() {} });
   const usage = await usageResponse.json();
 
-  assert.equal(usage.limits.perIp.used, 1);
-  assert.equal(usage.limits.global.used, 1);
+  assert.equal(usage.limits.perIp.used, challenges.length + 1);
+  assert.equal(usage.limits.global.used, challenges.length + 1);
 });
