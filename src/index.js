@@ -49,6 +49,15 @@ import {
     generateNotFoundPage, renderRoastPage, renderGalleryPage
 } from './ssr.js';
 import { redactVideoItemUrls } from './video.js';
+import {
+    handleAdminApiRequest,
+    renderAdminPage,
+    getHiddenRoastIds,
+    getFeaturedRoastIds,
+    roastIdExclusion,
+    filterHiddenRoasts,
+    isEmailOptedOut
+} from './admin.js';
 
 import {
     isWatchlistWebhookUrl,
@@ -95,6 +104,12 @@ export default {
       if (reqOrigin && !allowedOrigins.includes(reqOrigin)) {
         return Response.json({ error: "Forbidden: origin not allowed" }, { status: 403, headers: corsHeaders });
       }
+    }
+    if (url.pathname === "/admin" && request.method === "GET") {
+      return renderAdminPage(request, env22, corsHeaders);
+    }
+    if (url.pathname.startsWith("/api/admin")) {
+      return handleAdminApiRequest(request, env22, corsHeaders);
     }
     if (url.pathname === "/api/roast" && request.method === "POST") {
       const startTime = Date.now();
@@ -870,14 +885,16 @@ data: ${JSON.stringify(data)}
       // known key set so the value can only ever be a fixed column filter (never user text).
       const industryParam = url.searchParams.get("industry");
       const industryFilter = industryParam && INDUSTRY_KEYS.includes(industryParam) ? industryParam : null;
+      const hiddenIds = await getHiddenRoastIds(env22);
+      const hidden = roastIdExclusion(hiddenIds);
       const roasts = industryFilter ? await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
-        FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
-      `).bind(industryFilter, perPage, offset).all() : await env22.DB.prepare(`
+        FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} AND ${hidden.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?
+      `).bind(industryFilter, ...hidden.params, perPage, offset).all() : await env22.DB.prepare(`
         SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
-        FROM roasts WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
-      `).bind(perPage, offset).all();
-      const results = visibleStoredRoasts(roasts.results).map((roast) => ({
+        FROM roasts WHERE ${visibleStoredRoastSql()} AND ${hidden.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?
+      `).bind(...hidden.params, perPage, offset).all();
+      const results = filterHiddenRoasts(visibleStoredRoasts(roasts.results), hiddenIds).map((roast) => ({
         ...roast,
         screenshotUrl: `/api/screenshot/${roast.id}`,
         hostname: new URL(roast.url).hostname
@@ -1014,6 +1031,9 @@ data: ${JSON.stringify(data)}
           return Response.json({ error: "Too many requests. Please try again later." }, { status: 429, headers: corsHeaders });
         }
         const email = rawEmail.toLowerCase().trim();
+        if (await isEmailOptedOut(env22, email)) {
+          return Response.json({ success: true, message: "Subscribed successfully!" }, { headers: corsHeaders });
+        }
         const validRoastId = isValidRoastIdLoose(roastId) ? roastId : null;
         const id = generateId();
         await env22.DB.prepare(`INSERT OR IGNORE INTO email_subscribers (id, email, roast_id) VALUES (?, ?, ?)`).bind(id, email, validRoastId).run();
@@ -1993,6 +2013,24 @@ data: ${JSON.stringify(data)}
       ];
       const likeClauses = featuredDomains.map(() => `(url LIKE ?)`).join(" OR ");
       const likeParams = featuredDomains.map((d) => `%${d}%`);
+      const [adminFeaturedIds, hiddenIds] = await Promise.all([
+        getFeaturedRoastIds(env22),
+        getHiddenRoastIds(env22)
+      ]);
+      const hidden = roastIdExclusion(hiddenIds, "r.id");
+      let pinned = [];
+      if (adminFeaturedIds.length) {
+        const pinnedRows = await env22.DB.prepare(`
+          SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
+          FROM roasts
+          WHERE id IN (${adminFeaturedIds.map(() => "?").join(",")}) AND ${visibleStoredRoastSql()}
+        `).bind(...adminFeaturedIds).all();
+        const byId = new Map((pinnedRows.results || []).map((row) => [row.id, row]));
+        pinned = filterHiddenRoasts(
+          visibleStoredRoasts(adminFeaturedIds.map((id) => byId.get(id)).filter(Boolean)),
+          hiddenIds
+        );
+      }
       const featured = await env22.DB.prepare(`
         SELECT r.id, r.url, r.overall_score, r.hero_score, r.cta_score, r.trust_score, r.copy_score, r.design_score, r.industry, r.created_at, r.seo_data
         FROM roasts r
@@ -2002,23 +2040,29 @@ data: ${JSON.stringify(data)}
           WHERE ${likeClauses}
           GROUP BY url
         ) latest ON r.url = latest.url AND r.created_at = latest.latest
-        WHERE ${visibleStoredRoastSql("r")}
+        WHERE ${visibleStoredRoastSql("r")} AND ${hidden.sql}
         ORDER BY r.overall_score DESC
         LIMIT 12
-      `).bind(...likeParams).all();
-      let results = visibleStoredRoasts(featured.results);
+      `).bind(...likeParams, ...hidden.params).all();
+      const pinnedIds = new Set(pinned.map((row) => row.id));
+      let results = [
+        ...pinned,
+        ...filterHiddenRoasts(visibleStoredRoasts(featured.results), hiddenIds).filter((row) => !pinnedIds.has(row.id))
+      ];
       if (results.length < 6) {
         const existingIds = results.map((r) => r.id);
-        const excludeClause = existingIds.length > 0 ? `AND id NOT IN (${existingIds.map(() => "?").join(",")})` : "";
+        const excludeIds = [...new Set([...existingIds, ...hiddenIds])];
+        const excludeClause = excludeIds.length > 0 ? `AND id NOT IN (${excludeIds.map(() => "?").join(",")})` : "";
         const padding = await env22.DB.prepare(`
           SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, industry, created_at, seo_data
           FROM roasts
           WHERE overall_score > 0 AND ${visibleStoredRoastSql()} ${excludeClause}
           ORDER BY overall_score DESC, created_at DESC
           LIMIT ?
-        `).bind(...existingIds, 12 - results.length).all();
-        results = [...results, ...visibleStoredRoasts(padding.results)];
+        `).bind(...excludeIds, 12 - results.length).all();
+        results = [...results, ...filterHiddenRoasts(visibleStoredRoasts(padding.results), hiddenIds)];
       }
+      results = results.slice(0, 12);
       const formatted = results.map((r) => {
         let hostname = "";
         try {
@@ -3713,32 +3757,34 @@ data: ${JSON.stringify(data)}
       const offset = (page - 1) * perPage;
       const industryFilter = url.searchParams.get("industry");
       const validIndustry = industryFilter && INDUSTRY_KEYS.includes(industryFilter) ? industryFilter : null;
+      const hiddenIds = await getHiddenRoastIds(env22);
+      const hidden = roastIdExclusion(hiddenIds);
       let roastsResult;
       let totalResult;
       if (validIndustry) {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
             SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, industry, created_at, seo_data
-            FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
-          `).bind(validIndustry, perPage, offset).all(),
+            FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} AND ${hidden.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?
+          `).bind(validIndustry, ...hidden.params, perPage, offset).all(),
           env22.DB.prepare(
-            `SELECT COUNT(*) as count FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()}`
-          ).bind(validIndustry).first()
+            `SELECT COUNT(*) as count FROM roasts WHERE industry = ? AND ${visibleStoredRoastSql()} AND ${hidden.sql}`
+          ).bind(validIndustry, ...hidden.params).first()
         ]);
       } else {
         [roastsResult, totalResult] = await Promise.all([
           env22.DB.prepare(`
             SELECT id, url, overall_score, hero_score, cta_score, trust_score, copy_score, design_score, country, created_at, seo_data
-            FROM roasts WHERE ${visibleStoredRoastSql()} ORDER BY created_at DESC LIMIT ? OFFSET ?
-          `).bind(perPage, offset).all(),
+            FROM roasts WHERE ${visibleStoredRoastSql()} AND ${hidden.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?
+          `).bind(...hidden.params, perPage, offset).all(),
           env22.DB.prepare(
-            `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()}`
-          ).first()
+            `SELECT COUNT(*) as count FROM roasts WHERE ${visibleStoredRoastSql()} AND ${hidden.sql}`
+          ).bind(...hidden.params).first()
         ]);
       }
       const total = totalResult?.count || 0;
       const totalPages = Math.ceil(total / perPage);
-      const roasts = visibleStoredRoasts(roastsResult.results);
+      const roasts = filterHiddenRoasts(visibleStoredRoasts(roastsResult.results), hiddenIds);
       const industryMeta = validIndustry ? INDUSTRY_BENCHMARKS[validIndustry] : null;
       const galleryHtml = renderGalleryPage({
           roasts, total, page, totalPages,

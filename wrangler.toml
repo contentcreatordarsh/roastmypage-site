@@ -39,6 +39,9 @@ ENVIRONMENT = "development"
 BASE_URL = "https://roast-my-landing-page-test.falling-hall-ac41.workers.dev"
 CF_ACCOUNT_TAG = "0fa4850c978886b80a15821863df3855"
 CF_ZONE_TAG = "1147710735"
+# /admin is gated by wrangler secret ADMIN_SECRET (ADMIN_TOKEN also accepted).
+#   npx wrangler secret put ADMIN_SECRET
+#   npx wrangler secret put ADMIN_SECRET --env production
 
 # #49 Periodically scan watchlists for score changes (DB-only; no Browser Rendering).
 [triggers]

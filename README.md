@@ -20,6 +20,7 @@ The system is deployed as a single Cloudflare Worker, but it is structured modul
 The application's source code in `src/` is separated into focused modules:
 
 - **`index.js`**: The main entry point. Handles routing, API endpoints, CORS headers, and request orchestration.
+- **`admin.js`**: Token-gated `/admin` dashboard for stats, feedback, subscribers, gallery moderation, rate limits, and opt-outs.
 - **`config.js`**: Centralized configuration, constants, industry benchmarks, and origin definitions.
 - **`ai.js`**: Prompts and AI integration logic. Handles interactions with Cloudflare AI and parsing the AI responses into structured reports.
 - **`db.js`**: Database operations, queries for the gallery/leaderboard, and rate limiting logic.
@@ -48,3 +49,14 @@ The application's source code in `src/` is separated into focused modules:
 ## Environment Setup
 
 The worker requires bindings for `DB` (D1), `SCREENSHOTS` (R2), `CONFIG` (KV), `BROWSER`, and `AI`. Ensure your `wrangler.toml` is configured with the corresponding namespace IDs for your Cloudflare account.
+
+### Admin dashboard
+
+`/admin` is a token-gated internal dashboard for stats, feedback, subscribers, gallery moderation, rate-limit resets, and email opt-outs. Set the secret (never commit it):
+
+```
+npx wrangler secret put ADMIN_SECRET
+npx wrangler secret put ADMIN_SECRET --env production
+```
+
+Then open `/admin` and paste the token, or use `/admin?token=...` (the query token is moved into `sessionStorage` and stripped from the URL). `ADMIN_TOKEN` is accepted as a fallback name. Gallery hide/feature flags are stored in the `CONFIG` KV namespace under `admin:moderation`. Opt-outs use the `email_opt_outs` D1 table (`migrations/002_admin_opt_outs.sql`).

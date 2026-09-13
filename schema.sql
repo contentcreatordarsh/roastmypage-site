@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS email_subscribers (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS email_opt_outs (
+  email TEXT PRIMARY KEY,
+  reason TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS feedback (
   id TEXT PRIMARY KEY,
   vote TEXT NOT NULL,
