@@ -2907,17 +2907,6 @@ data: ${JSON.stringify(data)}
             message: "Cannot scan internal, private, or localhost URLs."
           }, { status: 400, headers: apiV1CorsHeaders });
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json({
-            success: false,
-            error: "service_busy",
-            message: "The roasting service is at capacity. Please try again in a few minutes."
-          }, {
-            status: 503,
-            headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
-          });
-        }
         const urlHash = await hashUrl(targetUrl, device);
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
@@ -2952,6 +2941,17 @@ data: ${JSON.stringify(data)}
             }
           });
           return response;
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json({
+            success: false,
+            error: "service_busy",
+            message: "The roasting service is at capacity. Please try again in a few minutes."
+          }, {
+            status: 503,
+            headers: { ...apiV1CorsHeaders, "Retry-After": "300" }
+          });
         }
         const quota = await consumeApiV1Quota(env22, ipHash);
         if (!quota.allowed) {

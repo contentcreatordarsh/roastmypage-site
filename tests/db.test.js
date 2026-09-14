@@ -88,6 +88,7 @@ test("getCachedRoast can return legacy audit data for non-persisting callers", a
 test("getCachedRoast falls back past a newer stored challenge roast", async () => {
   const url = "https://cache-shadow.example/";
   const urlHash = "shared-hash";
+  const now = Date.now();
   const validSeo = JSON.stringify({
     score: 92,
     title: { text: "Acme — Ship faster", length: 18, status: "good" },
@@ -98,7 +99,7 @@ test("getCachedRoast falls back past a newer stored challenge roast", async () =
       id: "newer-challenge",
       url,
       url_hash: urlHash,
-      created_at: "2026-09-07T10:00:00.000Z",
+      created_at: new Date(now - 60 * 60 * 1000).toISOString(),
       overall_score: 4.2,
       hero_score: 4,
       cta_score: 4,
@@ -120,7 +121,7 @@ test("getCachedRoast falls back past a newer stored challenge roast", async () =
       id: "older-valid",
       url,
       url_hash: urlHash,
-      created_at: "2026-09-07T09:00:00.000Z",
+      created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
       overall_score: 8.1,
       hero_score: 8,
       cta_score: 8,
