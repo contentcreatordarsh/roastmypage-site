@@ -141,18 +141,20 @@ test("roast route keeps screenshots same-origin on the workers.dev hostname", as
 
 // --- /robots.txt ---
 
-test("robots.txt on production adds only what the managed block lacks", async () => {
+test("robots.txt on production carries the complete crawler policy", async () => {
   const env = { ENVIRONMENT: "production", BASE_URL: "https://example.test" };
   const res = await worker.fetch(new Request("https://example.test/robots.txt"), env, { waitUntil() {} });
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type") || "", /text\/plain/);
   const body = await res.text();
   assert.match(body, /^Sitemap: https:\/\/example\.test\/sitemap\.xml$/m);
+  assert.match(body, /ARTICLE 4 OF THE EUROPEAN UNION DIRECTIVE 2019\/790/);
+  assert.match(body, /^Content-Signal: search=yes,ai-train=no,use=reference$/m);
+  assert.match(body, /^Allow: \/$/m);
   assert.match(body, /^Disallow: \/api\/$/m);
-  // Cloudflare splices its own content-signal block in front of this response.
-  // Restating it here is what produced a doubled crawler list on production.
-  assert.equal(/^Content-Signal:/m.test(body), false);
-  assert.equal(/^User-agent: GPTBot$/m.test(body), false);
+  for (const crawler of ["Amazonbot", "Applebot-Extended", "Bytespider", "CCBot", "ClaudeBot", "CloudflareBrowserRenderingCrawler", "Google-Extended", "GPTBot", "meta-externalagent"]) {
+    assert.match(body, new RegExp(`^User-agent: ${crawler}$`, "m"), `${crawler} must stay blocked`);
+  }
   assert.equal((body.match(/^User-agent: \*$/gm) || []).length, 1);
 });
 
