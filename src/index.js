@@ -3091,29 +3091,62 @@ data: ${JSON.stringify(data)}
       }
     }
     if (url.pathname === "/robots.txt" && request.method === "GET") {
-      // Cloudflare splices its managed content-signal block (the Article 4 /
-      // EU 2019/790 reservation and the AI-crawler denials) ahead of whatever
-      // the origin returns on the production zone — verified against the live
-      // file after deploy. So this only needs to add what the managed block
-      // lacks, and must NOT restate it: doing so produced two User-agent: *
-      // groups and a doubled crawler list.
       const isProduction = env22.ENVIRONMENT === "production";
-      const robots = isProduction
-        ? [
-            "User-agent: *",
-            "# JSON only, nothing crawlable, and requests spend rate limit.",
-            "Disallow: /api/",
-            "",
-            `Sitemap: ${env22.BASE_URL || PRODUCTION_ORIGINS[0]}/sitemap.xml`,
-            ""
-          ]
-        : [
+      let robots;
+      if (isProduction) {
+        // Keep the complete policy in the Worker. Cloudflare may prepend its
+        // managed block, but it is not guaranteed to do so; omitting this copy
+        // silently unblocks AI crawlers whenever the managed block is absent.
+        const blockedAiCrawlers = [
+          "Amazonbot",
+          "Applebot-Extended",
+          "Bytespider",
+          "CCBot",
+          "ClaudeBot",
+          "CloudflareBrowserRenderingCrawler",
+          "Google-Extended",
+          "GPTBot",
+          "meta-externalagent"
+        ];
+        robots = [
+          "# As a condition of accessing this website, you agree to abide by the following",
+          "# content signals:",
+          "#",
+          "# (a)  If a Content-Signal = yes, you may collect content for the corresponding use.",
+          "# (b)  If a Content-Signal = no, you may not collect content for the corresponding use.",
+          "# (c)  If the website operator does not include a Content-Signal for a corresponding",
+          "#      use, the website operator neither grants nor restricts permission via",
+          "#      Content-Signal with respect to the corresponding use.",
+          "#",
+          "# search:   building a search index and providing search results. Search does not",
+          "#           include providing AI-generated search summaries.",
+          "# ai-input: inputting content into one or more AI models.",
+          "# ai-train: training or fine-tuning AI models.",
+          "#",
+          "# ANY RESTRICTIONS EXPRESSED VIA CONTENT SIGNALS ARE EXPRESS RESERVATIONS OF",
+          "# RIGHTS UNDER ARTICLE 4 OF THE EUROPEAN UNION DIRECTIVE 2019/790 ON COPYRIGHT",
+          "# AND RELATED RIGHTS IN THE DIGITAL SINGLE MARKET.",
+          "",
+          "User-agent: *",
+          "Content-Signal: search=yes,ai-train=no,use=reference",
+          "Allow: /",
+          "# The API returns JSON with no crawlable content and spends rate limit.",
+          "Disallow: /api/",
+          ""
+        ];
+        for (const crawler of blockedAiCrawlers) {
+          robots.push(`User-agent: ${crawler}`, "Disallow: /", "");
+        }
+        robots.push(`Sitemap: ${env22.BASE_URL || PRODUCTION_ORIGINS[0]}/sitemap.xml`, "");
+      } else {
+        robots = [
             "# Non-production worker: publicly reachable and serves the same",
             "# content as production, so keep it out of the index entirely.",
             "User-agent: *",
             "Disallow: /",
             ""
-          ];
+        ];
+      }
       return new Response(robots.join("\n"), {
         headers: {
           ...corsHeaders,
