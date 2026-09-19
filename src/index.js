@@ -121,17 +121,17 @@ export default {
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
           );
         }
+        const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
+        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
+        if (cachedResult) {
+          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
+        }
         const globalLimit = await checkGlobalRateLimit(env22);
         if (!globalLimit.allowed) {
           return Response.json(
             { error: globalLimit.reason, retryAfter: 300 },
             { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
           );
-        }
-        const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
-        const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
-        if (cachedResult) {
-          return Response.json({ ...cachedResult, device, fullPage }, { headers: { ...corsHeaders, "X-Cache": "HIT" } });
         }
         const { result: roastResult, deduplicated } = await deduplicatedRoast(urlHash, () => withTimeout(
           (async () => {
@@ -272,13 +272,6 @@ export default {
             { status: 429, headers: corsHeaders }
           );
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const [hash1, hash2] = await Promise.all([
           hashUrl(url1, device + (fullPage ? "-full" : "")),
           hashUrl(url2, device + (fullPage ? "-full" : ""))
@@ -293,7 +286,16 @@ export default {
         const needCapture1 = !cached1;
         const needCapture2 = !cached2;
         const sessionsNeeded = (needCapture1 ? 1 : 0) + (needCapture2 ? 1 : 0);
-        if (sessionsNeeded > 0) await trackBrowserUsage(env22, sessionsNeeded);
+        if (sessionsNeeded > 0) {
+          const globalLimit = await checkGlobalRateLimit(env22);
+          if (!globalLimit.allowed) {
+            return Response.json(
+              { error: globalLimit.reason, retryAfter: 300 },
+              { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
+            );
+          }
+          await trackBrowserUsage(env22, sessionsNeeded);
+        }
         const compareResult = await withTimeout((async () => {
           const [page1, page2] = await Promise.all([
             needCapture1 ? capturePageWithMetrics(env22, url1, { device, fullPage }) : null,
@@ -582,15 +584,9 @@ export default {
             { status: 429, headers: corsHeaders }
           );
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const results = [];
         const errors = [];
+        let capacityChecked = false;
         for (const targetUrl of validUrls) {
           try {
             const urlHash = await hashUrl(targetUrl, device);
@@ -598,6 +594,16 @@ export default {
             if (cachedResult) {
               results.push({ ...cachedResult, device, cached: true });
               continue;
+            }
+            if (!capacityChecked) {
+              const globalLimit = await checkGlobalRateLimit(env22);
+              if (!globalLimit.allowed) {
+                return Response.json(
+                  { error: globalLimit.reason, retryAfter: 300 },
+                  { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
+                );
+              }
+              capacityChecked = true;
             }
             const roastId = generateId();
             await trackBrowserUsage(env22, 1);
@@ -691,13 +697,6 @@ export default {
             { status: 429, headers: { ...corsHeaders, "Retry-After": rateLimit.resetIn.toString() } }
           );
         }
-        const globalLimit = await checkGlobalRateLimit(env22);
-        if (!globalLimit.allowed) {
-          return Response.json(
-            { error: globalLimit.reason, retryAfter: 300 },
-            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
-          );
-        }
         const urlHash = await hashUrl(targetUrl, device + (fullPage ? "-full" : ""));
         const cachedResult = await getCachedRoast(env22, urlHash, targetUrl);
         if (cachedResult) {
@@ -705,6 +704,13 @@ export default {
         }
         if (inFlightRequests.has(urlHash)) {
           return Response.json({ error: "This URL is already being analyzed. Please wait a moment." }, { status: 409, headers: corsHeaders });
+        }
+        const globalLimit = await checkGlobalRateLimit(env22);
+        if (!globalLimit.allowed) {
+          return Response.json(
+            { error: globalLimit.reason, retryAfter: 300 },
+            { status: 503, headers: { ...corsHeaders, "Retry-After": "300" } }
+          );
         }
         const { readable, writable } = new TransformStream();
         const writer = writable.getWriter();

@@ -28,34 +28,9 @@ function mockDb(firstVal) {
   return { prepare: () => makeStmt(firstVal) };
 }
 
-// --- checkOperationRateLimit: the per-IP D1 limiter guarding the roast/compare/batch POSTs ---
-
-test("checkOperationRateLimit allows a request under the per-operation limit", async () => {
-  const env = { DB: mockDb({ request_count: 1, window_start: new Date().toISOString() }) };
-  const result = await checkOperationRateLimit(env, "ip-hash", "roast");
-  assert.equal(result.allowed, true);
-  assert.equal(result.remaining, CONFIG.RATE_LIMIT_MAX_REQUESTS - 1);
-});
-
-test("checkOperationRateLimit blocks once the count exceeds the limit", async () => {
-  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_MAX_REQUESTS + 1, window_start: new Date().toISOString() }) };
-  const result = await checkOperationRateLimit(env, "ip-hash", "roast");
-  assert.equal(result.allowed, false);
-  assert.equal(result.remaining, 0);
-});
-
-test("checkOperationRateLimit applies the tighter batch limit for the batch operation", async () => {
-  // batch max (3) is stricter than roast max (30): a count just past the batch cap must be
-  // blocked even though the same count is fine for a plain roast — proves the op→limit map.
-  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_BATCH_MAX + 1, window_start: new Date().toISOString() }) };
-  const blocked = await checkOperationRateLimit(env, "ip-hash", "batch");
-  assert.equal(blocked.allowed, false);
-});
-
-test("cached batch roasts do not consume the global browser-session budget", async () => {
-  const kvWrites = [];
+function cachedRouteEnv(globalWrites) {
   const cachedRoast = {
-    id: "cached-batch",
+    id: "cached-roast",
     url: "https://example.com/",
     url_hash: "hash",
     overall_score: 7.5,
@@ -71,12 +46,12 @@ test("cached batch roasts do not consume the global browser-session budget", asy
     heatmap_data: "{}",
     industry: "other"
   };
-  const env = {
+  return {
     ENVIRONMENT: "development",
     IP_HASH_SALT: "test-salt",
     CONFIG: {
       get: async () => "0",
-      put: async (...args) => kvWrites.push(args)
+      put: async (...args) => globalWrites.push(args)
     },
     DB: {
       prepare(sql) {
@@ -102,6 +77,74 @@ test("cached batch roasts do not consume the global browser-session budget", asy
       }
     }
   };
+}
+
+// --- checkOperationRateLimit: the per-IP D1 limiter guarding the roast/compare/batch POSTs ---
+
+test("checkOperationRateLimit allows a request under the per-operation limit", async () => {
+  const env = { DB: mockDb({ request_count: 1, window_start: new Date().toISOString() }) };
+  const result = await checkOperationRateLimit(env, "ip-hash", "roast");
+  assert.equal(result.allowed, true);
+  assert.equal(result.remaining, CONFIG.RATE_LIMIT_MAX_REQUESTS - 1);
+});
+
+test("checkOperationRateLimit blocks once the count exceeds the limit", async () => {
+  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_MAX_REQUESTS + 1, window_start: new Date().toISOString() }) };
+  const result = await checkOperationRateLimit(env, "ip-hash", "roast");
+  assert.equal(result.allowed, false);
+  assert.equal(result.remaining, 0);
+});
+
+test("checkOperationRateLimit applies the tighter batch limit for the batch operation", async () => {
+  // batch max (3) is stricter than roast max (30): a count just past the batch cap must be
+  // blocked even though the same count is fine for a plain roast — proves the op→limit map.
+  const env = { DB: mockDb({ request_count: CONFIG.RATE_LIMIT_BATCH_MAX + 1, window_start: new Date().toISOString() }) };
+  const blocked = await checkOperationRateLimit(env, "ip-hash", "batch");
+  assert.equal(blocked.allowed, false);
+});
+
+test("cached roast, stream, and compare requests preserve shared hourly capacity", async () => {
+  const cases = [
+    ["/api/roast", { url: "https://example.com" }],
+    ["/api/roast-stream", { url: "https://example.com" }],
+    ["/api/compare", { url1: "https://example.com", url2: "https://example.com" }]
+  ];
+  const originalSetTimeout = globalThis.setTimeout;
+  // A cached compare still wraps its synchronous result in the route's 90s
+  // timeout. Do not leave that losing Promise.race timer holding Node open.
+  globalThis.setTimeout = () => ({});
+
+  try {
+    for (const [pathname, body] of cases) {
+      const globalWrites = [];
+      const response = await worker.fetch(
+        new Request(`https://roastmypage.site${pathname}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "CF-Connecting-IP": "203.0.113.10"
+          },
+          body: JSON.stringify(body)
+        }),
+        cachedRouteEnv(globalWrites),
+        {
+          waitUntil() {
+            throw new Error("Cache hits must not schedule background work");
+          }
+        }
+      );
+
+      assert.equal(response.status, 200, pathname);
+      assert.equal(globalWrites.length, 0, pathname);
+    }
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test("cached batch roasts preserve shared hourly capacity", async () => {
+  const globalWrites = [];
+  const env = cachedRouteEnv(globalWrites);
   const request = new Request("https://roastmypage.site/api/batch-roast", {
     method: "POST",
     headers: {
@@ -123,8 +166,66 @@ test("cached batch roasts do not consume the global browser-session budget", asy
   assert.equal(response.status, 200);
   assert.equal(body.results.length, 3);
   assert.equal(body.results.every((result) => result.cached), true);
-  assert.equal(kvWrites.length, 1);
-  assert.deepEqual(kvWrites[0][2], { expirationTtl: 7200 });
+  assert.equal(globalWrites.length, 0);
+});
+
+test("cache misses on primary roast routes remain protected by shared capacity", async () => {
+  const cases = [
+    ["/api/roast", { url: "https://example.com" }],
+    ["/api/roast-stream", { url: "https://example.com" }],
+    ["/api/compare", { url1: "https://example.com", url2: "https://example.com" }],
+    ["/api/batch-roast", { urls: ["https://example.com"] }]
+  ];
+
+  for (const [pathname, body] of cases) {
+    const env = {
+      ENVIRONMENT: "development",
+      IP_HASH_SALT: "test-salt",
+      CONFIG: {
+        get: async (key) => key.startsWith("global_hourly_")
+          ? String(CONFIG.GLOBAL_HOURLY_LIMIT)
+          : "0",
+        put: async () => {
+          throw new Error("Denied capacity checks must not write");
+        }
+      },
+      DB: {
+        prepare(sql) {
+          const stmt = {
+            bind() {
+              return stmt;
+            },
+            run: async () => ({ success: true }),
+            async all() {
+              if (sql.includes("SELECT id, url, url_hash")) return { results: [] };
+              throw new Error(`Unexpected all query: ${sql}`);
+            },
+            async first() {
+              if (sql.includes("SELECT request_count, window_start")) {
+                return { request_count: 1, window_start: new Date().toISOString() };
+              }
+              throw new Error(`Unexpected query: ${sql}`);
+            }
+          };
+          return stmt;
+        }
+      }
+    };
+    const response = await worker.fetch(
+      new Request(`https://roastmypage.site${pathname}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "203.0.113.10"
+        },
+        body: JSON.stringify(body)
+      }),
+      env,
+      { waitUntil() {} }
+    );
+
+    assert.equal(response.status, 503, pathname);
+  }
 });
 
 // --- getCachedRoast: self-heal (#89) — never serve an incomplete cached roast ---
