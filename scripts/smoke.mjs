@@ -91,10 +91,10 @@ for (const path of ["/api/gallery?limit=100", "/api/leaderboard", "/api/recent",
 
 // --- SSRF -------------------------------------------------------------------
 const hostile = [
-  "http://127.0.0.1", "http://localhost:8080", "http://169.254.169.254/latest/meta-data/",
+  "http://127.0.0.1", "http://localhost:8080", "http://localhost./", "http://169.254.169.254/latest/meta-data/",
   "http://[::1]/", "http://10.0.0.1", "http://192.168.1.1", "http://172.16.0.5",
   "file:///etc/passwd", "http://0177.0.0.1", "http://2130706433",
-  "javascript:alert(1)", "http://metadata.google.internal/"
+  "javascript:alert(1)", "http://metadata.google.internal/", "http://metadata.google.internal./"
 ];
 for (const url of hostile) {
   const r = await post("/api/roast", { url });
@@ -115,7 +115,7 @@ for (const url of ["http://127.0.0.1", "http://169.254.169.254/", "file:///etc/p
 // consume the 10/hour budget. A 429 here therefore means the ordering regressed
 // and the limiter now runs first — report it rather than asserting on a status
 // the SSRF check never produced.
-for (const domain of ["localhost", "127.0.0.1", "169.254.169.254", "10.0.0.1", "192.168.1.1", "172.16.0.5", "metadata.google.internal"]) {
+for (const domain of ["localhost", "localhost.", "127.0.0.1", "169.254.169.254", "10.0.0.1", "192.168.1.1", "172.16.0.5", "metadata.google.internal", "metadata.google.internal."]) {
   const r = await post("/api/threat-scan", { domain });
   if (r.status === 429) {
     ok(`#147 threat-scan domain ${domain} rate limited before the SSRF check`, false, "429 — validation is no longer short-circuiting");

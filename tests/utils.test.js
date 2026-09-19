@@ -55,6 +55,19 @@ test("isUrlSafeForFetching blocks encoded and IPv6 loopback addresses", () => {
   }
 });
 
+test("isUrlSafeForFetching canonicalizes trailing-dot hostnames before SSRF checks", () => {
+  const blocked = [
+    "http://localhost.",
+    "http://metadata.google.internal.",
+    "http://service.cluster.local.",
+    "http://router.lan."
+  ];
+  for (const url of blocked) {
+    assert.equal(isUrlSafeForFetching(url), false, `${url} should be blocked`);
+  }
+  assert.equal(isUrlSafeForFetching("https://example.com."), true);
+});
+
 test("sanitizeUrl blocks dangerous schemes", () => {
   assert.equal(sanitizeUrl("javascript:alert(1)"), "");
   assert.equal(sanitizeUrl("https://safe.com"), "https://safe.com");

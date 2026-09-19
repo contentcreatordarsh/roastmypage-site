@@ -286,7 +286,11 @@ function isBlockedIpv4Int(ip) {
 function isUrlSafeForFetching(urlString) {
   try {
     const parsed = new URL(urlString);
-    const hostname = parsed.hostname.toLowerCase();
+    // DNS treats a single trailing dot as the absolute/root-label form of the
+    // same hostname (for example, localhost. resolves as localhost). Strip it
+    // before applying exact and suffix deny rules so FQDN notation cannot
+    // bypass the SSRF checks.
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return false;
     }
