@@ -24,7 +24,7 @@ test("determineHandleRisk ranks support impersonation as high", () => {
   assert.equal(determineHandleRisk("acmexyzq", "acme"), "low");
 });
 
-test("threat scan rejects private domain inputs before fetching", async () => {
+test("threat scan rejects private domain inputs, including trailing-dot forms, before fetching", async () => {
   const originalFetch = globalThis.fetch;
   let fetchCount = 0;
   globalThis.fetch = async () => {
@@ -33,28 +33,30 @@ test("threat scan rejects private domain inputs before fetching", async () => {
   };
 
   try {
-    const response = await worker.fetch(
-      new Request("https://roastmypage.site/api/threat-scan", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "CF-Connecting-IP": "203.0.113.10"
+    for (const domain of ["2130706433", "localhost.", "metadata.google.internal."]) {
+      const response = await worker.fetch(
+        new Request("https://roastmypage.site/api/threat-scan", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "CF-Connecting-IP": "203.0.113.10"
+          },
+          body: JSON.stringify({ domain })
+        }),
+        {
+          CONFIG: {
+            get: async () => "0",
+            put: async () => {}
+          },
+          IP_HASH_SALT: "test-salt",
+          ENVIRONMENT: "development"
         },
-        body: JSON.stringify({ domain: "2130706433" })
-      }),
-      {
-        CONFIG: {
-          get: async () => "0",
-          put: async () => {}
-        },
-        IP_HASH_SALT: "test-salt",
-        ENVIRONMENT: "development"
-      },
-      {}
-    );
+        {}
+      );
 
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /internal|private/i);
+      assert.equal(response.status, 400, domain);
+      assert.match((await response.json()).error, /internal|private/i, domain);
+    }
     assert.equal(fetchCount, 0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -68,7 +70,7 @@ test("checkSecurityHeaders blocks private redirect targets before fetching them"
     fetchCalls.push({ url: String(url), options });
     return new Response(null, {
       status: 302,
-      headers: { Location: "http://169.254.169.254/latest/meta-data/" }
+      headers: { Location: "http://localhost./admin" }
     });
   };
 
