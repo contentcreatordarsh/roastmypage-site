@@ -1,6 +1,6 @@
 import puppeteer from '@cloudflare/puppeteer';
 import { VIEWPORTS, CONFIG } from './config.js';
-import { sleep, isUrlSafeForFetching } from './utils.js';
+import { sleep, isUrlSafeForFetchingWithDns } from './utils.js';
 import { trackBrowserUsage } from './db.js';
 import { getRadarInsights } from './radar.js';
 import { analyzeVideoSignals, VIDEO_EMBED_RE } from './video.js';
@@ -31,9 +31,62 @@ function collectChallengeSignals() {
   };
 }
 
+function createDnsSafetyChecker(resolver) {
+  const checksByHostname = new Map();
+  return async (candidateUrl) => {
+    let parsed;
+    try {
+      parsed = new URL(candidateUrl);
+    } catch {
+      return false;
+    }
+    const key = `${parsed.protocol}//${parsed.hostname.toLowerCase().replace(/\.$/, "")}`;
+    if (!checksByHostname.has(key)) {
+      checksByHostname.set(key, isUrlSafeForFetchingWithDns(candidateUrl, resolver));
+    }
+    return checksByHostname.get(key);
+  };
+}
+
+async function installSafeRequestInterception(page, isRequestSafe) {
+  let mainNavigationBlocked = false;
+  await page.setRequestInterception(true);
+  page.on("request", async (req) => {
+    const requestUrl = req.url();
+    if (!/^https?:\/\//i.test(requestUrl)) {
+      try {
+        await req.continue();
+      } catch {}
+      return;
+    }
+
+    let safe = false;
+    try {
+      safe = await isRequestSafe(requestUrl);
+    } catch {}
+    if (!safe) {
+      mainNavigationBlocked ||= req.isNavigationRequest() && req.frame() === page.mainFrame();
+      try {
+        await req.abort("blockedbyclient");
+      } catch {}
+      return;
+    }
+    try {
+      await req.continue();
+    } catch {}
+  });
+  return {
+    wasMainNavigationBlocked: () => mainNavigationBlocked
+  };
+}
+
 async function capturePageWithMetrics(env22, url, options = {}) {
   const { device = "desktop", fullPage = false, attempt = 1 } = options;
   try {
+    const isRequestSafe = createDnsSafetyChecker();
+    if (!await isRequestSafe(url)) {
+      throw new Error("Blocked: hostname did not resolve exclusively to public addresses");
+    }
     const browser = await puppeteer.launch(env22.BROWSER);
     const page = await browser.newPage();
     const viewport = VIEWPORTS[device] || VIEWPORTS.desktop;
@@ -49,27 +102,27 @@ async function capturePageWithMetrics(env22, url, options = {}) {
     // private addresses. Block any http(s) request to a non-public host — covers the
     // main navigation, redirect hops, sub-resources and iframes. Non-http(s) schemes
     // (data:, blob:, about:) are left alone so normal rendering is unaffected.
+    let requestSafety;
     try {
-      await page.setRequestInterception(true);
-      page.on("request", (req) => {
-        const reqUrl = req.url();
-        if ((reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) && !isUrlSafeForFetching(reqUrl)) {
-          req.abort().catch(() => {});
-        } else {
-          req.continue().catch(() => {});
-        }
-      });
-    } catch (e) {
-      console.warn("Request interception unavailable; relying on post-navigation URL check:", e?.message || e);
+      requestSafety = await installSafeRequestInterception(page, isRequestSafe);
+    } catch {
+      await browser.close();
+      throw new Error("Blocked: request interception is unavailable");
     }
     const startTime = Date.now();
     try {
-      const navResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
+      let navResponse;
+      try {
+        navResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.SCREENSHOT_TIMEOUT_MS });
+      } catch (e) {
+        if (requestSafety.wasMainNavigationBlocked()) {
+          throw new Error("Blocked: navigation resolved to a non-public address");
+        }
+        throw e;
+      }
       await sleep(fullPage ? 2e3 : 1500);
-      // Re-validate the final landed URL in case a redirect slipped through interception.
-      const finalUrl = page.url();
-      if (!isUrlSafeForFetching(finalUrl)) {
-        throw new Error("Blocked: page redirected to an internal or private address");
+      if (requestSafety.wasMainNavigationBlocked()) {
+        throw new Error("Blocked: navigation resolved to a non-public address");
       }
       let loadTime = Date.now() - startTime;
       // Bot-challenge / interstitial check. Scoring a "Just a moment..." page produces a
@@ -107,8 +160,8 @@ async function capturePageWithMetrics(env22, url, options = {}) {
           throw botChallengeError(challenge.reasons);
         }
         await sleep(1500);
-        if (!isUrlSafeForFetching(page.url())) {
-          throw new Error("Blocked: page redirected to an internal or private address");
+        if (requestSafety.wasMainNavigationBlocked()) {
+          throw new Error("Blocked: navigation resolved to a non-public address");
         }
         challenge = detectBotChallenge(await readChallengeSignals(retryResponse?.status?.() || 0));
         if (challenge.blocked) {
@@ -570,4 +623,4 @@ async function capturePageWithMetrics(env22, url, options = {}) {
 }
 
 
-export { capturePageWithMetrics };
+export { capturePageWithMetrics, createDnsSafetyChecker, installSafeRequestInterception };
