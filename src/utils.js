@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import { CONFIG, POPULAR_DOMAINS, VIEWPORTS, PRODUCTION_ORIGINS, DEV_ORIGINS } from './config.js';
 
 function generateId() {
@@ -273,6 +274,7 @@ function ipv4ToInt(host) {
 function isBlockedIpv4Int(ip) {
   const a = (ip >>> 24) & 0xff;
   const b = (ip >>> 16) & 0xff;
+  const c = (ip >>> 8) & 0xff;
   if (a === 0) return true;                          // 0.0.0.0/8
   if (a === 127) return true;                        // loopback
   if (a === 10) return true;                         // private
@@ -280,8 +282,43 @@ function isBlockedIpv4Int(ip) {
   if (a === 192 && b === 168) return true;           // private
   if (a === 169 && b === 254) return true;           // link-local / cloud metadata
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+  if (a === 192 && b === 0 && c === 0) return true;  // IETF protocol assignments
+  if (a === 192 && b === 0 && c === 2) return true;  // TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmark testing
+  if (a === 198 && b === 51 && c === 100) return true;  // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true;   // TEST-NET-3
   if (a >= 224) return true;                         // multicast + reserved
   return false;
+}
+function parseIpv6Words(address) {
+  if (typeof address !== "string" || address.includes("%")) return null;
+  const halves = address.toLowerCase().split("::");
+  if (halves.length > 2) return null;
+  const parseHalf = (half) => {
+    if (!half) return [];
+    const groups = half.split(":");
+    if (groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+    return groups.map((group) => parseInt(group, 16));
+  };
+  const head = parseHalf(halves[0]);
+  const tail = parseHalf(halves[1] || "");
+  if (!head || !tail) return null;
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const omitted = 8 - head.length - tail.length;
+  if (omitted < 1) return null;
+  return [...head, ...new Array(omitted).fill(0), ...tail];
+}
+function isPublicIpAddress(address) {
+  const ipv4 = ipv4ToInt(address);
+  if (ipv4 !== null) return !isBlockedIpv4Int(ipv4);
+
+  const ipv6 = parseIpv6Words(address);
+  if (!ipv6) return false;
+  // Public IPv6 unicast space is 2000::/3. Explicitly exclude documentation
+  // addresses, which are syntactically global-looking but not routable.
+  const isGlobalUnicast = ipv6[0] >= 0x2000 && ipv6[0] <= 0x3fff;
+  const isDocumentation = ipv6[0] === 0x2001 && ipv6[1] === 0x0db8;
+  return isGlobalUnicast && !isDocumentation;
 }
 function isUrlSafeForFetching(urlString) {
   try {
@@ -352,6 +389,21 @@ function isUrlSafeForFetching(urlString) {
   }
 }
 
+async function isUrlSafeForFetchingWithDns(urlString, resolver = dns.promises) {
+  if (!isUrlSafeForFetching(urlString)) return false;
+
+  const hostname = new URL(urlString).hostname.toLowerCase().replace(/\.$/, "");
+  // A public IPv4 literal was fully classified by the synchronous check.
+  if (ipv4ToInt(hostname) !== null) return true;
+
+  const results = await Promise.allSettled([
+    Promise.resolve().then(() => resolver.resolve4(hostname)),
+    Promise.resolve().then(() => resolver.resolve6(hostname))
+  ]);
+  const addresses = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  return addresses.length > 0 && addresses.every(isPublicIpAddress);
+}
+
     function getApiDayKey() {
       const now = /* @__PURE__ */ new Date();
       return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
@@ -362,4 +414,4 @@ function isUrlSafeForFetching(urlString) {
       return Math.ceil((midnight.getTime() - now.getTime()) / 1e3);
     }
     
-export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, buildContentSecurityPolicy, getSecurityHeaders };
+export { generateId, isValidRoastId, isValidRoastIdLoose, isValidUrl, normalizeUrl, hashUrl, hashIp, uint8ArrayToBase64, safeLogError, sleep, withTimeout, fetchWithTimeout, getTimeAgo, getTimeAgoSSR, getCountryFlag, escapeHtml, sanitizeHtml, sanitizeUrl, isUrlSafeForFetching, isUrlSafeForFetchingWithDns, getApiDayKey, secondsUntilMidnightUTC, getAllowedOrigins, buildContentSecurityPolicy, getSecurityHeaders };

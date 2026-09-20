@@ -5,6 +5,7 @@ import {
   isValidUrl,
   normalizeUrl,
   isUrlSafeForFetching,
+  isUrlSafeForFetchingWithDns,
   isValidRoastId,
   sanitizeUrl,
   hashUrl,
@@ -53,6 +54,75 @@ test("isUrlSafeForFetching blocks encoded and IPv6 loopback addresses", () => {
   for (const url of blocked) {
     assert.equal(isUrlSafeForFetching(url), false, `${url} should be blocked`);
   }
+});
+
+function mockResolver({ ipv4 = [], ipv6 = [], ipv4Error, ipv6Error } = {}) {
+  return {
+    async resolve4() {
+      if (ipv4Error) throw ipv4Error;
+      return ipv4;
+    },
+    async resolve6() {
+      if (ipv6Error) throw ipv6Error;
+      return ipv6;
+    }
+  };
+}
+
+test("DNS-aware URL safety rejects hostnames resolving to non-public addresses", async () => {
+  const noData = Object.assign(new Error("no data"), { code: "ENODATA" });
+  assert.equal(
+    await isUrlSafeForFetchingWithDns(
+      "https://loopback-v4.example",
+      mockResolver({ ipv4: ["127.0.0.1"], ipv6Error: noData })
+    ),
+    false
+  );
+  assert.equal(
+    await isUrlSafeForFetchingWithDns(
+      "https://loopback-v6.example",
+      mockResolver({ ipv4Error: noData, ipv6: ["::1"] })
+    ),
+    false
+  );
+  assert.equal(
+    await isUrlSafeForFetchingWithDns(
+      "https://mixed.example",
+      mockResolver({ ipv4: ["93.184.216.34", "10.0.0.1"], ipv6Error: noData })
+    ),
+    false
+  );
+});
+
+test("DNS-aware URL safety preserves hostnames with exclusively public answers", async () => {
+  assert.equal(
+    await isUrlSafeForFetchingWithDns(
+      "https://public.example",
+      mockResolver({
+        ipv4: ["93.184.216.34"],
+        ipv6: ["2606:2800:220:1:248:1893:25c8:1946"]
+      })
+    ),
+    true
+  );
+});
+
+test("DNS-aware URL safety fails closed on DNS failure and reserved answers", async () => {
+  const failure = new Error("resolver unavailable");
+  assert.equal(
+    await isUrlSafeForFetchingWithDns(
+      "https://unresolved.example",
+      mockResolver({ ipv4Error: failure, ipv6Error: failure })
+    ),
+    false
+  );
+  assert.equal(
+    await isUrlSafeForFetchingWithDns(
+      "https://documentation.example",
+      mockResolver({ ipv4: ["198.51.100.20"], ipv6: ["2001:db8::1"] })
+    ),
+    false
+  );
 });
 
 test("sanitizeUrl blocks dangerous schemes", () => {
