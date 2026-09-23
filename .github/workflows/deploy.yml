@@ -107,10 +107,26 @@ jobs:
       - name: Record rollback target
         id: rollback
         run: |
-          npx wrangler deployments list --env production > /tmp/deployments.txt 2>&1 || true
-          PREVIOUS=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/deployments.txt | tail -1)
+          set -euo pipefail
+          npx wrangler deployments list --env production --json > /tmp/deployments.json
+          PREVIOUS=$(jq -er '
+            if length == 0 then
+              error("No existing production deployment found")
+            else
+              (last.versions | map(select(.percentage == 100))) as $live
+              | if ($live | length) == 1 and ($live[0].version_id | type) == "string" then
+                  $live[0].version_id
+                else
+                  error("Latest production deployment has no single 100% version")
+                end
+            end
+          ' /tmp/deployments.json)
+          if [[ ! "$PREVIOUS" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo "::error::Invalid rollback version ID: $PREVIOUS"
+            exit 1
+          fi
           echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
-          echo "Rollback target: ${PREVIOUS:-<none found>}"
+          echo "Rollback target: $PREVIOUS"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
