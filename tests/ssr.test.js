@@ -139,6 +139,71 @@ test("roast route keeps screenshots same-origin on the workers.dev hostname", as
   assert.doesNotMatch(html, /src="https:\/\/roastmypage\.site\/api\/screenshot\/deadbeef"/);
 });
 
+test("roast route cannot inject markup through stored heatmap values", async () => {
+  const payload = '<svg/onload="globalThis.heatmapPwned=1">';
+  const roast = {
+    id: "badc0ffe",
+    url: "https://example.com",
+    overall_score: 5,
+    hero_score: 5,
+    cta_score: 5,
+    trust_score: 5,
+    copy_score: 5,
+    design_score: 5,
+    roast_response: "",
+    quick_wins: "[]",
+    seo_data: null,
+    performance_data: null,
+    heatmap_data: JSON.stringify({
+      attention: [{
+        x: `10%;">${payload}`,
+        y: 25,
+        intensity: 90,
+        element: payload
+      }],
+      clickPredictions: [{
+        element: payload,
+        probability: '50" onmouseover="globalThis.heatmapPwned=1'
+      }],
+      foldLine: `60%;">${payload}`
+    }),
+    country: "US",
+    industry: "saas",
+    created_at: "2026-09-04 11:00:00"
+  };
+  const env = {
+    ENVIRONMENT: "production",
+    BASE_URL: "https://roastmypage.site",
+    DB: {
+      prepare(sql) {
+        const statement = {
+          bind() {
+            return statement;
+          },
+          async first() {
+            return sql.includes("COUNT(*)") ? { cnt: 1 } : roast;
+          }
+        };
+        return statement;
+      }
+    }
+  };
+
+  const response = await worker.fetch(
+    new Request("https://roastmypage.site/roast/badc0ffe"),
+    env,
+    {}
+  );
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.doesNotMatch(html, /<svg\/onload=/);
+  assert.doesNotMatch(html, /onmouseover="globalThis\.heatmapPwned/);
+  assert.match(html, /&lt;svg\/onload=&quot;globalThis\.heatmapPwned=1&quot;&gt;/);
+  assert.match(html, /left:0%;top:25%/);
+  assert.match(html, /style="width:0%;background:/);
+});
+
 // --- /robots.txt ---
 
 test("robots.txt on production adds only what the managed block lacks", async () => {
