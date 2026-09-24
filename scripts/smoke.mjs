@@ -27,10 +27,19 @@ const ok = (name, pass, info = "") => {
   results.push({ name, pass: !!pass, info: String(info).slice(0, 160) });
 };
 
+const configuredTimeout = Number(process.env.SMOKE_REQUEST_TIMEOUT_MS || 15000);
+const REQUEST_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+  ? configuredTimeout
+  : 15000;
+const requestSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
 const bust = (path) => `${BASE}${path}${path.includes("?") ? "&" : "?"}cb=${Date.now()}`;
 
 async function get(path) {
-  const res = await fetch(bust(path), { cache: "no-store" });
+  const res = await fetch(bust(path), {
+    cache: "no-store",
+    signal: requestSignal()
+  });
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch { /* not json */ }
@@ -41,7 +50,8 @@ async function post(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: requestSignal()
   });
   const text = await res.text();
   let json = null;
