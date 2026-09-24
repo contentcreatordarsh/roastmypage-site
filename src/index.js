@@ -3300,17 +3300,38 @@ data: ${JSON.stringify(data)}
       let heatmapDotsHtml = "";
       let heatmapSidebarHtml = "";
       if (heatmap) {
-        const attentionPoints = heatmap.attention || [];
+        // Heatmap values originate in model output and older rows may predate
+        // validation. Coerce them before interpolating into SSR style attributes
+        // so a stored string cannot break out into markup or event handlers.
+        const heatmapPercent = (value) => {
+          const number = Number(value);
+          return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0;
+        };
+        const attentionPoints = Array.isArray(heatmap.attention)
+          ? heatmap.attention.slice(0, 50).map((point) => ({
+              x: heatmapPercent(point?.x),
+              y: heatmapPercent(point?.y),
+              intensity: heatmapPercent(point?.intensity),
+              element: typeof point?.element === "string" ? point.element.slice(0, 200) : ""
+            }))
+          : [];
+        const clickPredictions = Array.isArray(heatmap.clickPredictions)
+          ? heatmap.clickPredictions.slice(0, 20).map((prediction) => ({
+              element: typeof prediction?.element === "string" ? prediction.element.slice(0, 200) : "",
+              probability: heatmapPercent(prediction?.probability)
+            }))
+          : [];
+        const foldLine = heatmap.foldLine == null ? null : heatmapPercent(heatmap.foldLine);
         heatmapDotsHtml = attentionPoints.map((p) => {
           const size = Math.max(40, p.intensity * 1.2);
           const color = p.intensity >= 80 ? "rgba(239,68,68,0.5)" : p.intensity >= 50 ? "rgba(249,115,22,0.4)" : "rgba(234,179,8,0.3)";
           const glow = p.intensity >= 80 ? "rgba(239,68,68,0.3)" : p.intensity >= 50 ? "rgba(249,115,22,0.2)" : "rgba(234,179,8,0.15)";
           return `<div style="position:absolute;left:${p.x}%;top:${p.y}%;width:${size}px;height:${size}px;border-radius:50%;background:radial-gradient(circle,${color} 0%,transparent 70%);box-shadow:0 0 ${size / 2}px ${glow};transform:translate(-50%,-50%);pointer-events:none;"${p.element ? ` title="${escapeHtml(p.element)}"` : ""}></div>`;
         }).join("");
-        if (heatmap.foldLine) {
-          heatmapDotsHtml += `<div style="position:absolute;left:0;right:0;top:${heatmap.foldLine}%;border-top:2px dashed #EAB308;pointer-events:none;"><span style="position:absolute;right:8px;top:-24px;font-size:11px;color:#EAB308;background:rgba(0,0,0,0.9);padding:2px 8px;border-radius:4px;">\u{1F4F1} Fold Line</span></div>`;
+        if (foldLine !== null) {
+          heatmapDotsHtml += `<div style="position:absolute;left:0;right:0;top:${foldLine}%;border-top:2px dashed #EAB308;pointer-events:none;"><span style="position:absolute;right:8px;top:-24px;font-size:11px;color:#EAB308;background:rgba(0,0,0,0.9);padding:2px 8px;border-radius:4px;">\u{1F4F1} Fold Line</span></div>`;
         }
-        const aboveFold = heatmap.foldLine ? attentionPoints.filter((p) => p.y < heatmap.foldLine).length : attentionPoints.length;
+        const aboveFold = foldLine !== null ? attentionPoints.filter((p) => p.y < foldLine).length : attentionPoints.length;
         const aboveFoldPct = attentionPoints.length > 0 ? Math.round(aboveFold / attentionPoints.length * 100) : 0;
         heatmapSidebarHtml = `
         <div class="space-y-4">
@@ -3331,10 +3352,10 @@ data: ${JSON.stringify(data)}
               </div>` : ""}
             </div>
           </div>
-          ${heatmap.clickPredictions && heatmap.clickPredictions.length > 0 ? `<div class="card p-5">
+          ${clickPredictions.length > 0 ? `<div class="card p-5">
             <div class="flex items-center gap-2 mb-3"><span class="text-lg">\u{1F3AF}</span><h4 class="font-semibold text-sm">Click Predictions</h4></div>
             <div class="space-y-2">
-              ${heatmap.clickPredictions.map((cp2) => `<div class="flex items-center justify-between text-sm">
+              ${clickPredictions.map((cp2) => `<div class="flex items-center justify-between text-sm">
                 <span class="text-[#a1a1a6]">${escapeHtml(cp2.element)}</span>
                 <div class="flex items-center gap-2">
                   <div class="w-16 h-1.5 bg-white/[0.06] rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${cp2.probability}%;background:${cp2.probability >= 60 ? "#22C55E" : cp2.probability >= 30 ? "#EAB308" : "#EF4444"}"></div></div>

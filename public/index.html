@@ -4508,13 +4508,13 @@
                         <span class="${iconColor} text-[11px] w-4 text-center flex-shrink-0">${icon}</span>
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center justify-between mb-0.5">
-                                <span class="text-[12px] text-[#d1d1d6]">${item.criterion || ''}</span>
+                                <span class="text-[12px] text-[#d1d1d6]">${sanitizeHtml(item.criterion || '')}</span>
                                 <span class="text-[11px] font-semibold flex-shrink-0" style="color:${color}">+${pts}/${max}</span>
                             </div>
                             <div class="h-1 bg-white/[0.04] rounded-full overflow-hidden">
                                 <div class="h-full rounded-full transition-all duration-500" style="width:${pct}%;background:${color}"></div>
                             </div>
-                            ${reason ? `<div class="text-[11px] text-[#6e6e73] mt-0.5 leading-tight">${reason}</div>` : ''}
+                            ${reason ? `<div class="text-[11px] text-[#6e6e73] mt-0.5 leading-tight">${sanitizeHtml(reason)}</div>` : ''}
                         </div>
                     </div>`;
             }).join('');
@@ -6655,9 +6655,9 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 
                 // AI visual accessibility issues
                 const visualIssuesEl = document.getElementById('a11y-visual-issues');
-                if (visualIssuesEl && data.accessibilityIssues && data.accessibilityIssues.length > 0) {
+                if (visualIssuesEl && Array.isArray(data.accessibilityIssues) && data.accessibilityIssues.length > 0) {
                     visualIssuesEl.innerHTML = data.accessibilityIssues.map(issue => `
-                        <div class="p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-300">\u26a0\ufe0f ${issue}</div>
+                        <div class="p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-300">\u26a0\ufe0f ${sanitizeHtml(issue)}</div>
                     `).join('');
                 }
                 
@@ -6837,18 +6837,23 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 }
                 
                 // Click Predictions
-                if (data.heatmap.clickPredictions) {
-                    document.getElementById('click-predictions').innerHTML = data.heatmap.clickPredictions.map(p => `
+                if (Array.isArray(data.heatmap.clickPredictions)) {
+                    document.getElementById('click-predictions').innerHTML = data.heatmap.clickPredictions.map(p => {
+                        const probabilityValue = Number(p.probability);
+                        const probability = Number.isFinite(probabilityValue)
+                            ? Math.max(0, Math.min(100, probabilityValue))
+                            : 0;
+                        return `
                         <div class="flex justify-between items-center p-2 bg-white/[0.05] rounded-lg">
-                            <span class="text-xs truncate max-w-[120px]">${p.element}</span>
+                            <span class="text-xs truncate max-w-[120px]">${sanitizeHtml(p.element)}</span>
                             <div class="flex items-center gap-2">
                                 <div class="w-16 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full ${p.probability >= 50 ? 'bg-green-500' : 'bg-gray-500'}" style="width:${p.probability}%"></div>
+                                    <div class="h-full rounded-full ${probability >= 50 ? 'bg-green-500' : 'bg-gray-500'}" style="width:${probability}%"></div>
                                 </div>
-                                <span class="text-xs font-medium ${p.probability >= 50 ? 'text-green-400' : 'text-[#a1a1a6]'}">${p.probability}%</span>
+                                <span class="text-xs font-medium ${probability >= 50 ? 'text-green-400' : 'text-[#a1a1a6]'}">${probability}%</span>
                             </div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
             }
 
@@ -7023,7 +7028,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                                         <span class="font-medium text-sm">${config.label}</span>
                                         <span class="text-xs px-2 py-0.5 rounded-full bg-${config.color}-500/20 text-${config.color}-400">${score}/10</span>
                                     </div>
-                                    <p class="text-sm text-[#a1a1a6]">${problem}</p>
+                                    <p class="text-sm text-[#a1a1a6]">${sanitizeHtml(problem)}</p>
                                 </div>
                             </div>
                         </div>
@@ -7037,7 +7042,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                                         <span class="font-medium text-sm">${config.label}</span>
                                         <span class="text-green-400 text-xs">✓ Fix</span>
                                     </div>
-                                    <p class="text-sm text-[#a1a1a6]">${fix}</p>
+                                    <p class="text-sm text-[#a1a1a6]">${sanitizeHtml(fix)}</p>
                                 </div>
                             </div>
                         </div>
@@ -7067,7 +7072,7 @@ Your landing page is like a first date where you talk about yourself for 45 minu
                 reportQuickWins.innerHTML = data.quickWins.map((w, i) => `
                     <li class="flex items-start gap-3 p-3 bg-white/[0.05]/30 rounded-lg">
                         <span class="flex-shrink-0 w-7 h-7 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg flex items-center justify-center text-sm font-bold text-white">${i + 1}</span>
-                        <span class="text-[#d1d1d6]">${w}</span>
+                        <span class="text-[#d1d1d6]">${sanitizeHtml(w)}</span>
                     </li>
                 `).join('');
             }
